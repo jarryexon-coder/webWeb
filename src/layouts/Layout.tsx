@@ -32,10 +32,10 @@ const drawerWidth = 240
 
 const menuItems = [
   { text: 'Home', icon: <HomeIcon />, path: '/' },
-  { text: 'All Access', icon: <FlashIcon />, path: '/all-access' },
-  { text: 'Super Stats', icon: <StatsChartIcon />, path: '/super-stats' },
-  { text: 'AI Tools', icon: <SparklesIcon />, path: '/ai-generators' },
-  { text: 'Elite Tools', icon: <ShieldIcon />, path: '/elite-tools' },
+  { text: 'Live Games', icon: <FlashIcon />, path: '/live-games' },
+  { text: 'Fantasy Hub', icon: <StatsChartIcon />, path: '/fantasy-hub' },
+  { text: 'AI Tools', icon: <SparklesIcon />, path: '/daily-picks' },
+  { text: 'Kalshi Predictions', icon: <ShieldIcon />, path: '/kalshi-predictions' },
   { text: 'Premium', icon: <StarIcon />, path: '/subscription' },
   { text: 'Login', icon: <LoginIcon />, path: '/login' },
   { text: 'Dev Tools', icon: <BugReportIcon />, path: '/dev-tools' },

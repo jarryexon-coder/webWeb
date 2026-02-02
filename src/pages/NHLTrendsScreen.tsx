@@ -223,7 +223,7 @@ const NHLTrendsScreen = () => {
                       cursor: 'pointer'
                     } 
                   }}
-                  onClick={() => navigate('/ai-generators', { state: { team: team.team } })}
+                  onClick={() => navigate('/daily-picks', { state: { team: team.team } })}
                 >
                   <TableCell>
                     <Typography fontWeight="bold">{index + 1}</Typography>
@@ -397,7 +397,7 @@ const NHLTrendsScreen = () => {
                       cursor: 'pointer'
                     } 
                   }}
-                  onClick={() => navigate('/ai-generators/player-metrics', { state: { player: player.name } })}
+                  onClick={() => navigate('/player-stats', { state: { player: player.name } })}
                 >
                   <TableCell>
                     <Typography fontWeight="bold" color="text.secondary">
@@ -497,11 +497,11 @@ const NHLTrendsScreen = () => {
                 key={index}
                 onClick={() => {
                   if (item.type === 'players') {
-                    navigate('/ai-generators/player-metrics');
+                    navigate('/player-stats');
                   } else if (item.type === 'games') {
                     navigate('/daily-picks');
                   } else {
-                    navigate('/ai-generators/expert-selections');
+                    navigate('/daily-picks');
                   }
                 }}
                 sx={{

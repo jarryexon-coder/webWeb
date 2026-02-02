@@ -796,7 +796,7 @@ const KalshiPredictionsScreen = () => {
                               color: getCategoryColor(prediction.category),
                             }}
                           />
-                          {prediction.aiGenerated && (
+                          {false && (
                             <StyledChip
                               icon={<SparklesIcon />}
                               label="AI Generated"

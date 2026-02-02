@@ -22,31 +22,31 @@ import RocketOutlinedIcon from '@mui/icons-material/RocketOutlined';
 const HomeScreen = () => {
   const mainCategories = [
     {
-      title: 'All Access',
-      description: 'Free tools for everyone',
+      title: 'Live Games',
+      description: 'Live games and real-time analytics',
       icon: <SportsBasketballIcon fontSize="large" />,
-      path: '/all-access',
+      path: '/live-games',
       color: '#1976d2'
     },
     {
-      title: 'Super Stats',
-      description: 'Advanced statistical analysis',
+      title: 'Fantasy Hub',
+      description: 'Fantasy sports insights and stats',
       icon: <TrendingUpIcon fontSize="large" />,
-      path: '/super-stats',
+      path: '/fantasy-hub',
       color: '#d32f2f'
     },
     {
       title: 'AI Tools',
       description: 'AI-powered insights & predictions',
       icon: <AutoAwesomeIcon fontSize="large" />,
-      path: '/ai-generators',
+      path: '/daily-picks',
       color: '#388e3c'
     },
     {
-      title: 'Elite Tools',
+      title: 'Kalshi Predictions',
       description: 'Premium features & utilities',
       icon: <SecurityIcon fontSize="large" />,
-      path: '/elite-tools',
+      path: '/kalshi-predictions',
       color: '#7b1fa2'
     }
   ];
@@ -94,7 +94,7 @@ const HomeScreen = () => {
           variant="contained" 
           size="large" 
           component={Link}
-          to="/all-access"
+          to="/live-games"
           sx={{ mt: 2 }}
         >
           Get Started
