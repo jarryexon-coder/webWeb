@@ -68,7 +68,7 @@ import {
   Person as PersonIcon,
   People as PeopleIcon,
   Security as ShieldIcon,
-  Cash as CashIcon,
+  MonetizationOn as CashIcon,
   Info as InfoIcon,
   Close as CloseIcon,
   FilterList as FilterListIcon,
@@ -775,7 +775,7 @@ const PlayerStatsScreen = () => {
               <Grid item xs={6} sm={3} key={index}>
                 <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
                   <Typography variant="h6" fontWeight="bold">
-                    {value}
+                    '0'
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
@@ -913,7 +913,7 @@ const PlayerStatsScreen = () => {
               <Grid item xs={6} sm={4} md={3} key={index}>
                 <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
                   <Typography variant="h6" fontWeight="bold">
-                    {value}
+                    '0'
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}

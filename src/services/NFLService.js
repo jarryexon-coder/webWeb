@@ -1,18 +1,15 @@
 // src/services/NFLService.js - NFL-specific API calls with real API integration
-import { apiService } from './ApiService';
-import { fetchFromBackend, buildUrl } from '../config/api';
-import axios from 'axios';
 
 // API Configuration
 const NFL_API_KEY = '2I2qnUQq7kcNAuhaCo3ElrgoVfHcdSBNoKXGTiqj';
-const BALLDONTLIE_API_KEY = '110e9686-5e16-4b69-991f-2744c42a9e9d';
 const THE_ODDS_API_KEY = '14befba45463dc61bb71eb3da6428e9e';
 const RAPIDAPI_KEY_PLAYER_PROPS = 'a0e5e0f406mshe0e4ba9f4f4daeap19859djsnfd92d0da5884';
 const RAPIDAPI_KEY_PREDICTIONS = 'cdd1cfc95bmsh3dea79dcd1be496p167ea1jsnb355ed1075ec';
 
 // Base URLs
 const ESPN_API_BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
-const BALLDONTLIE_API_BASE = 'https://www.balldontlie.io/api/v1';
+const NFL_API_BASE = 'https://api.sportradar.us/nfl';
+const ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const RAPIDAPI_BASE = 'https://api-football-v1.p.rapidapi.com/v3';
 
 export const NFLService = {
@@ -21,11 +18,19 @@ export const NFLService = {
   async fetchGames(season = '2024') {
     try {
       console.log('📡 Fetching NFL games from backend...');
-      const response = await fetchFromBackend('NFL', 'games');
       
-      if (response && response.success) {
-        console.log(`✅ NFL: ${response.games?.length || 0} games loaded`);
-        return response.games || [];
+      // Use fetchFromBackend if available, otherwise use mock data
+      try {
+        // Dynamic import to avoid issues if fetchFromBackend doesn't exist
+        const { fetchFromBackend } = await import('../config/api');
+        const response = await fetchFromBackend('NFL', 'games');
+        
+        if (response && response.success) {
+          console.log(`✅ NFL: ${response.games?.length || 0} games loaded`);
+          return response.games || [];
+        }
+      } catch (backendError) {
+        console.warn('Backend API not available, using mock data:', backendError.message);
       }
       
       return this.getMockGames();
@@ -39,41 +44,47 @@ export const NFLService = {
   async fetchStandings() {
     try {
       console.log('📡 Fetching NFL standings from backend...');
-      const response = await fetchFromBackend('NFL', 'standings');
-      if (response && response.success) {
-        console.log(`✅ NFL: Standings loaded from backend`);
-        return response.standings || [];
+      
+      try {
+        const { fetchFromBackend } = await import('../config/api');
+        const response = await fetchFromBackend('NFL', 'standings');
+        
+        if (response && response.success) {
+          console.log(`✅ NFL: Standings loaded from backend`);
+          return response.standings || [];
+        }
+      } catch (backendError) {
+        console.warn('Backend standings not available:', backendError.message);
       }
+      
     } catch (error) {
       console.error('❌ NFL Standings Error:', error.message);
     }
-    // Fallback to external API
-    return this.getStandings().then(result => {
-      // Transform Sportradar format to match expected format
-      if (result && result.conferences) {
-        const standings = [];
-        result.conferences.forEach(conf => {
-          conf.divisions.forEach(div => {
-            standings.push(...div.teams);
-          });
-        });
-        return standings;
-      }
-      return [];
-    });
+    
+    // Fallback to mock data
+    return this.getMockStandings();
   },
 
   async fetchTeams() {
     try {
       console.log('📡 Fetching NFL teams from backend...');
-      const response = await fetchFromBackend('NFL', 'teams');
-      if (response && response.success) {
-        console.log(`✅ NFL: Teams loaded from backend`);
-        return response.teams || [];
+      
+      try {
+        const { fetchFromBackend } = await import('../config/api');
+        const response = await fetchFromBackend('NFL', 'teams');
+        
+        if (response && response.success) {
+          console.log(`✅ NFL: Teams loaded from backend`);
+          return response.teams || [];
+        }
+      } catch (backendError) {
+        console.warn('Backend teams not available:', backendError.message);
       }
+      
     } catch (error) {
       console.error('❌ NFL Teams Error:', error.message);
     }
+    
     return this.getMockTeams();
   },
 
@@ -81,25 +92,31 @@ export const NFLService = {
   
   async getGameSummary(gameId) {
     try {
-      const response = await fetchFromBackend('NFL', 'gameSummary', { gameId });
-      
-      // Check if it's a stub response
-      if (response && response.message && response.message.includes('Stub')) {
-        console.log('⚠️ Using stub game summary - backend not fully implemented');
+      try {
+        const { fetchFromBackend } = await import('../config/api');
+        const response = await fetchFromBackend('NFL', 'gameSummary', { gameId });
+        
+        if (response && response.message && response.message.includes('Stub')) {
+          console.log('⚠️ Using stub game summary - backend not fully implemented');
+        }
+        
+        return response?.summary || {};
+        
+      } catch (backendError) {
+        console.warn('Backend game summary not available:', backendError.message);
       }
-      
-      return response?.summary || {};
       
     } catch (error) {
       console.error('Game summary error:', error);
-      return this.getMockGameSummary(gameId); // Development data
     }
+    
+    return this.getMockGameSummary(gameId);
   },
 
   // ========== EXTERNAL API METHODS ==========
   
-  // Get all games (Sportradar NFL API) - Original method
-  getGames: async (week = null, season = '2024') => {
+  // Get all games (Sportradar NFL API)
+  async getGames(week = null, season = '2024') {
     const params = {
       api_key: NFL_API_KEY,
       format: 'json'
@@ -110,18 +127,26 @@ export const NFLService = {
       endpoint = `${NFL_API_BASE}/games/${season}/REG/${week}/schedule.json`;
     }
     
-    return apiService.fetchWithCache(endpoint, {
-      ttl: 60000, // 1 minute cache
-      params,
-      cacheKey: `nfl_games_week${week || 'all'}_season${season}`,
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
+    try {
+      const url = new URL(endpoint);
+      Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+      
+      const response = await fetch(url.toString(), {
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching NFL games:', error);
+      return { weeks: [] };
+    }
   },
 
-  // Get today's games - Enhanced version
-  getTodaysGames: async () => {
+  // Get today's games
+  async getTodaysGames() {
     const today = new Date().toISOString().split('T')[0];
     
     // Try backend first
@@ -164,29 +189,31 @@ export const NFLService = {
     }
     
     // Final fallback to ESPN
-    return apiService.fetchWithCache(`${ESPN_API_BASE}/scoreboard`, {
-      ttl: 30000, // 30 seconds for live scores
-      cacheKey: `nfl_today_games_${today}`,
-      transform: (data) => {
-        if (!data || !data.events) return { games: [], source: 'ESPN' };
-        
-        return {
-          source: 'ESPN',
-          count: data.events.length,
-          games: data.events.map(event => ({
-            id: event.id,
-            name: event.name,
-            shortName: event.shortName,
-            status: event.status,
-            competitions: event.competitions
-          }))
-        };
-      }
-    });
+    try {
+      const response = await fetch(`${ESPN_API_BASE}/scoreboard`);
+      const data = await response.json();
+      
+      if (!data || !data.events) return { games: [], source: 'ESPN' };
+      
+      return {
+        source: 'ESPN',
+        count: data.events.length,
+        games: data.events.map(event => ({
+          id: event.id,
+          name: event.name,
+          shortName: event.shortName,
+          status: event.status,
+          competitions: event.competitions
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching today\'s games:', error);
+      return { games: [], source: 'ERROR' };
+    }
   },
 
-  // Get live games with real-time data (ESPN + Sportradar)
-  getLiveGames: async () => {
+  // Get live games with real-time data
+  async getLiveGames() {
     // First try backend
     try {
       const games = await this.fetchGames();
@@ -210,49 +237,49 @@ export const NFLService = {
     }
     
     // Fallback to ESPN for quick live scores
-    return apiService.fetchWithCache(`${ESPN_API_BASE}/scoreboard`, {
-      ttl: 10000, // 10 seconds for live games
-      cacheKey: 'nfl_live_games_espn',
-      transform: (data) => {
-        if (data && data.events) {
-          const liveGames = data.events.filter(event => 
-            event.status && event.status.type && 
-            (event.status.type.state === 'in' || 
-             event.status.type.state === 'inprogress' ||
-             event.status.type.state === 'halftime')
-          );
-          
-          // Enhance with Sportradar data if available
-          return {
-            source: 'ESPN',
-            timestamp: new Date().toISOString(),
-            count: liveGames.length,
-            games: liveGames
-          };
-        }
-        return data;
+    try {
+      const response = await fetch(`${ESPN_API_BASE}/scoreboard`);
+      const data = await response.json();
+      
+      if (data && data.events) {
+        const liveGames = data.events.filter(event => 
+          event.status && event.status.type && 
+          (event.status.type.state === 'in' || 
+           event.status.type.state === 'inprogress' ||
+           event.status.type.state === 'halftime')
+        );
+        
+        return {
+          source: 'ESPN',
+          timestamp: new Date().toISOString(),
+          count: liveGames.length,
+          games: liveGames
+        };
       }
-    });
+      return { games: [] };
+    } catch (error) {
+      console.error('Error fetching live games:', error);
+      return { games: [] };
+    }
   },
 
   // Get detailed game info by ID
-  getGameDetails: async (gameId) => {
-    // Try Sportradar first (most detailed)
-    return apiService.fetchWithCache(`${NFL_API_BASE}/games/${gameId}/summary.json`, {
-      ttl: 30000,
-      params: { api_key: NFL_API_KEY, format: 'json' },
-      cacheKey: `nfl_game_details_${gameId}`,
-      fallback: async () => {
-        // Fallback to ESPN
-      const response = await fetchFromBackend('NFL', 'games', { gameId });        
-        return response.data;
-      }
-    });
+  async getGameDetails(gameId) {
+    try {
+      const response = await fetch(`${NFL_API_BASE}/games/${gameId}/summary.json?api_key=${NFL_API_KEY}&format=json`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching game details:', error);
+      
+      // Fallback to game summary
+      return this.getGameSummary(gameId);
+    }
   },
 
   // ========== STANDINGS ==========
   
-  getStandings: async (conference = null, season = '2024') => {
+  async getStandings(conference = null, season = '2024') {
     // Try backend first
     try {
       const standings = await this.fetchStandings();
@@ -267,27 +294,28 @@ export const NFLService = {
     }
     
     // Using Sportradar for official standings
-    return apiService.fetchWithCache(`${NFL_API_BASE}/seasons/${season}/REG/standings.json`, {
-      ttl: 3600000, // 1 hour cache
-      params: { api_key: NFL_API_KEY, format: 'json' },
-      cacheKey: `nfl_standings_${season}_${conference || 'all'}`,
-      transform: (data) => {
-        if (!data || !data.conferences) return data;
-        
-        if (conference) {
-          const conf = data.conferences.find(c => 
-            c.name && c.name.toLowerCase().includes(conference.toLowerCase())
-          );
-          return conf || { divisions: [] };
-        }
-        return data;
+    try {
+      const response = await fetch(`${NFL_API_BASE}/seasons/${season}/REG/standings.json?api_key=${NFL_API_KEY}&format=json`);
+      const data = await response.json();
+      
+      if (!data || !data.conferences) return data;
+      
+      if (conference) {
+        const conf = data.conferences.find(c => 
+          c.name && c.name.toLowerCase().includes(conference.toLowerCase())
+        );
+        return conf || { divisions: [] };
       }
-    });
+      return data;
+    } catch (error) {
+      console.error('Error fetching standings:', error);
+      return { conferences: [] };
+    }
   },
 
   // ========== TEAMS ==========
   
-  getTeams: async () => {
+  async getTeams() {
     // Try backend first
     try {
       const teams = await this.fetchTeams();
@@ -303,211 +331,75 @@ export const NFLService = {
     }
     
     // Sportradar teams endpoint
-    return apiService.fetchWithCache(`${NFL_API_BASE}/league/hierarchy.json`, {
-      ttl: 86400000, // 24 hours
-      params: { api_key: NFL_API_KEY, format: 'json' },
-      cacheKey: 'nfl_teams_hierarchy',
-      transform: (data) => {
-        // Flatten teams from conferences and divisions
-        const teams = [];
-        if (data && data.conferences) {
-          data.conferences.forEach(conf => {
-            conf.divisions.forEach(div => {
-              teams.push(...div.teams);
-            });
+    try {
+      const response = await fetch(`${NFL_API_BASE}/league/hierarchy.json?api_key=${NFL_API_KEY}&format=json`);
+      const data = await response.json();
+      
+      // Flatten teams from conferences and divisions
+      const teams = [];
+      if (data && data.conferences) {
+        data.conferences.forEach(conf => {
+          conf.divisions.forEach(div => {
+            teams.push(...div.teams);
           });
-        }
-        return teams;
+        });
       }
-    });
-  },
-
-  getTeamDetails: async (teamId) => {
-    return apiService.fetchWithCache(`${NFL_API_BASE}/teams/${teamId}/profile.json`, {
-      ttl: 86400000,
-      params: { api_key: NFL_API_KEY, format: 'json' },
-      cacheKey: `nfl_team_${teamId}`
-    });
-  },
-
-  // ========== PLAYERS & STATS ==========
-  
-  getPlayers: async (position = null, team = null, season = '2024') => {
-    // Using RapidAPI for player stats
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/players`, {
-      ttl: 300000, // 5 minutes
-      params: {
-        league: '1', // NFL ID
-        season: season,
-        ...(position && { position }),
-        ...(team && { team: this._getTeamIdForRapidAPI(team) })
-      },
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
-      },
-      cacheKey: `nfl_players_${position || 'all'}_${team || 'all'}_${season}`
-    });
-  },
-
-  getPlayerStats: async (playerId, season = '2024') => {
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/players`, {
-      ttl: 300000,
-      params: {
-        id: playerId,
-        season: season
-      },
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
-      },
-      cacheKey: `nfl_player_stats_${playerId}_${season}`
-    });
+      return teams;
+    } catch (error) {
+      console.error('Error fetching teams:', error);
+      return [];
+    }
   },
 
   // ========== ODDS & BETTING ==========
   
-  getOdds: async (region = 'us', market = 'h2h', oddsFormat = 'american') => {
-    // Using The Odds API
-    return apiService.fetchWithCache(`${ODDS_API_BASE}/odds`, {
-      ttl: 60000, // 1 minute for odds (changes rapidly)
-      params: {
-        apiKey: THE_ODDS_API_KEY,
-        regions: region,
-        markets: market,
-        oddsFormat: oddsFormat
-      },
-      cacheKey: `nfl_odds_${region}_${market}`,
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-  },
-
-  getPlayerProps: async (gameId, playerName = null) => {
-    // RapidAPI for player props
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/odds`, {
-      ttl: 60000,
-      params: {
-        game: gameId,
-        bookmaker: '1', // Example bookmaker ID
-        bet: 'player_points',
-        ...(playerName && { player: playerName })
-      },
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
-      },
-      cacheKey: `nfl_player_props_${gameId}_${playerName || 'all'}`
-    });
+  async getOdds(region = 'us', market = 'h2h', oddsFormat = 'american') {
+    try {
+      const response = await fetch(`${ODDS_API_BASE}/sports/americanfootball_nfl/odds?regions=${region}&markets=${market}&oddsFormat=${oddsFormat}&apiKey=${THE_ODDS_API_KEY}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching odds:', error);
+      return [];
+    }
   },
 
   // ========== PREDICTIONS ==========
   
-  getPredictions: async (gameId = null) => {
-    // Using RapidAPI predictions service
-    const params = gameId ? { fixture: gameId } : {};
-    
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/predictions`, {
-      ttl: 300000, // 5 minutes for predictions
-      params,
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PREDICTIONS,
-        'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
-      },
-      cacheKey: `nfl_predictions_${gameId || 'all'}`
-    });
+  async getPredictions(gameId = null) {
+    try {
+      const params = gameId ? `fixture=${gameId}` : '';
+      const response = await fetch(`${RAPIDAPI_BASE}/predictions?${params}`, {
+        headers: {
+          'X-RapidAPI-Key': RAPIDAPI_KEY_PREDICTIONS,
+          'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
+        }
+      });
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching predictions:', error);
+      return [];
+    }
   },
 
   // ========== NEWS ==========
   
-  getNews: async (limit = 20) => {
-    // ESPN news endpoint
-    return apiService.fetchWithCache(`${ESPN_API_BASE}/news`, {
-      ttl: 300000, // 5 minutes
-      params: { limit },
-      cacheKey: `nfl_news_${limit}`
-    });
-  },
-
-  // ========== ANALYTICS ==========
-  
-  getAnalytics: async (gameId = null) => {
-    if (gameId) {
-      // Game-specific analytics
-      return apiService.fetchWithCache(`${ESPN_API_BASE}/summary`, {
-        ttl: 60000,
-        params: { event: gameId },
-        cacheKey: `nfl_analytics_game_${gameId}`,
-        transform: (data) => {
-          // Extract key analytics from game summary
-          return {
-            gameId,
-            advancedStats: data.boxscore?.teams || [],
-            playerMetrics: data.players || [],
-            teamMetrics: data.teamMetrics || {}
-          };
-        }
-      });
+  async getNews(limit = 20) {
+    try {
+      const response = await fetch(`${ESPN_API_BASE}/news?limit=${limit}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching news:', error);
+      return [];
     }
-    
-    // League-wide analytics
-    return apiService.fetchWithCache(`${ESPN_API_BASE}/statistics`, {
-      ttl: 60000,
-      cacheKey: 'nfl_analytics_league'
-    });
-  },
-
-  // ========== SCHEDULE ==========
-  
-  getSchedule: async (season = '2024') => {
-    // Sportradar schedule endpoint
-    return apiService.fetchWithCache(`${NFL_API_BASE}/games/${season}/REG/schedule.json`, {
-      ttl: 3600000, // 1 hour
-      params: { api_key: NFL_API_KEY, format: 'json' },
-      cacheKey: `nfl_schedule_${season}`,
-      transform: (data) => {
-        // Transform to more usable format
-        if (!data || !data.weeks) return { weeks: [] };
-        
-        const weeks = data.weeks.map(week => ({
-          weekNumber: week.sequence,
-          games: week.games || [],
-          startDate: week.startDate,
-          endDate: week.endDate
-        }));
-        
-        return {
-          season: data.season.year,
-          seasonType: data.type,
-          weeks
-        };
-      }
-    });
-  },
-
-  // ========== HELPER METHODS ==========
-  
-  _getTeamIdForRapidAPI(teamName) {
-    // Map team names/abbreviations to RapidAPI team IDs
-    const teamMap = {
-      'ARI': '22', 'ATL': '1', 'BAL': '33', 'BUF': '2',
-      'CAR': '29', 'CHI': '3', 'CIN': '4', 'CLE': '5',
-      'DAL': '6', 'DEN': '7', 'DET': '8', 'GB': '9',
-      'HOU': '34', 'IND': '11', 'JAX': '30', 'KC': '12',
-      'LV': '13', 'LAC': '24', 'LAR': '14', 'MIA': '15',
-      'MIN': '16', 'NE': '17', 'NO': '18', 'NYG': '19',
-      'NYJ': '20', 'PHI': '21', 'PIT': '23', 'SF': '25',
-      'SEA': '26', 'TB': '27', 'TEN': '10', 'WAS': '28'
-    };
-    
-    return teamMap[teamName.toUpperCase()] || teamName;
   },
 
   // ========== MOCK DATA METHODS ==========
   
   getMockGames() {
-    // Development mode: Using simplified version
     return [
       {
         id: 'mock-1',
@@ -529,7 +421,6 @@ export const NFLService = {
   },
 
   getMockStandings() {
-    // Development mode: Using simplified version
     return [
       {
         id: 'KC',
@@ -565,7 +456,6 @@ export const NFLService = {
   },
 
   getMockTeams() {
-    // Development mode: Using simplified version
     return [
       {
         id: 'KC',
@@ -594,10 +484,7 @@ export const NFLService = {
     ];
   },
 
-  // ========== MOCK GAME SUMMARY METHOD ==========
-  
   getMockGameSummary(gameId) {
-    // Using fallback for development
     return {
       gameId: gameId || 'mock_nfl_game_001',
       homeTeam: 'NFL Home Team',
@@ -606,34 +493,12 @@ export const NFLService = {
     };
   },
 
-  // ========== CACHE MANAGEMENT ==========
-  
-  refreshGames: () => {
-    apiService.clearCache(/^nfl_games/);
-    apiService.clearCache(/^nfl_live/);
-    console.log('🔄 NFL games cache cleared');
-    return true;
-  },
-
-  refreshStandings: () => {
-    apiService.clearCache(/^nfl_standings/);
-    console.log('🔄 NFL standings cache cleared');
-    return true;
-  },
-
-  refreshAll: () => {
-    apiService.clearCache(/^nfl_/);
-    console.log('🗑️  All NFL cache cleared');
-    return true;
-  },
-
   // ========== API HEALTH CHECK ==========
   
   async checkApiHealth() {
     const endpoints = [
       { 
         name: 'Backend API', 
-        url: 'https://pleasing-determination-production.up.railway.app/api/nfl/games',
         test: async () => {
           try {
             const games = await this.fetchGames();
@@ -645,17 +510,11 @@ export const NFLService = {
       },
       { 
         name: 'Sportradar NFL', 
-        url: `${NFL_API_BASE}/games/2024/REG/1/schedule.json`, 
-        key: NFL_API_KEY 
+        url: `${NFL_API_BASE}/games/2024/REG/1/schedule.json`
       },
       { 
         name: 'ESPN', 
         url: `${ESPN_API_BASE}/scoreboard` 
-      },
-      { 
-        name: 'The Odds API', 
-        url: `${ODDS_API_BASE}/odds`, 
-        key: THE_ODDS_API_KEY 
       }
     ];
 
@@ -677,13 +536,11 @@ export const NFLService = {
           });
         } else {
           // Test external APIs
-          const params = endpoint.key ? { api_key: endpoint.key, format: 'json' } : {};
-          const response = await fetchFromBackend('NFL', endpoint.name, endpoint.params);          
-            params, 
-            timeout: 5000,
-            ...(endpoint.key === THE_ODDS_API_KEY ? { params: { apiKey: endpoint.key } } : {})
-          });
+          const params = endpoint.name.includes('Sportradar') ? { api_key: NFL_API_KEY, format: 'json' } : {};
+          const url = new URL(endpoint.url);
+          Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
           
+          const response = await fetch(url.toString(), { timeout: 5000 });
           const latency = Date.now() - startTime;
           
           results.push({

@@ -1,17 +1,18 @@
-// src/services/nhlService.js - NHL-specific API calls with real API integration
+// src/services/NHLService.js - NHL-specific API calls with real API integration
 import { apiService } from './ApiService';
-import { fetchFromBackend, buildUrl } from '../config/api';
-import axios from 'axios';
+import { fetchFromBackend } from '../config/api';
 
 // API Configuration from your provided keys
-const NHL_API_KEY = '2I2qnUQq7kcNAuhaCo3ElrgoVfHcdSBNoKXGTiqj'; // Sportradar NHL API
+const NHL_API_KEY = '2I2qnUQq7kcNAuhaCo3ElrgoVfHcdSBNoKXGTiqj';
 const THE_ODDS_API_KEY = '14befba45463dc61bb71eb3da6428e9e';
 const RAPIDAPI_KEY_PLAYER_PROPS = 'a0e5e0f406mshe0e4ba9f4f4daeap19859djsnfd92d0da5884';
 const RAPIDAPI_KEY_PREDICTIONS = 'cdd1cfc95bmsh3dea79dcd1be496p167ea1jsnb355ed1075ec';
 
 // Base URLs
 const ESPN_NHL_BASE = 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl';
-const RAPIDAPI_BASE = 'https://api-nhl-v1.p.rapidapi.com'; // NHL-specific RapidAPI
+const SPORTRADAR_NHL_BASE = 'https://api.sportradar.us/nhl';
+const ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
+const RAPIDAPI_BASE = 'https://api-nhl-v1.p.rapidapi.com';
 
 export const NHLService = {
   // ========== PRIMARY BACKEND API METHODS ==========
@@ -45,20 +46,9 @@ export const NHLService = {
     } catch (error) {
       console.error('❌ NHL Standings Error:', error.message);
     }
-    // Fallback to external API
-    return this.getStandings().then(result => {
-      // Transform Sportradar format to match expected format
-      if (result && result.conferences) {
-        const standings = [];
-        result.conferences.forEach(conf => {
-          conf.divisions.forEach(div => {
-            standings.push(...div.teams);
-          });
-        });
-        return standings;
-      }
-      return [];
-    });
+    
+    // Fallback to mock data
+    return this.getMockStandings();
   },
 
   async fetchTeams() {
@@ -81,7 +71,6 @@ export const NHLService = {
     try {
       const response = await fetchFromBackend('NHL', 'gameSummary', { gameId });
       
-      // Check if it's a stub response
       if (response && response.message && response.message.includes('Stub')) {
         console.log('⚠️ Using stub game summary - backend not fully implemented');
       }
@@ -90,15 +79,14 @@ export const NHLService = {
       
     } catch (error) {
       console.error('Game summary error:', error);
-      return this.getMockGameSummary(gameId); // Development data
+      return this.getMockGameSummary(gameId);
     }
   },
 
   // ========== EXTERNAL API METHODS ==========
   
-  // Get latest NHL games and scores - Primary endpoint as requested
-  getLatest: async (limit = 10) => {
-    // Try backend first
+  // Get latest NHL games and scores
+  async getLatest(limit = 10) {
     try {
       const games = await this.fetchGames();
       if (games && games.length > 0) {
@@ -114,38 +102,39 @@ export const NHLService = {
       console.warn('⚠️ Backend API failed, using ESPN as fallback');
     }
     
-    // Fallback to ESPN for quick latest scores
-    return apiService.fetchWithCache(`${ESPN_NHL_BASE}/scoreboard`, {
-      ttl: 30000, // 30 seconds for live scores
-      cacheKey: `nhl_latest_${limit}`,
-      transform: (data) => {
-        if (!data || !data.events) return { games: [], source: 'ESPN' };
-        
-        const games = data.events
-          .slice(0, limit)
-          .map(event => ({
-            id: event.id,
-            name: event.name,
-            shortName: event.shortName,
-            status: event.status,
-            date: event.date,
-            competitions: event.competitions,
-            links: event.links
-          }));
-        
-        return {
-          source: 'ESPN NHL',
-          timestamp: new Date().toISOString(),
-          count: games.length,
-          games
-        };
-      }
-    });
+    // Fallback to ESPN
+    try {
+      const response = await fetch(`${ESPN_NHL_BASE}/scoreboard`);
+      const data = await response.json();
+      
+      if (!data || !data.events) return { games: [], source: 'ESPN' };
+      
+      const games = data.events
+        .slice(0, limit)
+        .map(event => ({
+          id: event.id,
+          name: event.name,
+          shortName: event.shortName,
+          status: event.status,
+          date: event.date,
+          competitions: event.competitions,
+          links: event.links
+        }));
+      
+      return {
+        source: 'ESPN NHL',
+        timestamp: new Date().toISOString(),
+        count: games.length,
+        games
+      };
+    } catch (error) {
+      console.error('Error fetching latest games:', error);
+      return { games: [], source: 'ERROR' };
+    }
   },
 
   // Get all games with filtering
-  getGames: async (season = '2024', gameType = 'R', date = null) => {
-    // Try backend first
+  async getGames(season = '2024', gameType = 'R', date = null) {
     if (!date) {
       try {
         const games = await this.fetchGames(season);
@@ -164,46 +153,42 @@ export const NHLService = {
     }
     
     // Fallback to Sportradar
-    let endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${season}/${gameType}/schedule.json`;
-    
-    const params = {
-      api_key: NHL_API_KEY
-    };
-    
-    if (date) {
-      // If specific date, use daily schedule endpoint
-      endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${date}/schedule.json`;
-    }
-    
-    return apiService.fetchWithCache(endpoint, {
-      ttl: 60000, // 1 minute cache
-      params,
-      cacheKey: `nhl_games_${season}_${gameType}_${date || 'all'}`,
-      transform: (data) => {
-        if (!data || !data.games) return { games: [] };
-        
-        return {
-          source: 'Sportradar NHL',
-          season: data.season?.year || season,
-          gameType: data.gameType || gameType,
-          count: data.games.length,
-          games: data.games.map(game => ({
-            id: game.id,
-            status: game.status,
-            scheduled: game.scheduled,
-            venue: game.venue,
-            home: game.home,
-            away: game.away,
-            broadcast: game.broadcast,
-            odds: game.odds || null
-          }))
-        };
+    try {
+      let endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${season}/${gameType}/schedule.json`;
+      
+      if (date) {
+        endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${date}/schedule.json`;
       }
-    });
+      
+      const response = await fetch(`${endpoint}?api_key=${NHL_API_KEY}`);
+      const data = await response.json();
+      
+      if (!data || !data.games) return { games: [] };
+      
+      return {
+        source: 'Sportradar NHL',
+        season: data.season?.year || season,
+        gameType: data.gameType || gameType,
+        count: data.games.length,
+        games: data.games.map(game => ({
+          id: game.id,
+          status: game.status,
+          scheduled: game.scheduled,
+          venue: game.venue,
+          home: game.home,
+          away: game.away,
+          broadcast: game.broadcast,
+          odds: game.odds || null
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching games:', error);
+      return { games: [] };
+    }
   },
 
   // Get today's games
-  getTodaysGames: async () => {
+  async getTodaysGames() {
     const today = new Date().toISOString().split('T')[0];
     
     // Try backend first
@@ -244,29 +229,31 @@ export const NHLService = {
     }
     
     // Final fallback to ESPN
-    return apiService.fetchWithCache(`${ESPN_NHL_BASE}/scoreboard`, {
-      ttl: 30000,
-      cacheKey: `nhl_today_games_${today}`,
-      transform: (data) => {
-        if (!data || !data.events) return { games: [], source: 'ESPN' };
-        
-        return {
-          source: 'ESPN NHL',
-          count: data.events.length,
-          games: data.events.map(event => ({
-            id: event.id,
-            name: event.name,
-            shortName: event.shortName,
-            status: event.status,
-            competitions: event.competitions
-          }))
-        };
-      }
-    });
+    try {
+      const response = await fetch(`${ESPN_NHL_BASE}/scoreboard`);
+      const data = await response.json();
+      
+      if (!data || !data.events) return { games: [], source: 'ESPN' };
+      
+      return {
+        source: 'ESPN NHL',
+        count: data.events.length,
+        games: data.events.map(event => ({
+          id: event.id,
+          name: event.name,
+          shortName: event.shortName,
+          status: event.status,
+          competitions: event.competitions
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching today\'s games:', error);
+      return { games: [], source: 'ERROR' };
+    }
   },
 
   // Get live games with real-time updates
-  getLiveGames: async () => {
+  async getLiveGames() {
     // Try backend first
     try {
       const games = await this.fetchGames();
@@ -290,40 +277,42 @@ export const NHLService = {
     }
     
     // Fallback to ESPN for live games
-    return apiService.fetchWithCache(`${ESPN_NHL_BASE}/scoreboard`, {
-      ttl: 15000, // 15 seconds for live games
-      cacheKey: 'nhl_live_games',
-      transform: (data) => {
-        if (!data || !data.events) return { games: [] };
-        
-        const liveGames = data.events.filter(event => 
-          event.status && event.status.type && 
-          (event.status.type.state === 'in' || 
-           event.status.type.state === 'inprogress' ||
-           event.status.type.state === 'halftime')
-        );
-        
-        return {
-          source: 'ESPN NHL Live',
-          timestamp: new Date().toISOString(),
-          count: liveGames.length,
-          games: liveGames.map(game => ({
-            id: game.id,
-            name: game.name,
-            status: game.status,
-            clock: game.status.type.detail,
-            homeTeam: game.competitions?.[0]?.competitors?.find(c => c.homeAway === 'home'),
-            awayTeam: game.competitions?.[0]?.competitors?.find(c => c.homeAway === 'away'),
-            period: game.status.period,
-            broadcast: game.competitions?.[0]?.broadcasts?.[0]?.names?.[0]
-          }))
-        };
-      }
-    });
+    try {
+      const response = await fetch(`${ESPN_NHL_BASE}/scoreboard`);
+      const data = await response.json();
+      
+      if (!data || !data.events) return { games: [] };
+      
+      const liveGames = data.events.filter(event => 
+        event.status && event.status.type && 
+        (event.status.type.state === 'in' || 
+         event.status.type.state === 'inprogress' ||
+         event.status.type.state === 'halftime')
+      );
+      
+      return {
+        source: 'ESPN NHL Live',
+        timestamp: new Date().toISOString(),
+        count: liveGames.length,
+        games: liveGames.map(game => ({
+          id: game.id,
+          name: game.name,
+          status: game.status,
+          clock: game.status.type.detail,
+          homeTeam: game.competitions?.[0]?.competitors?.find(c => c.homeAway === 'home'),
+          awayTeam: game.competitions?.[0]?.competitors?.find(c => c.homeAway === 'away'),
+          period: game.status.period,
+          broadcast: game.competitions?.[0]?.broadcasts?.[0]?.names?.[0]
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching live games:', error);
+      return { games: [] };
+    }
   },
 
   // Get game details by ID
-  getGameDetails: async (gameId) => {
+  async getGameDetails(gameId) {
     // Try backend first if it's a backend game ID
     if (gameId && gameId.startsWith('mock-')) {
       const mockGames = this.getMockGames();
@@ -337,30 +326,30 @@ export const NHLService = {
     }
     
     // Fallback to Sportradar
-    return apiService.fetchWithCache(`${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${gameId}/summary.json`, {
-      ttl: 30000,
-      params: { api_key: NHL_API_KEY },
-      cacheKey: `nhl_game_${gameId}`,
-      fallback: async () => {
-        // Fallback to ESPN
-        try {
-          const response = await fetchFromBackend('NHL', 'gameSummary', { gameId });          
-            params: { event: gameId }
-          });
-          return {
-            source: 'ESPN',
-            ...response.data
-          };
-        } catch (error) {
-          throw new Error(`Failed to fetch game details: ${error.message}`);
-        }
+    try {
+      const response = await fetch(`${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${gameId}/summary.json?api_key=${NHL_API_KEY}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching game details:', error);
+      
+      // Fallback to ESPN
+      try {
+        const response = await fetch(`${ESPN_NHL_BASE}/summary?event=${gameId}`);
+        const data = await response.json();
+        return {
+          source: 'ESPN',
+          ...data
+        };
+      } catch (espnError) {
+        throw new Error(`Failed to fetch game details: ${error.message}`);
       }
-    });
+    }
   },
 
   // ========== STANDINGS & TEAMS ==========
   
-  getStandings: async (season = '2024', conference = null) => {
+  async getStandings(season = '2024', conference = null) {
     // Try backend first
     try {
       const standings = await this.fetchStandings();
@@ -375,25 +364,26 @@ export const NHLService = {
     }
     
     // Fallback to Sportradar
-    return apiService.fetchWithCache(`${SPORTRADAR_NHL_BASE}/trial/v8/en/seasons/${season}/REG/standings.json`, {
-      ttl: 3600000, // 1 hour cache
-      params: { api_key: NHL_API_KEY },
-      cacheKey: `nhl_standings_${season}_${conference || 'all'}`,
-      transform: (data) => {
-        if (!data || !data.conferences) return { conferences: [] };
-        
-        if (conference) {
-          const conf = data.conferences.find(c => 
-            c.name && c.name.toLowerCase().includes(conference.toLowerCase())
-          );
-          return conf || { divisions: [] };
-        }
-        return data;
+    try {
+      const response = await fetch(`${SPORTRADAR_NHL_BASE}/trial/v8/en/seasons/${season}/REG/standings.json?api_key=${NHL_API_KEY}`);
+      const data = await response.json();
+      
+      if (!data || !data.conferences) return { conferences: [] };
+      
+      if (conference) {
+        const conf = data.conferences.find(c => 
+          c.name && c.name.toLowerCase().includes(conference.toLowerCase())
+        );
+        return conf || { divisions: [] };
       }
-    });
+      return data;
+    } catch (error) {
+      console.error('Error fetching standings:', error);
+      return { conferences: [] };
+    }
   },
 
-  getTeams: async () => {
+  async getTeams() {
     // Try backend first
     try {
       const teams = await this.fetchTeams();
@@ -409,253 +399,94 @@ export const NHLService = {
     }
     
     // Fallback to Sportradar
-    return apiService.fetchWithCache(`${SPORTRADAR_NHL_BASE}/trial/v8/en/league/hierarchy.json`, {
-      ttl: 86400000, // 24 hours
-      params: { api_key: NHL_API_KEY },
-      cacheKey: 'nhl_teams',
-      transform: (data) => {
-        // Flatten teams from conferences and divisions
-        const teams = [];
-        if (data && data.conferences) {
-          data.conferences.forEach(conf => {
-            conf.divisions.forEach(div => {
-              teams.push(...div.teams);
-            });
+    try {
+      const response = await fetch(`${SPORTRADAR_NHL_BASE}/trial/v8/en/league/hierarchy.json?api_key=${NHL_API_KEY}`);
+      const data = await response.json();
+      
+      // Flatten teams from conferences and divisions
+      const teams = [];
+      if (data && data.conferences) {
+        data.conferences.forEach(conf => {
+          conf.divisions.forEach(div => {
+            teams.push(...div.teams);
           });
-        }
-        return {
-          source: 'Sportradar',
-          count: teams.length,
-          teams
-        };
+        });
       }
-    });
-  },
-
-  getTeamDetails: async (teamId) => {
-    return apiService.fetchWithCache(`${SPORTRADAR_NHL_BASE}/trial/v8/en/teams/${teamId}/profile.json`, {
-      ttl: 86400000,
-      params: { api_key: NHL_API_KEY },
-      cacheKey: `nhl_team_${teamId}`
-    });
-  },
-
-  // ========== PLAYERS & STATS ==========
-  
-  getPlayers: async (teamId = null, position = null) => {
-    // Using RapidAPI for NHL players
-    const params = {};
-    if (teamId) params.teamId = teamId;
-    if (position) params.position = position;
-    
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/players`, {
-      ttl: 300000, // 5 minutes
-      params,
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
-      },
-      cacheKey: `nhl_players_${teamId || 'all'}_${position || 'all'}`,
-      fallback: async () => {
-        // Fallback to Sportradar if RapidAPI fails
-        if (teamId) {
-          const teamData = await NHLService.getTeamDetails(teamId);
-          return {
-            source: 'Sportradar',
-            players: teamData.players || []
-          };
-        }
-        return { players: [] };
-      }
-    });
-  },
-
-  getPlayerStats: async (playerId, season = '2024') => {
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/players/statistics`, {
-      ttl: 300000,
-      params: {
-        playerId,
-        season
-      },
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
-      },
-      cacheKey: `nhl_player_stats_${playerId}_${season}`
-    });
+      return {
+        source: 'Sportradar',
+        count: teams.length,
+        teams
+      };
+    } catch (error) {
+      console.error('Error fetching teams:', error);
+      return { teams: [] };
+    }
   },
 
   // ========== ODDS & BETTING ==========
   
-  getOdds: async (region = 'us', market = 'h2h') => {
-    // Using The Odds API for NHL betting
-    return apiService.fetchWithCache(`${ODDS_API_BASE}/odds`, {
-      ttl: 60000, // 1 minute for odds
-      params: {
-        apiKey: THE_ODDS_API_KEY,
-        regions: region,
-        markets: market,
-        oddsFormat: 'american'
-      },
-      cacheKey: `nhl_odds_${region}_${market}`,
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-  },
-
-  getPlayerProps: async (gameId, playerName = null) => {
-    // Using RapidAPI for player props
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/odds/playerprops`, {
-      ttl: 60000,
-      params: {
-        gameId,
-        ...(playerName && { playerName })
-      },
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
-      },
-      cacheKey: `nhl_player_props_${gameId}_${playerName || 'all'}`
-    });
+  async getOdds(region = 'us', market = 'h2h') {
+    try {
+      const response = await fetch(`${ODDS_API_BASE}/sports/icehockey_nhl/odds?regions=${region}&markets=${market}&oddsFormat=american&apiKey=${THE_ODDS_API_KEY}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching odds:', error);
+      return [];
+    }
   },
 
   // ========== PREDICTIONS ==========
   
-  getPredictions: async (gameId = null) => {
-    // Using RapidAPI for predictions
-    const params = gameId ? { gameId } : {};
-    
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/predictions`, {
-      ttl: 300000, // 5 minutes for predictions
-      params,
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PREDICTIONS,
-        'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
-      },
-      cacheKey: `nhl_predictions_${gameId || 'all'}`
-    });
+  async getPredictions(gameId = null) {
+    try {
+      const params = gameId ? `gameId=${gameId}` : '';
+      const response = await fetch(`${RAPIDAPI_BASE}/predictions?${params}`, {
+        headers: {
+          'X-RapidAPI-Key': RAPIDAPI_KEY_PREDICTIONS,
+          'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
+        }
+      });
+      
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching predictions:', error);
+      return [];
+    }
   },
 
   // ========== NEWS ==========
   
-  getNews: async (limit = 10) => {
-    // ESPN NHL news endpoint
-    return apiService.fetchWithCache(`${ESPN_NHL_BASE}/news`, {
-      ttl: 300000, // 5 minutes
-      params: { limit },
-      cacheKey: `nhl_news_${limit}`,
-      transform: (data) => {
-        if (!data || !data.articles) return { articles: [] };
-        
-        return {
-          source: 'ESPN NHL',
-          count: data.articles.length,
-          articles: data.articles.map(article => ({
-            id: article.id,
-            headline: article.headline,
-            description: article.description,
-            published: article.published,
-            images: article.images,
-            links: article.links,
-            byline: article.byline
-          }))
-        };
-      }
-    });
-  },
-
-  // ========== SCHEDULE ==========
-  
-  getSchedule: async (season = '2024', teamId = null) => {
-    // Try backend first for full schedule
-    if (!teamId) {
-      try {
-        const games = await this.fetchGames(season);
-        if (games && games.length > 0) {
-          // Transform to schedule format
-          const weeks = {};
-          games.forEach(game => {
-            const week = Math.floor(new Date(game.scheduled).getDate() / 7) + 1;
-            if (!weeks[week]) {
-              weeks[week] = [];
-            }
-            weeks[week].push(game);
-          });
-          
-          return {
-            source: 'BACKEND',
-            season: season,
-            weeks: Object.keys(weeks).map(week => ({
-              weekNumber: parseInt(week),
-              games: weeks[week]
-            }))
-          };
-        }
-      } catch (error) {
-        console.warn('⚠️ Backend schedule failed, using Sportradar as fallback');
-      }
+  async getNews(limit = 10) {
+    try {
+      const response = await fetch(`${ESPN_NHL_BASE}/news?limit=${limit}`);
+      const data = await response.json();
+      
+      if (!data || !data.articles) return { articles: [] };
+      
+      return {
+        source: 'ESPN NHL',
+        count: data.articles.length,
+        articles: data.articles.map(article => ({
+          id: article.id,
+          headline: article.headline,
+          description: article.description,
+          published: article.published,
+          images: article.images,
+          links: article.links,
+          byline: article.byline
+        }))
+      };
+    } catch (error) {
+      console.error('Error fetching news:', error);
+      return { articles: [] };
     }
-    
-    // Fallback to Sportradar
-    let endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/games/${season}/REG/schedule.json`;
-    
-    if (teamId) {
-      endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/teams/${teamId}/schedule.json`;
-    }
-    
-    return apiService.fetchWithCache(endpoint, {
-      ttl: 3600000, // 1 hour
-      params: { api_key: NHL_API_KEY },
-      cacheKey: `nhl_schedule_${season}_${teamId || 'all'}`
-    });
-  },
-
-  // ========== STATISTICS & ANALYTICS ==========
-  
-  getStatistics: async (teamId = null, season = '2024') => {
-    let endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/seasons/${season}/REG/statistics.json`;
-    
-    if (teamId) {
-      endpoint = `${SPORTRADAR_NHL_BASE}/trial/v8/en/seasons/${season}/REG/teams/${teamId}/statistics.json`;
-    }
-    
-    return apiService.fetchWithCache(endpoint, {
-      ttl: 3600000,
-      params: { api_key: NHL_API_KEY },
-      cacheKey: `nhl_stats_${season}_${teamId || 'league'}`
-    });
-  },
-
-  // ========== HELPER METHODS ==========
-  
-  getTeamRoster: async (teamId) => {
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/teams/roster`, {
-      ttl: 3600000,
-      params: { teamId },
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
-      },
-      cacheKey: `nhl_roster_${teamId}`
-    });
-  },
-
-  getPlayerProfile: async (playerId) => {
-    return apiService.fetchWithCache(`${RAPIDAPI_BASE}/players/${playerId}`, {
-      ttl: 86400000,
-      headers: {
-        'X-RapidAPI-Key': RAPIDAPI_KEY_PLAYER_PROPS,
-        'X-RapidAPI-Host': 'api-nhl-v1.p.rapidapi.com'
-      },
-      cacheKey: `nhl_player_${playerId}`
-    });
   },
 
   // ========== MOCK DATA METHODS ==========
   
-  getMockGames: () => {
-    // Development mode: Using simplified version
+  getMockGames() {
     return [
       {
         id: 'mock-1',
@@ -684,8 +515,7 @@ export const NHLService = {
     ];
   },
 
-  getMockStandings: () => {
-    // Development mode: Using simplified version
+  getMockStandings() {
     return [
       {
         id: 'BOS',
@@ -720,8 +550,7 @@ export const NHLService = {
     ];
   },
 
-  getMockTeams: () => {
-    // Development mode: Using simplified version
+  getMockTeams() {
     return [
       {
         id: 'BOS',
@@ -750,108 +579,13 @@ export const NHLService = {
     ];
   },
 
-  // ========== MOCK GAME SUMMARY METHOD ==========
-  
   getMockGameSummary(gameId) {
-    // Using fallback for development
     return {
       gameId: gameId || 'mock_nhl_game_001',
       homeTeam: 'NHL Home Team',
       awayTeam: 'NHL Away Team',
       status: 'scheduled',
     };
-  },
-
-  // ========== CACHE MANAGEMENT ==========
-  
-  refreshGames: () => {
-    apiService.clearCache(/^nhl_games/);
-    apiService.clearCache(/^nhl_live/);
-    apiService.clearCache(/^nhl_latest/);
-    console.log('🔄 NHL games cache cleared');
-    return true;
-  },
-
-  refreshAll: () => {
-    apiService.clearCache(/^nhl_/);
-    console.log('🗑️ All NHL cache cleared');
-    return true;
-  },
-
-  // ========== API HEALTH CHECK ==========
-  
-  testAPIs: async () => {
-    const endpoints = [
-      { 
-        name: 'Backend API', 
-        url: 'https://pleasing-determination-production.up.railway.app/api/nhl/games',
-        test: async () => {
-          try {
-            const games = await this.fetchGames();
-            return games && games.length > 0;
-          } catch (error) {
-            return false;
-          }
-        }
-      },
-      {
-        name: 'Sportradar NHL',
-        test: () => fetchFromBackend('NHL', 'schedule');        
-          params: { api_key: NHL_API_KEY }
-        })
-      },
-      {
-        name: 'ESPN NHL',
-        test: () => fetchFromBackend('NHL', 'scoreboard');        
-      },
-      {
-        name: 'The Odds API NHL',
-    const test: async () => {
-     const data = await fetchFromBackend('NHL', 'games');
-     return { data };
-        })
-      }
-    ];
-
-    const results = [];
-    
-    for (const endpoint of endpoints) {
-      try {
-        const startTime = Date.now();
-        
-        if (endpoint.test) {
-          // Test backend API
-          const isHealthy = await endpoint.test();
-          const latency = Date.now() - startTime;
-          
-          results.push({
-            name: endpoint.name,
-            status: isHealthy ? '✅ Healthy' : '⚠️ Issues',
-            latency: `${latency}ms`
-          });
-        } else {
-          // Test external APIs
-          const response = await endpoint.test();
-          const latency = Date.now() - startTime;
-          
-          results.push({
-            name: endpoint.name,
-            status: response.status === 200 ? '✅ Healthy' : '⚠️ Issues',
-            statusCode: response.status,
-            latency: `${latency}ms`
-          });
-        }
-      } catch (error) {
-        results.push({
-          name: endpoint.name,
-          status: error.response?.status === 401 ? '🔑 Auth Error' : '❌ Unavailable',
-          error: error.message
-        });
-      }
-    }
-
-    console.log('🔧 NHL API Health Check:', results);
-    return results;
   }
 };
 

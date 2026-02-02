@@ -69,7 +69,7 @@ import {
   SportsHockey as HockeyIcon,
   SportsBaseball as BaseballIcon,
   Tv as TvIcon,
-  Cube as CubeIcon,
+  GridView as CubeIcon,
   Star as StarIcon,
   AttachMoney as MoneyIcon,
   Timeline as TimelineIcon,

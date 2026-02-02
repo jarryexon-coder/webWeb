@@ -1,6 +1,6 @@
 // DISABLED: import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { authService } from './authService';
+import { authService } from './AuthService';
 
 // Development data
 const Notifications = {

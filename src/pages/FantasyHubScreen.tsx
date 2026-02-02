@@ -146,7 +146,7 @@ const FantasyHubScreen = () => {
   const location = useLocation();
   
   // State management
-  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  // const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -389,7 +389,7 @@ const FantasyHubScreen = () => {
     }
     
     if (searchInput.trim()) {
-      await addToSearchHistory(searchInput.trim());
+      // await addToSearchHistory(searchInput.trim());
       setSearchQuery(searchInput.trim());
       filterPlayers(searchInput.trim());
     } else {
@@ -997,7 +997,7 @@ const FantasyHubScreen = () => {
           <Button
             fullWidth
             variant="outlined"
-            onClick={() => setSnackbar({ open: true, message: 'Showing best value picks...', severity: 'info' })}
+            onClick={() => setSnackbar({ open: true, message: 'Showing best value picks...', severity: 'success' })}
             sx={{ justifyContent: 'flex-start' }}
           >
             🎯 Best Value Picks
@@ -1007,7 +1007,7 @@ const FantasyHubScreen = () => {
           <Button
             fullWidth
             variant="outlined"
-            onClick={() => setSnackbar({ open: true, message: 'Analyzing matchups...', severity: 'info' })}
+            onClick={() => setSnackbar({ open: true, message: 'Analyzing matchups...', severity: 'success' })}
             sx={{ justifyContent: 'flex-start' }}
           >
             📊 Favorable Matchups

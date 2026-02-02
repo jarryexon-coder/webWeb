@@ -27,6 +27,7 @@ import {
   alpha
 } from '@mui/material';
 import {
+  Shield as ShieldIcon,
   ArrowBack,
   Search,
   CalendarToday,
@@ -42,11 +43,10 @@ import {
   Lock,
   BookmarkBorder,
   Info,
-  Shield,
   Bolt,
   Refresh,
   Close,
-  Sparkles,
+  AutoAwesome,
   EmojiEvents,
   Schedule
 } from '@mui/icons-material';
@@ -195,7 +195,7 @@ const DailyPicksScreen = () => {
             </Grid>
             <Grid item xs={12} sm={6}>
               <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                <Security sx={{ color: '#8b5cf6', mr: 1, mt: 0.5 }} />
+                <ShieldIcon sx={{ color: '#8b5cf6', mr: 1, mt: 0.5 }} />
                 <Typography variant="body2">
                   Each pick includes detailed analysis, confidence scores, and expected value
                 </Typography>
@@ -222,7 +222,7 @@ const DailyPicksScreen = () => {
   // Daily Pick Generator Component
   const DailyPickGenerator = () => {
     const [generatedToday, setGeneratedToday] = useState(false);
-    const [generatedPicks, setGeneratedPicks] = useState([]);
+    const [generatedPicks, setGeneratedPicks] = useState<any[]>([]); // instead of never[]    
 
     const generateSamplePicks = () => {
       return [
@@ -308,8 +308,8 @@ const DailyPicksScreen = () => {
                           label={pick.type} 
                           size="small"
                           sx={{ 
-                            bgcolor: `${CATEGORY_COLORS[pick.type] || '#6b7280'}20`,
-                            color: CATEGORY_COLORS[pick.type] || '#6b7280',
+                            bgcolor: `${(CATEGORY_COLORS as any)[pick.type] || '#6b7280'}20`,
+                            color: (CATEGORY_COLORS as any)[pick.type] || '#6b7280',
                             fontWeight: 'bold'
                           }}
                         />
@@ -317,8 +317,8 @@ const DailyPicksScreen = () => {
                           label={pick.sport} 
                           size="small"
                           sx={{ 
-                            bgcolor: `${SPORT_COLORS[pick.sport]}20`,
-                            color: SPORT_COLORS[pick.sport]
+                            bgcolor: `${(SPORT_COLORS as any)[pick.sport]}20`,
+                            color: (SPORT_COLORS as any)[pick.sport]
                           }}
                         />
                       </Box>
@@ -441,7 +441,7 @@ const DailyPicksScreen = () => {
     }
   };
 
-  const handleTrackPick = (pick) => {
+  const handleTrackPick = (pick: any) => {
     if (pick.requiresPremium && !hasPremiumAccess) {
       setShowUpgradeModal(true);
       return;
@@ -495,14 +495,14 @@ const DailyPicksScreen = () => {
     }, 2000);
   };
 
-  const renderPickCard = (pick) => {
+  const renderPickCard = (pick: any) => {
     const isPremiumLocked = pick.requiresPremium && !hasPremiumAccess;
     
     return (
       <Card key={pick.id} sx={{ 
         mb: 3,
         borderLeft: 4,
-        borderColor: CATEGORY_COLORS[pick.category] || '#6b7280'
+        borderColor: (CATEGORY_COLORS as any)[pick.category] || '#6b7280'
       }}>
         <CardContent>
           {/* Header */}
@@ -519,8 +519,8 @@ const DailyPicksScreen = () => {
                   label={pick.sport}
                   size="small"
                   sx={{ 
-                    bgcolor: `${SPORT_COLORS[pick.sport]}20`,
-                    color: SPORT_COLORS[pick.sport],
+                    bgcolor: `${(SPORT_COLORS as any)[pick.sport]}20`,
+                    color: (SPORT_COLORS as any)[pick.sport],
                     fontWeight: 'bold'
                   }}
                 />
@@ -529,8 +529,8 @@ const DailyPicksScreen = () => {
                     label={pick.category}
                     size="small"
                     sx={{ 
-                      bgcolor: `${CATEGORY_COLORS[pick.category]}20`,
-                      color: CATEGORY_COLORS[pick.category],
+                      bgcolor: `${(CATEGORY_COLORS as any)[pick.category]}20`,
+                      color: (CATEGORY_COLORS as any)[pick.category],
                       fontWeight: 'bold'
                     }}
                   />
@@ -708,9 +708,9 @@ const DailyPicksScreen = () => {
               color={selectedSport === sport ? 'primary' : 'default'}
               variant={selectedSport === sport ? 'filled' : 'outlined'}
               sx={{ 
-                bgcolor: selectedSport === sport && sport !== 'All' ? `${SPORT_COLORS[sport]}20` : undefined,
-                borderColor: SPORT_COLORS[sport],
-                color: selectedSport === sport && sport !== 'All' ? SPORT_COLORS[sport] : undefined
+                bgcolor: selectedSport === sport && sport !== 'All' ? `${(SPORT_COLORS as any)[sport]}20` : undefined,
+                borderColor: (SPORT_COLORS as any)[sport],
+                color: selectedSport === sport && sport !== 'All' ? (SPORT_COLORS as any)[sport] : undefined
               }}
             />
           ))}

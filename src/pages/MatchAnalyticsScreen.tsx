@@ -192,7 +192,7 @@ const MatchAnalyticsScreen = () => {
   const [loadingAI, setLoadingAI] = useState(false);
   const [activeTab, setActiveTab] = useState('conditions');
   const [refreshing, setRefreshing] = useState(false);
-  const [filteredGames, setFilteredGames] = useState([]);
+  const [filteredGames, setFilteredGames] = useState<any[]>([]);
 
   // Combine all games
   const allGames = [
@@ -214,7 +214,7 @@ const MatchAnalyticsScreen = () => {
     }
   };
 
-  const handleSearch = (query) => {
+  const handleSearch = (query: string) => {
     setSearchInput(query);
     if (!query.trim()) {
       setSearchQuery('');
@@ -232,14 +232,14 @@ const MatchAnalyticsScreen = () => {
     }
   }, []);
 
-  const handleSelectGame = (game) => {
+  const handleSelectGame = (game: any) => {
     setSelectedGame(game);
     setSearchQuery('');
     setSearchInput('');
     setFilteredGames([]);
   };
 
-  const generateAIAnalysis = async (promptType) => {
+  const generateAIAnalysis = async (promptType: string) => {
     setLoadingAI(true);
     setShowAIModal(true);
     
@@ -253,7 +253,7 @@ const MatchAnalyticsScreen = () => {
         predictive: `**Predictive Statistics**\n\n**Win Probability:**\n• Home: 62%\n• Away: 38%\n\n**Expected Score:**\n• Home: 27.3 points\n• Away: 24.1 points`
       };
       
-      setAiResponse(responses[promptType] || 'Analysis generated successfully.');
+      setAiResponse(responses[promptType as keyof typeof responses] || 'Analysis generated successfully.');
       setLoadingAI(false);
     }, 1500);
   };
@@ -387,7 +387,7 @@ const MatchAnalyticsScreen = () => {
     }
   };
 
-  const renderStatusBadge = (status) => {
+  const renderStatusBadge = (status: string) => {
     switch(status) {
       case 'Live':
         return (
@@ -431,7 +431,7 @@ const MatchAnalyticsScreen = () => {
     }
   };
 
-  const GameCard = ({ game, isSelected = false, onSelect }) => (
+  const GameCard = ({ game, isSelected = false, onSelect }: { game: any; isSelected?: boolean; onSelect: (game: any) => void }) => (
     <Card 
       sx={{ 
         mb: 2, 
@@ -544,7 +544,7 @@ const MatchAnalyticsScreen = () => {
                   key={index}
                   icon={suggestion.icon}
                   label={suggestion.text}
-                  onClick={() => handleSearchSubmit(suggestion.text)}
+                  onClick={() => handleSearchSubmit(suggestion.text || '' as any)}
                   sx={{ 
                     bgcolor: `${suggestion.color}10`,
                     borderColor: suggestion.color,
@@ -570,7 +570,7 @@ const MatchAnalyticsScreen = () => {
                 key={game.id}
                 game={game}
                 isSelected={selectedGame?.id === game.id}
-                onSelect={handleSelectGame}
+                onSelect={() => handleSelectGame(game)}
               />
             ))}
           </Box>
@@ -831,7 +831,7 @@ const MatchAnalyticsScreen = () => {
                   <Grid item xs={12} sm={6} md={4} key={game.id}>
                     <GameCard
                       game={game}
-                      onSelect={handleSelectGame}
+                      onSelect={() => handleSelectGame(game)}
                     />
                   </Grid>
                 ))}

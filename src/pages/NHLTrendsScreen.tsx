@@ -1,6 +1,7 @@
 // src/pages/NHLTrendsScreen.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  ListItemButton,  
   Box,
   Typography,
   Container,
@@ -95,7 +96,7 @@ const NHLTrendsScreen = () => {
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchResults, setSearchResults] = useState(null);
+  const [searchResults, setSearchResults] = useState<any>(null);
   const [searchCategory, setSearchCategory] = useState('all');
   
   // Mock search history - in real app, would come from context/provider
@@ -492,9 +493,8 @@ const NHLTrendsScreen = () => {
         {results.length > 0 ? (
           <List>
             {results.slice(0, 10).map((item: any, index: number) => (
-              <ListItem 
+              <ListItemButton component="div" divider 
                 key={index}
-                button
                 onClick={() => {
                   if (item.type === 'players') {
                     navigate('/ai-generators/player-metrics');
@@ -539,7 +539,7 @@ const NHLTrendsScreen = () => {
                     {item.type}
                   </Typography>
                 </ListItemSecondaryAction>
-              </ListItem>
+              </ListItemButton>
             ))}
           </List>
         ) : (

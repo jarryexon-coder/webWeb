@@ -263,7 +263,7 @@ const LiveGamesScreen = () => {
         games = games.filter(game => 
           game.awayTeam.toLowerCase().includes(searchLower) ||
           game.homeTeam.toLowerCase().includes(searchLower) ||
-          game.arena.toLowerCase().includes(searchLower) ||
+          (game.arena || '').toLowerCase().includes(searchLower) ||
           game.channel.toLowerCase().includes(searchLower)
         );
       }

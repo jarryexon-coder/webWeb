@@ -1,5 +1,6 @@
 // src/pages/ParlayArchitectScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
+import SportsSoccerIcon from '@mui/icons-material/SportsSoccer';
 import {
   Box,
   Typography,
@@ -52,7 +53,9 @@ import {
   FormControl,
   InputLabel
 } from '@mui/material';
+// import SportsSoccerIcon from '@mui/icons-material/SportsSoccer'; // Removed duplicate
 import { Link, useNavigate } from 'react-router-dom';
+// import SportsSoccerIcon from '@mui/icons-material/SportsSoccer'; // Removed duplicate
 import {
   Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
@@ -97,6 +100,7 @@ import {
   Person as PersonIcon,
   People as PeopleIcon
 } from '@mui/icons-material';
+// import SportsSoccerIcon from '@mui/icons-material/SportsSoccer'; // Removed duplicate
 import { alpha } from '@mui/material/styles';
 
 // Mock data for players and picks
@@ -956,7 +960,7 @@ const ParlayArchitectScreen = () => {
         case 'NFL': return <FootballIcon />;
         case 'NHL': return <HockeyIcon />;
         case 'MLB': return <BaseballIcon />;
-        default: return <SportsSoccer />;
+//         default: return <SportsSoccerIcon />; // Removed duplicate
       }
     };
 

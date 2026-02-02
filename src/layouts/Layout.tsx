@@ -104,7 +104,7 @@ const Layout = () => {
             NBA Fantasy Dashboard
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            {import.meta.env.VITE_APP_VERSION}
+            {'1.0.0'}
           </Typography>
         </Toolbar>
       </AppBar>

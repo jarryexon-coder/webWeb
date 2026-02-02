@@ -10,12 +10,11 @@ export default defineConfig({
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'mui-vendor': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
           'charts-vendor': ['@mui/x-charts', 'recharts'],
-          'date-vendor': ['@mui/x-date-pickers', 'date-fns'],
-          'firebase-vendor': ['firebase'],
-          'state-vendor': ['@reduxjs/toolkit', 'react-redux', 'axios']
-        }
-      },
-      chunkSizeWarningLimit: 1000,
-    },
-  },
+          'date-vendor': ['@mui/x-date-pickers', 'date-fns']
+        },
+        // MOVE chunkSizeWarningLimit HERE
+        chunkSizeWarningLimit: 1000
+      }
+    }
+  }
 })

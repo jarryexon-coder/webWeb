@@ -1,5 +1,7 @@
 // src/pages/SportsWireScreen.tsx
 import React, { useState, useEffect } from 'react';
+import NewReleasesIcon from '@mui/icons-material/NewReleases';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import {
   Box,
   Typography,
@@ -28,6 +30,8 @@ import {
   alpha,
   useTheme
 } from '@mui/material';
+// import NewReleasesIcon from '@mui/icons-material/NewReleases'; // Removed duplicate
+// import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // Removed duplicate
 import {
   ArrowBack,
   Search,
@@ -49,11 +53,13 @@ import {
   BarChart,
   Notifications,
   Close,
-  Sparkles,
+  AutoAwesome as SparklesIcon,
   Remove,
   TrendingDown,
   Timer
 } from '@mui/icons-material';
+// import NewReleasesIcon from '@mui/icons-material/NewReleases'; // Removed duplicate
+// import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // Removed duplicate
 import { useNavigate } from 'react-router-dom';
 
 const SPORT_COLORS = {
@@ -164,7 +170,7 @@ const SportsWireScreen = () => {
   const [loading, setLoading] = useState(false);
   
   const categories = [
-    { id: 'beat-writers', name: 'Beat Writers', icon: <NewReleases />, color: '#3b82f6' },
+//     { id: 'beat-writers', name: 'Beat Writers', icon: <NewReleasesIcon />, color: '#3b82f6' }, // Removed duplicate
     { id: 'injuries', name: 'Injury News', icon: <MedicalServices />, color: '#ef4444' },
     { id: 'rosters', name: 'Rosters', icon: <People />, color: '#8b5cf6' },
     { id: 'analytics', name: 'Analytics', icon: <Analytics />, color: '#10b981' },
@@ -245,7 +251,7 @@ const SportsWireScreen = () => {
       <Box sx={{ 
         position: 'relative',
         height: 120,
-        bgcolor: CATEGORY_COLORS[story.category] || theme.palette.primary.main,
+        bgcolor: (CATEGORY_COLORS as any)[story.category] || theme.palette.primary.main,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center'
@@ -292,8 +298,8 @@ const SportsWireScreen = () => {
             sx={{ 
               height: 20,
               fontSize: '0.6rem',
-              bgcolor: `${SPORT_COLORS[story.sport]}20`,
-              color: SPORT_COLORS[story.sport]
+              bgcolor: `${(SPORT_COLORS as any)[story.sport]}20`,
+              color: (SPORT_COLORS as any)[story.sport]
             }}
           />
         </Box>
@@ -328,8 +334,8 @@ const SportsWireScreen = () => {
             label={categories.find(c => c.id === story.category)?.name}
             size="small"
             sx={{ 
-              bgcolor: `${CATEGORY_COLORS[story.category]}20`,
-              color: CATEGORY_COLORS[story.category]
+              bgcolor: `${(CATEGORY_COLORS as any)[story.category]}20`,
+              color: (CATEGORY_COLORS as any)[story.category]
             }}
           />
           <Typography variant="caption" color="text.secondary">
@@ -342,7 +348,7 @@ const SportsWireScreen = () => {
             <Share sx={{ fontSize: 16 }} />
           </IconButton>
           <IconButton size="small" onClick={() => alert(story.aiInsights.join('\n'))}>
-            <AutoAwesome sx={{ fontSize: 16, color: '#8b5cf6' }} />
+//             <AutoAwesomeIcon sx={{ fontSize: 16, color: '#8b5cf6' }} /> // Removed duplicate
           </IconButton>
           <IconButton size="small">
             <BookmarkBorder sx={{ fontSize: 16 }} />
@@ -360,8 +366,8 @@ const SportsWireScreen = () => {
             label={categories.find(c => c.id === article.category)?.name}
             size="small"
             sx={{ 
-              bgcolor: `${CATEGORY_COLORS[article.category]}20`,
-              color: CATEGORY_COLORS[article.category],
+              bgcolor: `${(CATEGORY_COLORS as any)[article.category]}20`,
+              color: (CATEGORY_COLORS as any)[article.category],
               fontWeight: 'bold'
             }}
           />
@@ -588,9 +594,9 @@ const SportsWireScreen = () => {
                   sx={{ 
                     height: 8,
                     borderRadius: 4,
-                    bgcolor: `${CATEGORY_COLORS[topic.category]}20`,
+                    bgcolor: `${(CATEGORY_COLORS as any)[topic.category]}20`,
                     '& .MuiLinearProgress-bar': { 
-                      bgcolor: CATEGORY_COLORS[topic.category] || theme.palette.primary.main 
+                      bgcolor: (CATEGORY_COLORS as any)[topic.category] || theme.palette.primary.main 
                     }
                   }}
                 />

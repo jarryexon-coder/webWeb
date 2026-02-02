@@ -5,7 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider, createTheme } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { SearchProvider } from './providers/SearchProvider'  // Add this
-import App from './App.tsx'
+import App from './App'
 
 const darkTheme = createTheme({
   palette: {

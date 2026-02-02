@@ -104,7 +104,7 @@ const NewsDeskScreen = () => {
   const navigate = useNavigate();
   
   // State management
-  const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  // const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchHistory, setShowSearchHistory] = useState(false);
@@ -182,7 +182,7 @@ const NewsDeskScreen = () => {
     const query = searchInput.trim();
     
     if (query) {
-      await addToSearchHistory(query);
+      // await addToSearchHistory(query);
       setSearchQuery(query);
       setShowSearchHistory(false);
       filterContent(query);
@@ -441,7 +441,7 @@ const NewsDeskScreen = () => {
           />
 
           {/* Search History Dropdown */}
-          {showSearchHistory && searchHistory.length > 0 && (
+          {showSearchHistory && [].length > 0 && (
             <Paper sx={{
               position: 'absolute',
               top: '100%',
@@ -456,12 +456,12 @@ const NewsDeskScreen = () => {
                 <Typography variant="subtitle1" fontWeight="bold">
                   Recent Searches
                 </Typography>
-                <Button size="small" color="error" onClick={clearSearchHistory}>
+                <Button size="small" color="error">
                   Clear All
                 </Button>
               </Box>
               <List>
-                {searchHistory.map((item, index) => (
+                {[].map((item, index) => (
                   <ListItemButton
                     key={index}
                     onClick={() => {

@@ -1,5 +1,6 @@
 // src/pages/PrizePicksScreen.tsx
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -112,24 +113,96 @@ const WinnerBadge = styled(Chip)(({ theme }) => ({
   fontSize: '0.75rem',
 }));
 
-const ConfidenceBadge = styled(Chip)(({ theme, confidence }) => {
-  let color = theme.palette.success.main;
-  if (confidence < 75) color = theme.palette.warning.main;
-  if (confidence < 65) color = theme.palette.error.main;
+// ConfidenceBadge with custom interface
+interface ConfidenceBadgeProps {
+  confidence: number;
+  label: string;
+  size?: 'small' | 'medium';
+  className?: string;
+}
+
+const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({ confidence, label, size = 'medium', className }) => {
+  const theme = useTheme();
   
-  return {
-    backgroundColor: color,
-    color: 'white',
-    fontWeight: 'bold',
+  const getColor = () => {
+    if (confidence >= 75) return theme.palette.success.main;
+    if (confidence >= 65) return theme.palette.warning.main;
+    return theme.palette.error.main;
   };
-});
+  
+  return (
+    <Chip
+      label={label}
+      size={size}
+      sx={{
+        backgroundColor: getColor(),
+        color: 'white',
+        fontWeight: 'bold',
+      }}
+      className={className}
+    />
+  );
+};
+
+// Mock Data Types
+interface Winner {
+  player: string;
+  pick: string;
+  odds: string;
+}
+
+interface Selection {
+  id: string;
+  type: string;
+  sport: string;
+  title: string;
+  confidence: number;
+  winners: Winner[];
+  totalOdds: string;
+  analysis: string;
+  timestamp: string;
+  model: string;
+  modelAccuracy: string;
+  edgeScore: number;
+  bumpRisk: string;
+  payoutMultiplier: string;
+  requiresPremium: boolean;
+}
 
 // Daily PrizePicks Generator Component
-const DailyPrizePicksGenerator = ({ onGenerate, isGenerating, selectionsLeft }) => {
-  const [generatedToday, setGeneratedToday] = useState(false);
-  const [dailySelections, setDailySelections] = useState([]);
+interface DailyPrizePicksGeneratorProps {
+  onGenerate?: () => void;
+  isGenerating: boolean;
+  selectionsLeft: number;
+}
 
-  const mockSelections = [
+interface DailySelection {
+  id: number;
+  type: string;
+  sport: string;
+  title: string;
+  confidence: number;
+  winners: Array<{ name: string; odds: string; probability: string }>;
+  analysis: string;
+  totalOdds: string;
+  probability: string;
+  keyStat: string;
+  trend: string;
+  timestamp: string;
+  edgeScore: number;
+  bumpRisk: string;
+  payoutMultiplier: string;
+}
+
+const DailyPrizePicksGenerator: React.FC<DailyPrizePicksGeneratorProps> = ({ 
+  onGenerate, 
+  isGenerating, 
+  selectionsLeft 
+}) => {
+  const [generatedToday, setGeneratedToday] = useState(false);
+  const [dailySelections, setDailySelections] = useState<DailySelection[]>([]);
+
+  const mockSelections: DailySelection[] = [
     {
       id: 1,
       type: '3-Winner Parlay',
@@ -209,7 +282,11 @@ const DailyPrizePicksGenerator = ({ onGenerate, isGenerating, selectionsLeft }) 
             <Paper key={selection.id} sx={{ p: 2, mb: 2, bgcolor: 'grey.800' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <ConfidenceBadge label={`${selection.confidence}%`} confidence={selection.confidence} size="small" />
+                  <ConfidenceBadge 
+                    label={`${selection.confidence}%`} 
+                    confidence={selection.confidence} 
+                    size="small" 
+                  />
                   <Chip label={selection.type} size="small" color="secondary" />
                   <Chip 
                     label={selection.sport} 
@@ -341,7 +418,7 @@ const DailyPrizePicksGenerator = ({ onGenerate, isGenerating, selectionsLeft }) 
 };
 
 // Mock Data
-const mockSelections = [
+const mockSelections: Selection[] = [
   {
     id: '1',
     type: '3-Winner Parlay',
@@ -395,18 +472,18 @@ const selectionQueries = [
 ];
 
 const sports = [
-  { id: 'All', name: 'All Sports', icon: <TrophyIcon />, color: 'primary' },
-  { id: 'NBA', name: 'NBA', icon: <BasketballIcon />, color: 'error' },
-  { id: 'NFL', name: 'NFL', icon: <FootballIcon />, color: 'success' },
-  { id: 'MLB', name: 'MLB', icon: <BaseballIcon />, color: 'warning' },
-  { id: 'NHL', name: 'NHL', icon: <HockeyIcon />, color: 'info' },
-  { id: 'Soccer', name: 'Soccer', icon: <SoccerIcon />, color: 'success' },
+  { id: 'All', name: 'All Sports', icon: <TrophyIcon />, color: 'primary' as const },
+  { id: 'NBA', name: 'NBA', icon: <BasketballIcon />, color: 'error' as const },
+  { id: 'NFL', name: 'NFL', icon: <FootballIcon />, color: 'success' as const },
+  { id: 'MLB', name: 'MLB', icon: <BaseballIcon />, color: 'warning' as const },
+  { id: 'NHL', name: 'NHL', icon: <HockeyIcon />, color: 'info' as const },
+  { id: 'Soccer', name: 'Soccer', icon: <SoccerIcon />, color: 'success' as const },
 ];
 
 const timeframes = ['Today', 'Tomorrow', 'Week', 'All Upcoming'];
 
 // Main Component
-const PrizePicksScreen = () => {
+const PrizePicksScreen: React.FC = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   
@@ -418,7 +495,7 @@ const PrizePicksScreen = () => {
   const [simulating, setSimulating] = useState(false);
   const [generatingSelections, setGeneratingSelections] = useState(false);
   const [dailySelectionsLeft, setDailySelectionsLeft] = useState(2);
-  const [todaySelections, setTodaySelections] = useState([]);
+  const [todaySelections, setTodaySelections] = useState<Selection[]>([]);
 
   useEffect(() => {
     // Load initial data
@@ -427,7 +504,6 @@ const PrizePicksScreen = () => {
 
   const handleGenerateSelections = () => {
     if (dailySelectionsLeft <= 0) {
-      // Show limit reached message
       return;
     }
     
@@ -435,7 +511,6 @@ const PrizePicksScreen = () => {
     setTimeout(() => {
       setGeneratingSelections(false);
       setDailySelectionsLeft(prev => prev - 1);
-      // Show success message
     }, 2000);
   };
 
@@ -452,7 +527,7 @@ const PrizePicksScreen = () => {
     setSearchQuery(query);
   };
 
-  const renderSelectionCard = (selection: any) => {
+  const renderSelectionCard = (selection: Selection) => {
     const getBumpRiskColor = (risk: string) => {
       switch (risk) {
         case 'High': return 'error';
@@ -523,7 +598,7 @@ const PrizePicksScreen = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {selection.winners.map((winner: any, index: number) => (
+                  {selection.winners.map((winner, index) => (
                     <TableRow key={index}>
                       <TableCell>
                         <Typography variant="body2" fontWeight="medium">
@@ -644,7 +719,7 @@ const PrizePicksScreen = () => {
       return (
         selection.title.toLowerCase().includes(query) ||
         selection.sport.toLowerCase().includes(query) ||
-        selection.winners.some((w: any) => 
+        selection.winners.some(w => 
           w.player.toLowerCase().includes(query) ||
           w.pick.toLowerCase().includes(query)
         )
@@ -790,7 +865,7 @@ const PrizePicksScreen = () => {
               icon={sport.icon}
               label={sport.name}
               onClick={() => setSelectedSport(sport.id)}
-              color={selectedSport === sport.id ? sport.color as any : 'default'}
+              color={selectedSport === sport.id ? sport.color : 'default'}
               variant={selectedSport === sport.id ? 'filled' : 'outlined'}
             />
           ))}
