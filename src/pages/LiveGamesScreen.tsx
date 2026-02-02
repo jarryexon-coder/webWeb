@@ -9,28 +9,22 @@ import {
   Button,
   Container,
   Paper,
-  LinearProgress,
   Chip,
   IconButton,
   TextField,
   InputAdornment,
-  Select,
-  MenuItem,
-  FormControl,
   Alert,
   CircularProgress,
-  Tooltip,
-  Divider,
   Badge,
   Avatar,
   Stack,
   Switch,
   FormControlLabel,
-  Slider,
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Snackbar
 } from '@mui/material';
 import { Link } from 'react-router-dom';
 import {
@@ -38,44 +32,70 @@ import {
   SportsFootball as SportsFootballIcon,
   SportsHockey as SportsHockeyIcon,
   SportsBaseball as SportsBaseballIcon,
-  SportsSoccer as SportsSoccerIcon,
   TrendingUp as TrendingUpIcon,
   Search as SearchIcon,
   Refresh as RefreshIcon,
   LiveTv as LiveTvIcon,
   EmojiEvents as EmojiEventsIcon,
-  AccessTime as AccessTimeIcon,
-  LocationOn as LocationOnIcon,
-  Tv as TvIcon,
-  PlayCircle as PlayCircleIcon,
-  Videocam as VideocamIcon,
   BarChart as BarChartIcon,
   FilterList as FilterListIcon,
   Info as InfoIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  TrendingFlat as TrendingFlatIcon,
+  PlayCircle as PlayCircleIcon,
+  Videocam as VideocamIcon,
+  LocationOn as LocationOnIcon,
+  Tv as TvIcon,
   Whatshot as WhatshotIcon,
   CheckCircle as CheckCircleIcon,
-  Schedule as ScheduleIcon,
   Cancel as CancelIcon
 } from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
+
+interface Game {
+  id: string;
+  sport: string;
+  awayTeam: string;
+  homeTeam: string;
+  awayScore: number;
+  homeScore: number;
+  period: string;
+  timeRemaining: string;
+  status: 'live' | 'final' | 'scheduled';
+  quarter?: string;
+  channel?: string;
+  lastPlay?: string;
+  awayColor?: string;
+  homeColor?: string;
+  awayRecord?: string;
+  homeRecord?: string;
+  arena?: string;
+  attendance?: string;
+  gameClock?: string;
+  broadcast?: { network: string; stream: string };
+  bettingLine?: { spread: string; total: string };
+}
 
 const LiveGamesScreen = () => {
-  const theme = useTheme();
-  
+  // Debug logging
+  useEffect(() => {
+    console.log('=== LiveGamesScreen Debug ===');
+    console.log('API Base URL:', import.meta.env.VITE_API_BASE);
+    console.log('Backend URL:', 'https://pleasing-determination-production.up.railway.app');
+    console.log('==========================');
+  }, []);
+
   // Main states
   const [selectedSport, setSelectedSport] = useState('all');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [filteredGames, setFilteredGames] = useState<any[]>([]);
-  const [selectedGame, setSelectedGame] = useState<any>(null);
+  const [filteredGames, setFilteredGames] = useState<Game[]>([]);
+  const [allGames, setAllGames] = useState<Game[]>([]);
+  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [gameDialogOpen, setGameDialogOpen] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
   // Game stats
   const [gameStats, setGameStats] = useState({
     liveCount: 0,
@@ -86,211 +106,213 @@ const LiveGamesScreen = () => {
   });
 
   // Live updates
-  const [liveUpdates, setLiveUpdates] = useState<any[]>([
-    { id: 1, sport: 'all', time: 'Just now', text: '🔥 Exciting action in sports right now! Check out the live scores.' },
-    { id: 2, sport: 'all', time: '2 min ago', text: '⚡ Big play just happened in one of the games!' },
-    { id: 3, sport: 'all', time: '5 min ago', text: '🏆 Close game alert in multiple sports! Scores are tight.' },
+  const [liveUpdates, setLiveUpdates] = useState([
+    { id: 1, sport: 'all', time: 'Just now', text: 'Loading live games...' },
   ]);
 
   // Sports data
   const sports = [
-    { id: 'all', name: 'All Sports', icon: <WhatshotIcon />, color: '#8b5cf6', count: 7 },
-    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444', count: 3 },
-    { id: 'NFL', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6', count: 2 },
-    { id: 'NHL', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af', count: 1 },
-    { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981', count: 1 }
+    { id: 'all', name: 'All Sports', icon: <WhatshotIcon />, color: '#8b5cf6' },
+    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444' },
+    { id: 'NFL', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6' },
+    { id: 'NHL', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af' },
+    { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981' }
   ];
 
-  // Mock games data
-  const mockGamesData = {
-    all: [
-      {
-        id: 1,
-        sport: 'NBA',
-        awayTeam: 'Golden State Warriors',
-        homeTeam: 'Los Angeles Lakers',
-        awayScore: 105,
-        homeScore: 108,
-        period: '4th',
-        timeRemaining: '2:15',
-        status: 'live',
-        quarter: '4th',
-        channel: 'TNT',
-        lastPlay: 'LeBron James makes 3-pointer',
-        awayColor: '#1d428a',
-        homeColor: '#552583',
-        awayRecord: '42-38',
-        homeRecord: '43-37',
-        arena: 'Crypto.com Arena',
-        attendance: '18,997',
-        gameClock: '2:15',
-        broadcast: { network: 'TNT', stream: 'NBA League Pass' },
-        bettingLine: { spread: 'LAL -2.5', total: '225.5' }
-      },
-      {
-        id: 2,
-        sport: 'NBA',
-        awayTeam: 'Boston Celtics',
-        homeTeam: 'Miami Heat',
-        awayScore: 112,
-        homeScore: 98,
-        period: 'Final',
-        timeRemaining: '0:00',
-        status: 'final',
-        quarter: '4th',
-        channel: 'ESPN',
-        lastPlay: 'Game ended',
-        awayColor: '#007a33',
-        homeColor: '#98002e',
-        awayRecord: '57-25',
-        homeRecord: '44-38',
-        arena: 'FTX Arena',
-        attendance: '19,600',
-        gameClock: '0:00',
-        broadcast: { network: 'ESPN', stream: 'NBA League Pass' },
-        bettingLine: { spread: 'BOS -4.5', total: '218.5' }
-      },
-      {
-        id: 3,
-        sport: 'NBA',
-        awayTeam: 'Phoenix Suns',
-        homeTeam: 'Denver Nuggets',
-        awayScore: 95,
-        homeScore: 97,
-        period: '3rd',
-        timeRemaining: '3:45',
-        status: 'live',
-        quarter: '3rd',
-        channel: 'ABC',
-        lastPlay: 'Nikola Jokić makes layup',
-        awayColor: '#e56020',
-        homeColor: '#0e2240',
-        awayRecord: '45-37',
-        homeRecord: '53-29',
-        arena: 'Ball Arena',
-        attendance: '19,520',
-        gameClock: '3:45',
-        broadcast: { network: 'ABC', stream: 'NBA League Pass' },
-        bettingLine: { spread: 'DEN -3.5', total: '230.5' }
-      },
-      {
-        id: 4,
-        sport: 'NFL',
-        awayTeam: 'Kansas City Chiefs',
-        homeTeam: 'Baltimore Ravens',
-        awayScore: 24,
-        homeScore: 17,
-        period: '4th',
-        timeRemaining: '2:34',
-        status: 'live',
-        quarter: '4th',
-        channel: 'CBS',
-        lastPlay: 'Patrick Mahomes 15-yard pass',
-        awayColor: '#e31837',
-        homeColor: '#241773',
-        awayRecord: '14-3',
-        homeRecord: '13-4',
-        stadium: 'M&T Bank Stadium',
-        attendance: '71,008',
-        gameClock: '2:34',
-        broadcast: { network: 'CBS', stream: 'Paramount+' },
-        bettingLine: { spread: 'KC -2.5', total: '48.5' }
-      }
-    ],
-    NBA: [
-      {
-        id: 1,
-        sport: 'NBA',
-        awayTeam: 'Golden State Warriors',
-        homeTeam: 'Los Angeles Lakers',
-        awayScore: 105,
-        homeScore: 108,
-        period: '4th',
-        timeRemaining: '2:15',
-        status: 'live',
-        quarter: '4th',
-        channel: 'TNT',
-        lastPlay: 'LeBron James makes 3-pointer',
-        awayColor: '#1d428a',
-        homeColor: '#552583',
-        awayRecord: '42-38',
-        homeRecord: '43-37',
-        arena: 'Crypto.com Arena',
-        attendance: '18,997',
-        gameClock: '2:15',
-        broadcast: { network: 'TNT', stream: 'NBA League Pass' },
-        bettingLine: { spread: 'LAL -2.5', total: '225.5' }
-      },
-      {
-        id: 2,
-        sport: 'NBA',
-        awayTeam: 'Boston Celtics',
-        homeTeam: 'Miami Heat',
-        awayScore: 112,
-        homeScore: 98,
-        period: 'Final',
-        timeRemaining: '0:00',
-        status: 'final',
-        quarter: '4th',
-        channel: 'ESPN',
-        lastPlay: 'Game ended',
-        awayColor: '#007a33',
-        homeColor: '#98002e',
-        awayRecord: '57-25',
-        homeRecord: '44-38',
-        arena: 'FTX Arena',
-        attendance: '19,600',
-        gameClock: '0:00',
-        broadcast: { network: 'ESPN', stream: 'NBA League Pass' },
-        bettingLine: { spread: 'BOS -4.5', total: '218.5' }
-      }
-    ]
-  };
+  // Mock games data as fallback
+  const mockGamesData: Game[] = [
+    {
+      id: '1',
+      sport: 'NBA',
+      awayTeam: 'Golden State Warriors',
+      homeTeam: 'Los Angeles Lakers',
+      awayScore: 105,
+      homeScore: 108,
+      period: '4th',
+      timeRemaining: '2:15',
+      status: 'live',
+      quarter: '4th',
+      channel: 'TNT',
+      lastPlay: 'LeBron James makes 3-pointer',
+      awayColor: '#1d428a',
+      homeColor: '#552583',
+      awayRecord: '42-38',
+      homeRecord: '43-37',
+      arena: 'Crypto.com Arena',
+      attendance: '18,997',
+      gameClock: '2:15',
+      broadcast: { network: 'TNT', stream: 'NBA League Pass' },
+      bettingLine: { spread: 'LAL -2.5', total: '225.5' }
+    }
+  ];
 
-  // Load games data
+  // Replace your entire fetchGames function with this:
   const loadLiveGames = useCallback(async (isRefresh = false, searchText = '') => {
     if (!isRefresh) setLoading(true);
-    
+    setRefreshing(isRefresh);
+    setError(null);
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
       
-      let games = mockGamesData[selectedSport as keyof typeof mockGamesData] || [];
+      console.log(`🎯 Fetching from backend: ${apiBaseUrl}/api/games`);
       
-      // Apply search filter
-      if (searchText) {
-        const searchLower = searchText.toLowerCase();
-        games = games.filter(game => 
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/games`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+
+        const result = await response.json();
+        console.log('✅ Backend response received:', result);
+        
+        // CRITICAL: Check if response has valid games array
+        if (result && result.success === true && Array.isArray(result.games)) {
+          console.log(`✅ Using REAL backend data: ${result.games.length} games`);
+          
+          // Transform backend data to match our frontend format
+          const games = result.games.map((game: any) => ({
+            id: game.id || Math.random().toString(),
+            sport: game.sport || 'NBA',
+            awayTeam: game.awayTeam || 'Away Team',
+            homeTeam: game.homeTeam || 'Home Team',
+            awayScore: game.awayScore || 0,
+            homeScore: game.homeScore || 0,
+            period: game.period || '1st',
+            timeRemaining: game.timeRemaining || '12:00',
+            status: game.status || 'live',
+            quarter: game.quarter || game.period || '1st',
+            channel: game.channel || 'TBD',
+            lastPlay: game.lastPlay || 'Game starting soon',
+            awayColor: game.awayColor || '#1d428a',
+            homeColor: game.homeColor || '#552583',
+            awayRecord: game.awayRecord || '0-0',
+            homeRecord: game.homeRecord || '0-0',
+            arena: game.arena || game.venue || 'Unknown Arena',
+            attendance: game.attendance || '0',
+            gameClock: game.gameClock || game.timeRemaining,
+            broadcast: game.broadcast || { network: game.channel || 'TBD', stream: 'League Pass' },
+            bettingLine: game.bettingLine || { spread: 'EVEN', total: '200.5' }
+          }));
+          
+          // Apply sport filter
+          let filtered = games;
+          if (selectedSport !== 'all') {
+            filtered = games.filter(game => game.sport === selectedSport);
+          }
+          
+          // Apply search filter
+          if (searchText) {
+            const searchLower = searchText.toLowerCase();
+            filtered = filtered.filter(game => 
+              game.awayTeam.toLowerCase().includes(searchLower) ||
+              game.homeTeam.toLowerCase().includes(searchLower) ||
+              (game.arena || '').toLowerCase().includes(searchLower) ||
+              (game.channel || '').toLowerCase().includes(searchLower)
+            );
+          }
+          
+          // Set all states with real data
+          setFilteredGames(filtered);
+          setAllGames(games);
+          
+          // Calculate stats
+          const liveGamesCount = filtered.filter(game => game.status === 'live').length;
+          const finalGamesCount = filtered.filter(game => game.status === 'final').length;
+          const totalPoints = filtered.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
+          const averageScore = filtered.length > 0 ? 
+            Math.round(totalPoints / filtered.length) : 0;
+          
+          setGameStats({
+            liveCount: liveGamesCount,
+            finalCount: finalGamesCount,
+            totalGames: filtered.length,
+            totalPoints,
+            averageScore
+          });
+
+          // Update live updates
+          if (filtered.length > 0) {
+            const newUpdates = [
+              { id: 1, sport: 'all', time: 'Just now', text: `Loaded ${filtered.length} ${selectedSport === 'all' ? 'games' : selectedSport + ' games'}` },
+              { id: 2, sport: 'all', time: '1 min ago', text: `${liveGamesCount} games currently live` },
+              { id: 3, sport: 'all', time: '2 min ago', text: 'Real-time updates enabled' }
+            ];
+            setLiveUpdates(newUpdates);
+          }
+          
+          setSuccess(`✅ Loaded ${games.length} live games from backend`);
+          return; // EXIT EARLY - don't run any mock data code
+          
+        } else {
+          console.warn('⚠️ Backend returned invalid structure:', result);
+          throw new Error('Invalid response structure from backend');
+        }
+        
+      } catch (fetchError) {
+        console.error('❌ Backend fetch failed, using mock data:', fetchError);
+        throw new Error('Backend fetch failed');
+      }
+
+    } catch (error) {
+      console.error('❌ Error in loadLiveGames:', error);
+      setError('Backend temporarily unavailable. Showing demo data.');
+      
+      // ONLY use mock data if the fetch completely fails
+      let filtered = mockGamesData;
+      
+      // Apply sport filter to mock data
+      if (selectedSport !== 'all') {
+        filtered = mockGamesData.filter(game => game.sport === selectedSport);
+      }
+      
+      // Apply search filter to mock data
+      if (searchQuery) {
+        const searchLower = searchQuery.toLowerCase();
+        filtered = filtered.filter(game => 
           game.awayTeam.toLowerCase().includes(searchLower) ||
           game.homeTeam.toLowerCase().includes(searchLower) ||
           (game.arena || '').toLowerCase().includes(searchLower) ||
-          game.channel.toLowerCase().includes(searchLower)
+          (game.channel || '').toLowerCase().includes(searchLower)
         );
       }
       
-      setFilteredGames(games);
+      setFilteredGames(filtered);
+      setAllGames(mockGamesData);
       
-      // Calculate stats
-      const liveGamesCount = games.filter(game => game.status === 'live').length;
-      const finalGamesCount = games.filter(game => game.status === 'final').length;
-      const totalPoints = games.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
-      const averageScore = games.length > 0 ? Math.round(totalPoints / games.length) : 0;
-
+      // Calculate stats for mock data
+      const liveGamesCount = filtered.filter(game => game.status === 'live').length;
+      const finalGamesCount = filtered.filter(game => game.status === 'final').length;
+      const totalPoints = filtered.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
+      const averageScore = filtered.length > 0 ? Math.round(totalPoints / filtered.length) : 0;
+      
       setGameStats({
         liveCount: liveGamesCount,
         finalCount: finalGamesCount,
-        totalGames: games.length,
+        totalGames: filtered.length,
         totalPoints,
         averageScore
       });
       
-    } catch (error) {
-      console.error('Error loading live games:', error);
+      // Update live updates for mock data
+      const newUpdates = [
+        { id: 1, sport: 'all', time: 'Just now', text: 'Using demo data. Backend connection failed.' },
+        { id: 2, sport: 'all', time: '1 min ago', text: `${liveGamesCount} demo games currently live` },
+        { id: 3, sport: 'all', time: '2 min ago', text: 'Real-time updates disabled in demo mode' }
+      ];
+      setLiveUpdates(newUpdates);
+      
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedSport]);
+  }, [selectedSport, searchQuery]);
 
   useEffect(() => {
     loadLiveGames(false, searchQuery);
@@ -299,7 +321,7 @@ const LiveGamesScreen = () => {
     if (autoRefresh) {
       const interval = setInterval(() => {
         loadLiveGames(true, searchQuery);
-      }, 30000);
+      }, 30000); // 30 seconds
       
       return () => clearInterval(interval);
     }
@@ -313,6 +335,8 @@ const LiveGamesScreen = () => {
   const handleSearchSubmit = () => {
     if (searchInput.trim()) {
       setSearchQuery(searchInput.trim());
+    } else {
+      setSearchQuery('');
     }
   };
 
@@ -322,7 +346,7 @@ const LiveGamesScreen = () => {
     setSearchInput('');
   };
 
-  const handleGameSelect = (game: any) => {
+  const handleGameSelect = (game: Game) => {
     setSelectedGame(game);
     setGameDialogOpen(true);
   };
@@ -418,37 +442,40 @@ const LiveGamesScreen = () => {
         Filter by Sport
       </Typography>
       <Grid container spacing={2}>
-        {sports.map((sport) => (
-          <Grid item key={sport.id}>
-            <Card
-              sx={{
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                border: selectedSport === sport.id ? `3px solid ${sport.color}` : '2px solid #e5e7eb',
-                minWidth: 120,
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: 4
-                }
-              }}
-              onClick={() => handleSportChange(sport.id)}
-            >
-              <CardContent sx={{ textAlign: 'center' }}>
-                <Box sx={{ color: sport.color, mb: 1 }}>
-                  {sport.icon}
-                </Box>
-                <Typography variant="body2" fontWeight="medium">
-                  {sport.name}
-                </Typography>
-                <Badge
-                  badgeContent={sport.count}
-                  color="primary"
-                  sx={{ mt: 1 }}
-                />
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
+        {sports.map((sport) => {
+          const count = allGames.filter(g => sport.id === 'all' || g.sport === sport.id).length;
+          return (
+            <Grid item key={sport.id}>
+              <Card
+                sx={{
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  border: selectedSport === sport.id ? `3px solid ${sport.color}` : '2px solid #e5e7eb',
+                  minWidth: 120,
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4
+                  }
+                }}
+                onClick={() => handleSportChange(sport.id)}
+              >
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Box sx={{ color: sport.color, mb: 1 }}>
+                    {sport.icon}
+                  </Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    {sport.name}
+                  </Typography>
+                  <Badge
+                    badgeContent={count}
+                    color="primary"
+                    sx={{ mt: 1 }}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
       </Grid>
     </Paper>
   );
@@ -516,7 +543,7 @@ const LiveGamesScreen = () => {
     </Paper>
   );
 
-  const renderGameCard = (game: any) => {
+  const renderGameCard = (game: Game) => {
     const isLive = game.status === 'live';
     const isFinal = game.status === 'final';
     
@@ -554,7 +581,7 @@ const LiveGamesScreen = () => {
           <Grid container spacing={3} alignItems="center" sx={{ mb: 3 }}>
             <Grid item xs={5}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Avatar sx={{ bgcolor: game.awayColor, width: 40, height: 40 }}>
+                <Avatar sx={{ bgcolor: game.awayColor || '#1d428a', width: 40, height: 40 }}>
                   {game.awayTeam.charAt(0)}
                 </Avatar>
                 <Box>
@@ -562,7 +589,7 @@ const LiveGamesScreen = () => {
                     {game.awayTeam.split(' ').pop()}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {game.awayRecord}
+                    {game.awayRecord || '0-0'}
                   </Typography>
                 </Box>
               </Box>
@@ -586,10 +613,10 @@ const LiveGamesScreen = () => {
                     {game.homeTeam.split(' ').pop()}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {game.homeRecord}
+                    {game.homeRecord || '0-0'}
                   </Typography>
                 </Box>
-                <Avatar sx={{ bgcolor: game.homeColor, width: 40, height: 40 }}>
+                <Avatar sx={{ bgcolor: game.homeColor || '#552583', width: 40, height: 40 }}>
                   {game.homeTeam.charAt(0)}
                 </Avatar>
               </Box>
@@ -597,17 +624,17 @@ const LiveGamesScreen = () => {
           </Grid>
           
           {/* Game Info */}
-          <Box sx={{ display: 'flex', gap: 3, mb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 3, mb: 2, flexWrap: 'wrap' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <LocationOnIcon fontSize="small" color="action" />
               <Typography variant="body2">
-                {game.arena || game.stadium}
+                {game.arena || 'Unknown Arena'}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <TvIcon fontSize="small" color="action" />
               <Typography variant="body2">
-                {game.broadcast?.network || game.channel}
+                {game.broadcast?.network || game.channel || 'TBD'}
               </Typography>
             </Box>
             {game.attendance && (
@@ -639,20 +666,20 @@ const LiveGamesScreen = () => {
           )}
           
           {/* Action Buttons */}
-          <Box sx={{ display: 'flex', gap: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             <Button
               variant="contained"
               startIcon={<BarChartIcon />}
               onClick={() => handleGameSelect(game)}
-              fullWidth
+              sx={{ flex: 1, minWidth: '120px' }}
             >
               View Stats
             </Button>
             <Button
               variant="outlined"
               startIcon={<PlayCircleIcon />}
-              onClick={() => alert(`Watch ${game.awayTeam} vs ${game.homeTeam} live on ${game.broadcast?.network || game.channel}`)}
-              fullWidth
+              onClick={() => alert(`Watch ${game.awayTeam} vs ${game.homeTeam} live on ${game.broadcast?.network || game.channel || 'available channels'}`)}
+              sx={{ flex: 1, minWidth: '120px' }}
             >
               Watch
             </Button>
@@ -660,7 +687,7 @@ const LiveGamesScreen = () => {
               variant="outlined"
               startIcon={<VideocamIcon />}
               onClick={() => alert(`View highlights for ${game.awayTeam} vs ${game.homeTeam}`)}
-              fullWidth
+              sx={{ flex: 1, minWidth: '120px' }}
             >
               Highlights
             </Button>
@@ -723,7 +750,7 @@ const LiveGamesScreen = () => {
         <>
           <DialogTitle>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Avatar sx={{ bgcolor: selectedGame.awayColor }}>
+              <Avatar sx={{ bgcolor: selectedGame.awayColor || '#1d428a' }}>
                 {selectedGame.awayTeam.charAt(0)}
               </Avatar>
               <Typography variant="h6">
@@ -746,7 +773,7 @@ const LiveGamesScreen = () => {
                       {selectedGame.awayTeam}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Record: {selectedGame.awayRecord}
+                      Record: {selectedGame.awayRecord || '0-0'}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       Color: 
@@ -754,7 +781,7 @@ const LiveGamesScreen = () => {
                         display: 'inline-block',
                         width: 20, 
                         height: 20, 
-                        backgroundColor: selectedGame.awayColor,
+                        backgroundColor: selectedGame.awayColor || '#1d428a',
                         ml: 1,
                         verticalAlign: 'middle',
                         borderRadius: '50%'
@@ -771,7 +798,7 @@ const LiveGamesScreen = () => {
                       {selectedGame.homeTeam}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Record: {selectedGame.homeRecord}
+                      Record: {selectedGame.homeRecord || '0-0'}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       Color: 
@@ -779,7 +806,7 @@ const LiveGamesScreen = () => {
                         display: 'inline-block',
                         width: 20, 
                         height: 20, 
-                        backgroundColor: selectedGame.homeColor,
+                        backgroundColor: selectedGame.homeColor || '#552583',
                         ml: 1,
                         verticalAlign: 'middle',
                         borderRadius: '50%'
@@ -799,13 +826,13 @@ const LiveGamesScreen = () => {
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <LocationOnIcon fontSize="small" color="action" />
                         <Typography variant="body2">
-                          <strong>Arena:</strong> {selectedGame.arena || selectedGame.stadium}
+                          <strong>Arena:</strong> {selectedGame.arena || 'Unknown Arena'}
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <TvIcon fontSize="small" color="action" />
                         <Typography variant="body2">
-                          <strong>Channel:</strong> {selectedGame.broadcast?.network || selectedGame.channel}
+                          <strong>Channel:</strong> {selectedGame.broadcast?.network || selectedGame.channel || 'TBD'}
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -815,9 +842,8 @@ const LiveGamesScreen = () => {
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <ScheduleIcon fontSize="small" color="action" />
                         <Typography variant="body2">
-                          <strong>Period:</strong> {selectedGame.period || selectedGame.quarter} • {selectedGame.timeRemaining || '0:00'}
+                          <strong>Period:</strong> {selectedGame.period} • {selectedGame.timeRemaining}
                         </Typography>
                       </Box>
                     </Box>
@@ -859,7 +885,7 @@ const LiveGamesScreen = () => {
             <Button 
               variant="contained" 
               component={Link}
-              to={`/analytics?team=${selectedGame.awayTeam}&sport=${selectedGame.sport}`}
+              to={`/advanced-analytics?team=${selectedGame.awayTeam}&sport=${selectedGame.sport}`}
             >
               View Advanced Analytics
             </Button>
@@ -869,11 +895,14 @@ const LiveGamesScreen = () => {
     </Dialog>
   );
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-          <CircularProgress />
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh', flexDirection: 'column', gap: 3 }}>
+          <CircularProgress size={60} />
+          <Typography variant="h6">
+            Loading live games from backend...
+          </Typography>
         </Box>
       </Container>
     );
@@ -881,6 +910,29 @@ const LiveGamesScreen = () => {
 
   return (
     <Container maxWidth="lg">
+      {/* Error/Success Snackbars */}
+      <Snackbar 
+        open={!!error} 
+        autoHideDuration={6000} 
+        onClose={() => setError(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="warning" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      </Snackbar>
+      
+      <Snackbar 
+        open={!!success} 
+        autoHideDuration={3000} 
+        onClose={() => setSuccess(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="success" onClose={() => setSuccess(null)}>
+          {success}
+        </Alert>
+      </Snackbar>
+
       {renderHeader()}
       {renderSportSelector()}
       {renderLiveStats()}
@@ -890,6 +942,9 @@ const LiveGamesScreen = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h5">
             {selectedSport === 'all' ? 'All Sports' : selectedSport} Games
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
+              Source: {import.meta.env.VITE_API_BASE ? 'Backend API' : 'Demo Data'}
+            </Typography>
           </Typography>
           <Chip
             label={`${gameStats.liveCount} LIVE`}
@@ -944,11 +999,9 @@ const LiveGamesScreen = () => {
         <Typography variant="body2">
           🔄 Auto-refreshing every 30 seconds • Last updated: {new Date().toLocaleTimeString()}
         </Typography>
-        {searchQuery && (
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            Tip: Try searching by team names like "Warriors Lakers" or arena names
-          </Typography>
-        )}
+        <Typography variant="body2" sx={{ mt: 1 }}>
+          Backend URL: {import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app'}
+        </Typography>
       </Paper>
       
       {renderGameDialog()}
