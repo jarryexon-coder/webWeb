@@ -8,3 +8,5 @@ local-dev/
 .env.local
 .vercel
 .env*.local
+*.backup*
+*.broken-backup
