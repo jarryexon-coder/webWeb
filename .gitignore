@@ -6,3 +6,5 @@ dist/
 local-dev/
 *.local
 .env.local
+.vercel
+.env*.local

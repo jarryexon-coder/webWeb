@@ -1,33 +1,6 @@
+// src/layouts/Layout.tsx
 import React, { useState } from 'react'
-import {
-  SportsFootball as SportsFootballIcon,
-  Newspaper as NewspaperIcon,
-  EmojiEvents as EmojiEventsIcon,
-  Person as PersonIcon,
-  Feed as FeedIcon,
-  AcUnit as AcUnitIcon,
-  Analytics as AnalyticsIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  AccountTree as AccountTreeIcon,
-  Insights as InsightsIcon,
-  Timeline as TimelineIcon,
-  ShowChart as ShowChartIcon,
-  Key as KeyIcon,
-  Casino as CasinoIcon,
-  SportsFootball as SportsFootballIcon,
-  Newspaper as NewspaperIcon,
-  EmojiEvents as EmojiEventsIcon,
-  Person as PersonIcon,
-  Feed as FeedIcon,
-  AcUnit as AcUnitIcon,
-  Analytics as AnalyticsIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  AccountTree as AccountTreeIcon,
-  Insights as InsightsIcon,
-  Timeline as TimelineIcon,
-  ShowChart as ShowChartIcon,
-  Key as KeyIcon,
-  Casino as CasinoIcon, Outlet } from 'react-router-dom'
+import { Outlet, Link } from 'react-router-dom'
 import {
   AppBar,
   Box,
@@ -59,20 +32,6 @@ import {
   ShowChart as ShowChartIcon,
   Key as KeyIcon,
   Casino as CasinoIcon,
-  SportsFootball as SportsFootballIcon,
-  Newspaper as NewspaperIcon,
-  EmojiEvents as EmojiEventsIcon,
-  Person as PersonIcon,
-  Feed as FeedIcon,
-  AcUnit as AcUnitIcon,
-  Analytics as AnalyticsIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  AccountTree as AccountTreeIcon,
-  Insights as InsightsIcon,
-  Timeline as TimelineIcon,
-  ShowChart as ShowChartIcon,
-  Key as KeyIcon,
-  Casino as CasinoIcon,
   Menu as MenuIcon,
   Home as HomeIcon,
   FlashOn as FlashIcon,
@@ -82,6 +41,7 @@ import {
   Star as StarIcon,
   Login as LoginIcon,
   BugReport as BugReportIcon,
+  SportsBasketball as SportsBasketballIcon,
 } from '@mui/icons-material'
 
 const drawerWidth = 240
@@ -96,7 +56,7 @@ const menuItems = [
   { text: 'Sports Wire', icon: <FeedIcon />, path: '/sports-wire' },
   { text: 'NHL Trends', icon: <AcUnitIcon />, path: '/nhl-trends' },
   { text: 'Match Analytics', icon: <AnalyticsIcon />, path: '/match-analytics' },
-  { text: 'Daily Picks', icon: <AutoAwesomeIcon />, path: '/daily-picks' },
+  { text: 'Daily Picks', icon: <SparklesIcon />, path: '/daily-picks' },
   { text: 'Parlay Architect', icon: <AccountTreeIcon />, path: '/parlay-architect' },
   { text: 'Advanced Analytics', icon: <InsightsIcon />, path: '/advanced-analytics' },
   { text: 'Predictions Outcome', icon: <TimelineIcon />, path: '/predictions-outcome' },
@@ -106,7 +66,7 @@ const menuItems = [
   { text: 'Subscription', icon: <StarIcon />, path: '/subscription' },
   { text: 'Login', icon: <LoginIcon />, path: '/login' },
   { text: 'Diagnostic', icon: <BugReportIcon />, path: '/diagnostic' },
-];
+]
 
 const Layout = () => {
   const theme = useTheme()
@@ -127,7 +87,7 @@ const Layout = () => {
       <List>
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
-            <ListItemButton href={item.path}>
+            <ListItemButton component={Link} to={item.path}>
               <ListItemIcon sx={{ color: 'primary.main' }}>
                 {item.icon}
               </ListItemIcon>

@@ -193,12 +193,61 @@ const MatchAnalyticsScreen = () => {
   const [activeTab, setActiveTab] = useState('conditions');
   const [refreshing, setRefreshing] = useState(false);
   const [filteredGames, setFilteredGames] = useState<any[]>([]);
+  const [selectedSport, setSelectedSport] = useState<'NFL' | 'NBA'>('NFL');
+  const [games, setGames] = useState<any[]>(MOCK_DATA.nfl.games);
+  const [analytics, setAnalytics] = useState<any>(null);
 
   // Combine all games
   const allGames = [
     ...MOCK_DATA.nfl.games,
     ...MOCK_DATA.nba.games,
   ];
+
+  // Add this fetch function near your existing useEffect
+  const fetchAnalyticsData = async () => {
+    try {
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const sport = selectedSport.toLowerCase(); // 'nba' or 'nfl'
+      
+      console.log(`🎯 Fetching ${sport} analytics from: ${apiBaseUrl}/api/${sport}/analytics`);
+      
+      const response = await fetch(`${apiBaseUrl}/api/${sport}/analytics`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const result = await response.json();
+      
+      if (result.success && !result.documentation) {
+        console.log(`✅ Using REAL ${sport} analytics data`);
+        // Update based on your data structure
+        if (result.games) {
+          setGames(result.games);
+          if (result.games.length > 0) {
+            setSelectedGame(result.games[0]);
+          }
+        }
+        if (result.analytics) setAnalytics(result.analytics);
+      } else {
+        console.warn(`⚠️ ${sport} analytics endpoint returns documentation`);
+        throw new Error('Endpoint returns documentation');
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to fetch ${selectedSport} analytics, using mock:`, error);
+      // Use your existing MOCK_DATA
+      const mockData = MOCK_DATA[selectedSport.toLowerCase() as keyof typeof MOCK_DATA];
+      setGames(mockData.games);
+      setSelectedGame(mockData.games[0]);
+    }
+  };
+
+  // Call this in your useEffect for selectedSport
+  useEffect(() => {
+    fetchAnalyticsData();
+  }, [selectedSport]);
 
   // Handle search
   const handleSearchSubmit = (query = null) => {
@@ -225,18 +274,22 @@ const MatchAnalyticsScreen = () => {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await fetchAnalyticsData();
       setRefreshing(false);
     } catch (error) {
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedSport]);
 
   const handleSelectGame = (game: any) => {
     setSelectedGame(game);
     setSearchQuery('');
     setSearchInput('');
     setFilteredGames([]);
+    // Update selected sport based on the selected game
+    if (game.sport === 'NFL' || game.sport === 'NBA') {
+      setSelectedSport(game.sport);
+    }
   };
 
   const generateAIAnalysis = async (promptType: string) => {
@@ -824,7 +877,7 @@ const MatchAnalyticsScreen = () => {
               <MoreHoriz /> More Games
             </Typography>
             <Grid container spacing={2}>
-              {allGames
+              {games
                 .filter(game => game.id !== selectedGame.id)
                 .slice(0, 3)
                 .map((game) => (

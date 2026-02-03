@@ -73,6 +73,21 @@ import {
 import { Link } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 
+// Prediction interface moved here
+interface Prediction {
+  id: string;
+  question: string;
+  category: string;
+  yesPrice: string;
+  noPrice: string;
+  volume: string;
+  analysis: string;
+  expires: string;
+  confidence: number;
+  edge: string;
+  aiGenerated?: boolean;
+}
+
 // Styled Components
 const GradientCard = styled(Card)(({ theme }) => ({
   background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${alpha(theme.palette.primary.main, 0.8)} 100%)`,
@@ -416,6 +431,7 @@ const KalshiNewsFeed = ({ newsItems }: { newsItems: any[] }) => {
 const KalshiPredictionsScreen = () => {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMarket, setSelectedMarket] = useState('All');
   const [customPrompt, setCustomPrompt] = useState('');
@@ -431,13 +447,124 @@ const KalshiPredictionsScreen = () => {
     recordDay: '$466M',
   });
 
-  // Mock data for development
-  const [kalshiPredictions, setKalshiPredictions] = useState([
-    { id: '1', question: 'Will Trump win the 2024 presidential election?', category: 'Politics', yesPrice: '0.52', noPrice: '0.48', volume: 'High', analysis: 'Current polls show close race with slight edge to Trump', expires: 'Nov 5, 2024', confidence: 65, edge: '+2.5%' },
-    { id: '2', question: 'Will US recession occur in 2024?', category: 'Economics', yesPrice: '0.38', noPrice: '0.62', volume: 'High', analysis: 'Economic indicators mixed, but strong labor market reduces probability', expires: 'Dec 31, 2024', confidence: 68, edge: '+2.9%' },
-    { id: '3', question: 'Will Chiefs win Super Bowl 2025?', category: 'Sports', yesPrice: '0.28', noPrice: '0.72', volume: 'High', analysis: 'Strong team but competitive field reduces probability', expires: 'Feb 9, 2025', confidence: 62, edge: '+1.5%' },
-    { id: '4', question: 'Will Taylor Swift win Album of the Year Grammy 2025?', category: 'Culture', yesPrice: '0.55', noPrice: '0.45', volume: 'High', analysis: 'Critical acclaim and commercial success create strong candidacy', expires: 'Feb 2, 2025', confidence: 70, edge: '+3.6%' },
+  // State for predictions - using the Prediction interface
+  const [kalshiPredictions, setKalshiPredictions] = useState<Prediction[]>([
+    { 
+      id: '1', 
+      question: 'Will Trump win the 2024 presidential election?', 
+      category: 'Politics', 
+      yesPrice: '0.52', 
+      noPrice: '0.48', 
+      volume: 'High', 
+      analysis: 'Current polls show close race with slight edge to Trump', 
+      expires: 'Nov 5, 2024', 
+      confidence: 65, 
+      edge: '+2.5%',
+      aiGenerated: false 
+    },
+    { 
+      id: '2', 
+      question: 'Will US recession occur in 2024?', 
+      category: 'Economics', 
+      yesPrice: '0.38', 
+      noPrice: '0.62', 
+      volume: 'High', 
+      analysis: 'Economic indicators mixed, but strong labor market reduces probability', 
+      expires: 'Dec 31, 2024', 
+      confidence: 68, 
+      edge: '+2.9%',
+      aiGenerated: false 
+    },
+    { 
+      id: '3', 
+      question: 'Will Chiefs win Super Bowl 2025?', 
+      category: 'Sports', 
+      yesPrice: '0.28', 
+      noPrice: '0.72', 
+      volume: 'High', 
+      analysis: 'Strong team but competitive field reduces probability', 
+      expires: 'Feb 9, 2025', 
+      confidence: 62, 
+      edge: '+1.5%',
+      aiGenerated: false 
+    },
+    { 
+      id: '4', 
+      question: 'Will Taylor Swift win Album of the Year Grammy 2025?', 
+      category: 'Culture', 
+      yesPrice: '0.55', 
+      noPrice: '0.45', 
+      volume: 'High', 
+      analysis: 'Critical acclaim and commercial success create strong candidacy', 
+      expires: 'Feb 2, 2025', 
+      confidence: 70, 
+      edge: '+3.6%',
+      aiGenerated: false 
+    },
   ]);
+
+  const [filteredPredictions, setFilteredPredictions] = useState<Prediction[]>(kalshiPredictions);
+
+  // Add fetch function for Kalshi predictions
+  const fetchKalshiPredictions = async () => {
+    try {
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      
+      console.log(`🎯 Fetching Kalshi predictions from: ${apiBaseUrl}/api/kalshi/predictions`);
+      
+      const response = await fetch(`${apiBaseUrl}/api/kalshi/predictions`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.success && Array.isArray(result.predictions)) {
+          console.log(`✅ Using REAL Kalshi predictions: ${result.predictions.length}`);
+          setKalshiPredictions(result.predictions as Prediction[]);
+          setFilteredPredictions(result.predictions as Prediction[]);
+          return;
+        }
+      }
+      
+      console.warn('⚠️ Kalshi endpoint not implemented or returns invalid data');
+      throw new Error('Kalshi endpoint not ready');
+      
+    } catch (error) {
+      console.error('❌ Failed to fetch Kalshi predictions, using mock:', error);
+      // Keep using your mock data structure
+    }
+  };
+
+  // Call in useEffect on component mount
+  useEffect(() => {
+    fetchKalshiPredictions();
+  }, []);
+
+  // Updated loadPredictions function to use API
+  const loadPredictions = async () => {
+    setLoading(true);
+    try {
+      await fetchKalshiPredictions();
+    } catch (error) {
+      console.error('Failed to load predictions:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Updated refresh function
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchKalshiPredictions();
+      setRefreshing(false);
+    } catch (error) {
+      console.error('Failed to refresh predictions:', error);
+      setRefreshing(false);
+    }
+  };
 
   const kalshiNews = [
     {
@@ -448,7 +575,6 @@ const KalshiPredictionsScreen = () => {
       timestamp: 'Today',
       url: 'https://example.com/kalshi-growth'
     },
-    // ... other news items
   ];
 
   const markets = [
@@ -470,12 +596,15 @@ const KalshiPredictionsScreen = () => {
     'Will Barbie win Best Picture Oscar?',
   ];
 
-  const loadPredictions = async () => {
-    setLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setLoading(false);
-  };
+  // Update filtered predictions when predictions change
+  useEffect(() => {
+    if (selectedMarket === 'All') {
+      setFilteredPredictions(kalshiPredictions);
+    } else {
+      const filtered = kalshiPredictions.filter(prediction => prediction.category === selectedMarket);
+      setFilteredPredictions(filtered);
+    }
+  }, [selectedMarket, kalshiPredictions]);
 
   const generateKalshiPrediction = async (prompt: string) => {
     if (!prompt.trim()) return;
@@ -485,7 +614,7 @@ const KalshiPredictionsScreen = () => {
       // Simulate generation
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      const newPrediction = {
+      const newPrediction: Prediction = {
         id: `kalshi-${Date.now()}`,
         question: `AI-Generated: ${prompt}`,
         category: 'AI Generated',
@@ -514,10 +643,6 @@ const KalshiPredictionsScreen = () => {
     // Implement trade logic
     console.log(`Placing ${side} trade for $${amount} on market ${marketId}`);
   };
-
-  const filteredPredictions = selectedMarket === 'All'
-    ? kalshiPredictions
-    : kalshiPredictions.filter(prediction => prediction.category === selectedMarket);
 
   const getCategoryColor = (category: string) => {
     switch (category) {
@@ -554,9 +679,15 @@ const KalshiPredictionsScreen = () => {
               <IconButton sx={{ color: 'white' }}>
                 <SearchIcon />
               </IconButton>
-              <IconButton sx={{ color: 'white' }}>
-                <RefreshIcon />
-              </IconButton>
+              <Tooltip title="Refresh Predictions">
+                <IconButton 
+                  sx={{ color: 'white' }} 
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                >
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
             </Box>
           </Box>
 
@@ -796,7 +927,7 @@ const KalshiPredictionsScreen = () => {
                               color: getCategoryColor(prediction.category),
                             }}
                           />
-                          {false && (
+                          {prediction.aiGenerated && (
                             <StyledChip
                               icon={<SparklesIcon />}
                               label="AI Generated"

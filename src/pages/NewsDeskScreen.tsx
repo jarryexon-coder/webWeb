@@ -98,6 +98,52 @@ interface WinPost {
   date: string;
 }
 
+// MOCK_ARTICLES for fallback
+const MOCK_ARTICLES: UpdateItem[] = [
+  {
+    id: '1',
+    title: '🎉 New Community Features!',
+    description: 'Share your winning results with the community and celebrate success together!',
+    date: 'Just now',
+    category: 'feature',
+  },
+  {
+    id: '2',
+    title: '📊 Enhanced Analytics Dashboard',
+    description: 'New player tracking metrics and real-time performance insights available.',
+    date: '2h ago',
+    category: 'update',
+  },
+  {
+    id: '3',
+    title: '🏆 Weekly Leaderboard Added',
+    description: 'Compete with other users and track your success on our new leaderboard.',
+    date: '1d ago',
+    category: 'feature',
+  },
+  {
+    id: '4',
+    title: '💡 Pro Betting Tips',
+    description: 'New section with expert insights and statistical analysis for smarter betting.',
+    date: '2d ago',
+    category: 'tip',
+  },
+  {
+    id: '5',
+    title: '⚡ Performance Improvements',
+    description: 'Faster loading times and smoother animations in the latest update.',
+    date: '3d ago',
+    category: 'performance',
+  },
+  {
+    id: '6',
+    title: '🐛 Bug Fixes',
+    description: 'Fixed issues with notifications and data synchronization.',
+    date: '4d ago',
+    category: 'fix',
+  },
+];
+
 const NewsDeskScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -144,31 +190,90 @@ const NewsDeskScreen = () => {
     { value: 'NCAAF', label: 'NCAAF', icon: <TrendingIcon fontSize="small" /> },
   ];
 
-  useEffect(() => {
-    logScreenView('NewsDeskScreen');
-    fetchUpdates();
-  }, []);
+  // NEW: Fetch news from API
+  const fetchNews = async () => {
+    try {
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      console.log(`🎯 Fetching news from: ${apiBaseUrl}/api/news`);
+      
+      const response = await fetch(`${apiBaseUrl}/api/news`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const result = await response.json();
+      console.log('✅ News data received:', result);
+      
+      if (result && result.success && Array.isArray(result.news)) {
+        console.log(`✅ Using REAL news: ${result.news.length} articles`);
+        
+        // Convert API news to UpdateItem format
+        const apiUpdates: UpdateItem[] = result.news.map((article: any, index: number) => ({
+          id: article.id || `api-${index}`,
+          title: article.title || 'News Update',
+          description: article.description || article.content || 'No description available',
+          date: article.date || article.createdAt || 'Recently',
+          category: 'announcement'
+        }));
+        
+        setUpdates(apiUpdates);
+        setFilteredUpdates(apiUpdates);
+      } else {
+        throw new Error('Invalid news data structure');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to fetch news, using mock data:', error);
+      // Fallback to mock
+      setUpdates(MOCK_ARTICLES);
+      setFilteredUpdates(MOCK_ARTICLES);
+    }
+  };
 
-  const fetchUpdates = async (isRefresh = false) => {
+  // Helper function to map API categories to our categories
+  const mapCategory = (category: string): UpdateItem['category'] => {
+    const categoryMap: Record<string, UpdateItem['category']> = {
+      'feature': 'feature',
+      'update': 'update',
+      'bug': 'fix',
+      'announcement': 'announcement',
+      'performance': 'performance',
+      'tip': 'tip',
+      'news': 'announcement',
+      'improvement': 'update'
+    };
+    
+    return categoryMap[category.toLowerCase()] || 'announcement';
+  };
+
+  // Fetch all data including news from API and mock wins
+  const fetchAllData = async (isRefresh = false) => {
     try {
       setLoading(true);
       
-      // Mock data
-      const updatesData = getSampleUpdates();
+      // Fetch news from API
+      await fetchNews();
+      
+      // Fetch winning posts (mock data for now)
       const winsData = getSampleWins();
-
-      setUpdates(updatesData);
-      setFilteredUpdates(updatesData);
       setWinningPosts(winsData);
       setFilteredWinningPosts(winsData);
+      
       setLastRefresh(new Date());
 
       // Mock read status
       const mockReadStatus: Record<string, boolean> = {};
-      updatesData.forEach(update => {
-        mockReadStatus[update.id] = Math.random() > 0.5;
-      });
-      setReadStatus(mockReadStatus);
+      // This will be populated after updates are set
+      setTimeout(() => {
+        const currentUpdates = updates.length > 0 ? updates : MOCK_ARTICLES;
+        const updatedReadStatus: Record<string, boolean> = {};
+        currentUpdates.forEach(update => {
+          updatedReadStatus[update.id] = Math.random() > 0.5;
+        });
+        setReadStatus(updatedReadStatus);
+      }, 100);
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -177,6 +282,12 @@ const NewsDeskScreen = () => {
       setRefreshing(false);
     }
   };
+
+  // Update useEffect to use fetchAllData
+  useEffect(() => {
+    logScreenView('NewsDeskScreen');
+    fetchAllData();
+  }, []);
 
   const handleSearchSubmit = async () => {
     const query = searchInput.trim();
@@ -220,6 +331,11 @@ const NewsDeskScreen = () => {
     setFilteredUpdates(updates);
     setFilteredWinningPosts(winningPosts);
     setShowSearchHistory(false);
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchAllData(true);
   };
 
   const markAsRead = (id: string) => {
@@ -291,51 +407,6 @@ const NewsDeskScreen = () => {
     return colors[sport] || '#6b7280';
   };
 
-  const getSampleUpdates = (): UpdateItem[] => [
-    {
-      id: '1',
-      title: '🎉 New Community Features!',
-      description: 'Share your winning results with the community and celebrate success together!',
-      date: 'Just now',
-      category: 'feature',
-    },
-    {
-      id: '2',
-      title: '📊 Enhanced Analytics Dashboard',
-      description: 'New player tracking metrics and real-time performance insights available.',
-      date: '2h ago',
-      category: 'update',
-    },
-    {
-      id: '3',
-      title: '🏆 Weekly Leaderboard Added',
-      description: 'Compete with other users and track your success on our new leaderboard.',
-      date: '1d ago',
-      category: 'feature',
-    },
-    {
-      id: '4',
-      title: '💡 Pro Betting Tips',
-      description: 'New section with expert insights and statistical analysis for smarter betting.',
-      date: '2d ago',
-      category: 'tip',
-    },
-    {
-      id: '5',
-      title: '⚡ Performance Improvements',
-      description: 'Faster loading times and smoother animations in the latest update.',
-      date: '3d ago',
-      category: 'performance',
-    },
-    {
-      id: '6',
-      title: '🐛 Bug Fixes',
-      description: 'Fixed issues with notifications and data synchronization.',
-      date: '4d ago',
-      category: 'fix',
-    },
-  ];
-
   const getSampleWins = (): WinPost[] => [
     {
       id: 'win-1',
@@ -397,11 +468,16 @@ const NewsDeskScreen = () => {
               Updates & Winning Results
             </Typography>
           </Box>
-          {unreadCount > 0 && (
-            <Badge badgeContent={unreadCount} color="error">
-              <NotificationsIcon />
-            </Badge>
-          )}
+          <Box display="flex" alignItems="center" gap={1}>
+            {unreadCount > 0 && (
+              <Badge badgeContent={unreadCount} color="error">
+                <NotificationsIcon />
+              </Badge>
+            )}
+            <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white' }}>
+              <RefreshIcon />
+            </IconButton>
+          </Box>
         </Box>
 
         {/* Search Bar */}
@@ -690,6 +766,9 @@ const NewsDeskScreen = () => {
       {renderHeader()}
       
       <Container maxWidth="lg">
+        {/* Loading/Refreshing Indicator */}
+        {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+        
         {/* Search Results Info */}
         {searchQuery && (
           <Paper sx={{ 

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+// src/pages/PrizePicksScreen.tsx
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -10,17 +11,24 @@ import {
   Container,
   Paper,
   Chip,
+  IconButton,
   TextField,
   InputAdornment,
+  LinearProgress,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  Divider,
   Avatar,
+  Tooltip,
   Badge,
+  Fade,
+  CardActions,
   Stack,
   CircularProgress,
   Alert,
+  alpha,
   useTheme,
   Tabs,
   Tab,
@@ -28,10 +36,20 @@ import {
   Stepper,
   Step,
   StepLabel,
+  StepContent,
   List,
   ListItem,
+  ListItemIcon,
   ListItemText,
   ListItemAvatar,
+  Breadcrumbs,
+  Link as MuiLink,
+  Pagination,
+  Switch,
+  FormControlLabel,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   Table,
   TableBody,
   TableCell,
@@ -45,21 +63,31 @@ import {
   EmojiEvents as TrophyIcon,
   TrendingUp as TrendingUpIcon,
   Analytics as AnalyticsIcon,
+  CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
   SportsBasketball as BasketballIcon,
   SportsFootball as FootballIcon,
   SportsBaseball as BaseballIcon,
   SportsHockey as HockeyIcon,
   SportsSoccer as SoccerIcon,
+  AccessTime as TimeIcon,
   PlayArrow as PlayIcon,
   Bookmark as BookmarkIcon,
   Lightbulb as LightbulbIcon,
   Security as ShieldIcon,
+  Diamond as DiamondIcon,
   Refresh as RefreshIcon,
+  FilterList as FilterIcon,
+  ExpandMore as ExpandMoreIcon,
   AttachMoney as MoneyIcon,
+  Star as StarIcon,
+  LocalFireDepartment as FireIcon,
   EmojiEvents as EventsIcon,
+  Timeline as TimelineIcon,
+  Speed as SpeedIcon,
   AutoAwesome as AutoAwesomeIcon,
 } from '@mui/icons-material';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 
 // Styled Components
@@ -76,6 +104,13 @@ const StyledCard = styled(Card)(({ theme }) => ({
     transform: 'translateY(-4px)',
     boxShadow: theme.shadows[8],
   },
+}));
+
+const WinnerBadge = styled(Chip)(({ theme }) => ({
+  backgroundColor: theme.palette.success.main,
+  color: theme.palette.success.contrastText,
+  fontWeight: 'bold',
+  fontSize: '0.75rem',
 }));
 
 // ConfidenceBadge with custom interface

@@ -1,6 +1,7 @@
 // src/services/NFLService.js - NFL-specific API calls with real API integration
 
 // API Configuration
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
 const NFL_API_KEY = '2I2qnUQq7kcNAuhaCo3ElrgoVfHcdSBNoKXGTiqj';
 const THE_ODDS_API_KEY = '14befba45463dc61bb71eb3da6428e9e';
 const RAPIDAPI_KEY_PLAYER_PROPS = 'a0e5e0f406mshe0e4ba9f4f4daeap19859djsnfd92d0da5884';
@@ -12,6 +13,51 @@ const NFL_API_BASE = 'https://api.sportradar.us/nfl';
 const ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const RAPIDAPI_BASE = 'https://api-football-v1.p.rapidapi.com/v3';
 
+// Helper function from file 1
+const fetchNFLData = async (endpoint) => {
+  try {
+    console.log(`🎯 Fetching NFL data from: ${API_BASE}${endpoint}`);
+    
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    
+    const result = await response.json();
+    console.log(`NFL response for ${endpoint}:`, result);
+    
+    // Check if it's actual data or documentation
+    if (result.success && !result.documentation) {
+      // Real data
+      return result;
+    } else if (result.availableEndpoints) {
+      // Documentation page - backend not implemented yet
+      console.warn(`⚠️ NFL endpoint ${endpoint} returns documentation, not data`);
+      throw new Error('Endpoint returns documentation, not data');
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error(`❌ NFL backend issue for ${endpoint}:`, error.message);
+    console.warn('⚠️ Falling back to mock NFL data');
+    return getMockNFLData();
+  }
+};
+
+// Helper function for mock data fallback
+const getMockNFLData = () => {
+  return {
+    success: false,
+    message: 'Using mock data',
+    games: [],
+    standings: [],
+    teams: []
+  };
+};
+
 export const NFLService = {
   // ========== PRIMARY BACKEND API METHODS ==========
   
@@ -19,11 +65,9 @@ export const NFLService = {
     try {
       console.log('📡 Fetching NFL games from backend...');
       
-      // Use fetchFromBackend if available, otherwise use mock data
+      // Use the new fetchNFLData function instead of fetchFromBackend
       try {
-        // Dynamic import to avoid issues if fetchFromBackend doesn't exist
-        const { fetchFromBackend } = await import('../config/api');
-        const response = await fetchFromBackend('NFL', 'games');
+        const response = await fetchNFLData('/api/nfl/games');
         
         if (response && response.success) {
           console.log(`✅ NFL: ${response.games?.length || 0} games loaded`);
@@ -46,8 +90,7 @@ export const NFLService = {
       console.log('📡 Fetching NFL standings from backend...');
       
       try {
-        const { fetchFromBackend } = await import('../config/api');
-        const response = await fetchFromBackend('NFL', 'standings');
+        const response = await fetchNFLData('/api/nfl/standings');
         
         if (response && response.success) {
           console.log(`✅ NFL: Standings loaded from backend`);
@@ -70,8 +113,7 @@ export const NFLService = {
       console.log('📡 Fetching NFL teams from backend...');
       
       try {
-        const { fetchFromBackend } = await import('../config/api');
-        const response = await fetchFromBackend('NFL', 'teams');
+        const response = await fetchNFLData('/api/nfl/teams');
         
         if (response && response.success) {
           console.log(`✅ NFL: Teams loaded from backend`);
@@ -93,8 +135,7 @@ export const NFLService = {
   async getGameSummary(gameId) {
     try {
       try {
-        const { fetchFromBackend } = await import('../config/api');
-        const response = await fetchFromBackend('NFL', 'gameSummary', { gameId });
+        const response = await fetchNFLData(`/api/nfl/game/${gameId}`);
         
         if (response && response.message && response.message.includes('Stub')) {
           console.log('⚠️ Using stub game summary - backend not fully implemented');
@@ -501,8 +542,8 @@ export const NFLService = {
         name: 'Backend API', 
         test: async () => {
           try {
-            const games = await this.fetchGames();
-            return games && games.length > 0;
+            const response = await fetchNFLData('/api/nfl/games');
+            return response && response.success && response.games && response.games.length > 0;
           } catch (error) {
             return false;
           }
@@ -564,3 +605,4 @@ export const NFLService = {
 };
 
 export default NFLService;
+export { fetchNFLData };

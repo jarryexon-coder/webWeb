@@ -30,8 +30,6 @@ import {
   alpha,
   useTheme
 } from '@mui/material';
-// import NewReleasesIcon from '@mui/icons-material/NewReleases'; // Removed duplicate
-// import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // Removed duplicate
 import {
   ArrowBack,
   Search,
@@ -58,8 +56,6 @@ import {
   TrendingDown,
   Timer
 } from '@mui/icons-material';
-// import NewReleasesIcon from '@mui/icons-material/NewReleases'; // Removed duplicate
-// import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // Removed duplicate
 import { useNavigate } from 'react-router-dom';
 
 const SPORT_COLORS = {
@@ -79,6 +75,32 @@ const CATEGORY_COLORS = {
   'advanced-stats': '#14b8a6',
   'beat-writers': '#3b82f6'
 };
+
+// MOCK_ARTICLES for fallback
+const MOCK_ARTICLES = Array.from({ length: 12 }, (_, i) => {
+  const categories = ['analytics', 'injuries', 'trades', 'rosters', 'draft'];
+  const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+  
+  return {
+    id: i + 1,
+    title: `Sports News Article ${i + 1}: Breaking Update on Major Event`,
+    category: randomCategory,
+    excerpt: 'This is a detailed excerpt about the latest developments in sports analytics and insights from beat writers...',
+    time: `${Math.floor(Math.random() * 24)}h ago`,
+    views: `${Math.floor(Math.random() * 20) + 5}K`,
+    writer: ['Sarah Johnson', 'Mike Smith', 'Alex Rodriguez'][Math.floor(Math.random() * 3)],
+    isBookmarked: Math.random() > 0.5,
+    sentiment: ['positive', 'neutral', 'negative'][Math.floor(Math.random() * 3)],
+    engagement: Math.floor(Math.random() * 30) + 70,
+    readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
+    aiScore: Math.floor(Math.random() * 40) + 60,
+    metrics: {
+      socialShares: Math.floor(Math.random() * 1000),
+      comments: Math.floor(Math.random() * 500),
+      saves: Math.floor(Math.random() * 200)
+    }
+  };
+});
 
 const MOCK_TRENDING_STORIES = [
   {
@@ -131,31 +153,6 @@ const MOCK_TRENDING_STORIES = [
   }
 ];
 
-const MOCK_ARTICLES = Array.from({ length: 12 }, (_, i) => {
-  const categories = ['analytics', 'injuries', 'trades', 'rosters', 'draft'];
-  const randomCategory = categories[Math.floor(Math.random() * categories.length)];
-  
-  return {
-    id: i + 1,
-    title: `Sports News Article ${i + 1}: Breaking Update on Major Event`,
-    category: randomCategory,
-    excerpt: 'This is a detailed excerpt about the latest developments in sports analytics and insights from beat writers...',
-    time: `${Math.floor(Math.random() * 24)}h ago`,
-    views: `${Math.floor(Math.random() * 20) + 5}K`,
-    writer: ['Sarah Johnson', 'Mike Smith', 'Alex Rodriguez'][Math.floor(Math.random() * 3)],
-    isBookmarked: Math.random() > 0.5,
-    sentiment: ['positive', 'neutral', 'negative'][Math.floor(Math.random() * 3)],
-    engagement: Math.floor(Math.random() * 30) + 70,
-    readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
-    aiScore: Math.floor(Math.random() * 40) + 60,
-    metrics: {
-      socialShares: Math.floor(Math.random() * 1000),
-      comments: Math.floor(Math.random() * 500),
-      saves: Math.floor(Math.random() * 200)
-    }
-  };
-});
-
 const SportsWireScreen = () => {
   const theme = useTheme();
   const navigate = useNavigate();
@@ -168,9 +165,11 @@ const SportsWireScreen = () => {
   const [filteredArticles, setFilteredArticles] = useState(MOCK_ARTICLES);
   const [bookmarked, setBookmarked] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [trendingStories, setTrendingStories] = useState(MOCK_TRENDING_STORIES);
   
   const categories = [
-//     { id: 'beat-writers', name: 'Beat Writers', icon: <NewReleasesIcon />, color: '#3b82f6' }, // Removed duplicate
+    { id: 'beat-writers', name: 'Beat Writers', icon: <NewReleasesIcon />, color: '#3b82f6' },
     { id: 'injuries', name: 'Injury News', icon: <MedicalServices />, color: '#ef4444' },
     { id: 'rosters', name: 'Rosters', icon: <People />, color: '#8b5cf6' },
     { id: 'analytics', name: 'Analytics', icon: <Analytics />, color: '#10b981' },
@@ -201,6 +200,225 @@ const SportsWireScreen = () => {
       { category: 'trades', count: 19 }
     ]
   });
+
+  // NEW: Fetch news from API
+  const fetchNews = async () => {
+    try {
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      console.log(`🎯 Fetching sports wire news from: ${apiBaseUrl}/api/news`);
+      
+      const response = await fetch(`${apiBaseUrl}/api/news`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const result = await response.json();
+      console.log('✅ Sports wire news received:', result);
+      
+      if (result && result.success && Array.isArray(result.news)) {
+        console.log(`✅ Using REAL sports wire news: ${result.news.length} articles`);
+        
+        // Convert API news to our article format
+        const apiArticles = result.news.map((article: any, index: number) => ({
+          id: article.id || `api-${index}`,
+          title: article.title || 'Sports News Update',
+          category: article?.category || 'analytics',
+          excerpt: article.description || article.content || 'Latest sports news and analysis...',
+          time: `${Math.floor(Math.random() * 24)}h ago`,
+          views: `${Math.floor(Math.random() * 20) + 5}K`,
+          writer: article.author || article.writer || 'Sports Reporter',
+          isBookmarked: false,
+          sentiment: undefined,
+          engagement: Math.floor(Math.random() * 30) + 70,
+          readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
+          aiScore: Math.floor(Math.random() * 40) + 60,
+          metrics: {
+            socialShares: Math.floor(Math.random() * 1000),
+            comments: Math.floor(Math.random() * 500),
+            saves: Math.floor(Math.random() * 200)
+          }
+        }));
+        
+        setArticles(apiArticles);
+        setFilteredArticles(apiArticles);
+        
+        // Update trending stories if API provides them
+        if (result.trending && Array.isArray(result.trending)) {
+          const apiTrendingStories = result.trending.map((story: any, index: number) => ({
+            id: story.id || `trending-${index}`,
+            title: story.title || 'Trending Story',
+            category: story?.category || 'analytics',
+            time: '1h ago',
+            views: `${Math.floor(Math.random() * 20) + 5}K`,
+            trending: true,
+            emoji: undefined,
+            type: undefined,
+            writer: story.author || 'Sports Analyst',
+            sport: story.sport || 'NBA',
+            sentiment: undefined,
+            engagement: Math.floor(Math.random() * 30) + 70,
+            readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
+            aiInsights: story.insights || ['AI analysis available', 'Data-driven insights']
+          }));
+          setTrendingStories(apiTrendingStories);
+        }
+        
+      } else {
+        throw new Error('Invalid sports wire data structure');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to fetch sports wire news, using mock data:', error);
+      // Fallback to mock
+      setArticles(MOCK_ARTICLES);
+      setFilteredArticles(MOCK_ARTICLES);
+      setTrendingStories(MOCK_TRENDING_STORIES);
+    }
+  };
+
+  // Helper function to map API categories to our categories
+  const mapCategory = (category: string): string => {
+    if (!category) return 'analytics';
+    
+    const categoryMap: Record<string, string> = {
+      'analytics': 'analytics',
+      'injury': 'injuries',
+      'injuries': 'injuries',
+      'trade': 'trades',
+      'trades': 'trades',
+      'roster': 'rosters',
+      'rosters': 'rosters',
+      'draft': 'draft',
+      'free agency': 'free-agency',
+      'free-agency': 'free-agency',
+      'stats': 'advanced-stats',
+      'advanced-stats': 'advanced-stats',
+      'news': 'beat-writers',
+      'beat-writers': 'beat-writers'
+    };
+    
+    return categoryMap[category.toLowerCase()] || 'analytics';
+  };
+
+  // Helper function to format time
+  const formatTime = (dateString?: string): string => {
+    if (!dateString) return `${Math.floor(Math.random() * 24)}h ago`;
+    
+    try {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+      
+      if (diffHours < 1) return 'Just now';
+      if (diffHours < 24) return `${diffHours}h ago`;
+      
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d ago`;
+    } catch {
+      return `${Math.floor(Math.random() * 24)}h ago`;
+    }
+  };
+
+  // Helper function to get sentiment
+  const getSentiment = (sentiment?: string): string => {
+    if (!sentiment) return ['positive', 'neutral', 'negative'][Math.floor(Math.random() * 3)];
+    
+    const sentimentMap: Record<string, string> = {
+      'positive': 'positive',
+      'negative': 'negative',
+      'neutral': 'neutral',
+      'up': 'positive',
+      'down': 'negative'
+    };
+    
+    return sentimentMap[sentiment.toLowerCase()] || 'neutral';
+  };
+
+  // Helper function to get emoji for category
+  const getEmoji = (category: string): string => {
+    const emojiMap: Record<string, string> = {
+      'analytics': '📊',
+      'injuries': '🏥',
+      'trades': '📝',
+      'rosters': '👥',
+      'draft': '🎓',
+      'free-agency': '💰',
+      'advanced-stats': '📈',
+      'beat-writers': '📰'
+    };
+    
+    return emojiMap[category] || '📰';
+  };
+
+  // Helper function to get type for trending stories
+  const getType = (category: string): string => {
+    const typeMap: Record<string, string> = {
+      'analytics': 'ANALYSIS',
+      'injuries': 'BREAKING',
+      'trades': 'RUMOR',
+      'rosters': 'UPDATE',
+      'draft': 'INSIGHT',
+      'free-agency': 'REPORT',
+      'advanced-stats': 'ANALYSIS',
+      'beat-writers': 'NEWS'
+    };
+    
+    return typeMap[category] || 'NEWS';
+  };
+
+  // Fetch all data including news from API
+  const fetchAllData = async (isRefresh = false) => {
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      
+      await fetchNews();
+      
+    } catch (error) {
+      console.error('Error fetching sports wire data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Initialize data fetching
+  useEffect(() => {
+    fetchAllData();
+  }, []);
+
+  // Filter articles when category or search changes
+  useEffect(() => {
+    let filtered = articles;
+    
+    // Filter by category
+    if (selectedCategory !== 'beat-writers') {
+      filtered = filtered.filter(article => article.category === selectedCategory);
+    }
+    
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(article => 
+        article.title.toLowerCase().includes(query) ||
+        article.excerpt.toLowerCase().includes(query) ||
+        article.writer.toLowerCase().includes(query)
+      );
+    }
+    
+    // Filter trending stories if needed
+    if (trendingFilter !== 'all') {
+      // For trending filter, we could add additional filtering logic
+      // This is a placeholder for future implementation
+    }
+    
+    setFilteredArticles(filtered);
+  }, [selectedCategory, searchQuery, trendingFilter, articles]);
 
   const getSentimentIcon = (sentiment: string) => {
     switch(sentiment) {
@@ -238,6 +456,11 @@ const SportsWireScreen = () => {
       navigator.clipboard.writeText(`${article.title}\n\n${article.excerpt}`);
       alert('Article link copied to clipboard!');
     }
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchAllData(true);
   };
 
   const renderTrendingCard = (story: any) => (
@@ -347,8 +570,8 @@ const SportsWireScreen = () => {
           <IconButton size="small" onClick={() => handleShare(story)}>
             <Share sx={{ fontSize: 16 }} />
           </IconButton>
-          <IconButton size="small" onClick={() => alert(story.aiInsights.join('\n'))}>
-//             <AutoAwesomeIcon sx={{ fontSize: 16, color: '#8b5cf6' }} /> // Removed duplicate
+          <IconButton size="small" onClick={() => alert(story.aiInsights?.join('\n') || 'No AI insights available')}>
+            <AutoAwesomeIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
           </IconButton>
           <IconButton size="small">
             <BookmarkBorder sx={{ fontSize: 16 }} />
@@ -522,12 +745,12 @@ const SportsWireScreen = () => {
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.totalArticles}
+                {articles.length}
               </Typography>
               <Typography variant="caption" color="text.secondary">Total Articles</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={Math.min(analyticsMetrics.totalArticles, 100)} 
+                value={Math.min(articles.length, 100)} 
                 sx={{ mt: 1 }}
               />
             </Paper>
@@ -654,6 +877,9 @@ const SportsWireScreen = () => {
                 Beat writers, analytics & roster insights
               </Typography>
             </Box>
+            <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white' }}>
+              <AccessTime />
+            </IconButton>
           </Box>
           
           <Grid container spacing={2} sx={{ mt: 2 }}>
@@ -700,6 +926,9 @@ const SportsWireScreen = () => {
           </Grid>
         </Box>
       </Paper>
+
+      {/* Loading/Refreshing Indicator */}
+      {(loading || refreshing) && <LinearProgress sx={{ mb: 2 }} />}
 
       {/* Search Bar */}
       <Paper sx={{ p: 2, mb: 3 }}>
@@ -759,10 +988,10 @@ const SportsWireScreen = () => {
         </Tabs>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="body2" fontWeight="bold">
-            {categories.find(c => c.id === selectedCategory)?.name} • {articles.length} articles
+            {categories.find(c => c.id === selectedCategory)?.name} • {filteredArticles.length} articles
           </Typography>
           <Badge 
-            badgeContent={analyticsMetrics.totalArticles} 
+            badgeContent={articles.length} 
             color="error"
             sx={{ cursor: 'pointer' }}
           >
@@ -807,7 +1036,7 @@ const SportsWireScreen = () => {
         
         {/* Trending Cards */}
         <Box sx={{ overflow: 'auto', whiteSpace: 'nowrap', pb: 1 }}>
-          {MOCK_TRENDING_STORIES.map(renderTrendingCard)}
+          {trendingStories.map(renderTrendingCard)}
         </Box>
       </Paper>
 
@@ -819,7 +1048,7 @@ const SportsWireScreen = () => {
               📰 Latest {categories.find(c => c.id === selectedCategory)?.name}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {analyticsMetrics.totalArticles} articles • {analyticsMetrics.engagementRate}% avg engagement
+              {articles.length} articles • {analyticsMetrics.engagementRate}% avg engagement
             </Typography>
           </Box>
           <Chip 
@@ -830,20 +1059,44 @@ const SportsWireScreen = () => {
           />
         </Box>
         
-        {filteredArticles.map(renderArticleCard)}
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+            <CircularProgress />
+            <Typography sx={{ ml: 2 }}>Loading sports wire articles...</Typography>
+          </Box>
+        ) : filteredArticles.length > 0 ? (
+          filteredArticles.map(renderArticleCard)
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Newspaper sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              No articles found
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {searchQuery ? 'Try a different search term' : 'Check back soon for new articles'}
+            </Typography>
+            {searchQuery && (
+              <Button onClick={() => setSearchQuery('')}>
+                Clear Search
+              </Button>
+            )}
+          </Box>
+        )}
         
-        <Box sx={{ textAlign: 'center', py: 3 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            No more articles to load
-          </Typography>
-          <Button 
-            startIcon={<Analytics />}
-            onClick={() => setShowAnalyticsModal(true)}
-            variant="outlined"
-          >
-            View Analytics Dashboard
-          </Button>
-        </Box>
+        {!loading && filteredArticles.length > 0 && (
+          <Box sx={{ textAlign: 'center', py: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Showing {filteredArticles.length} of {articles.length} articles
+            </Typography>
+            <Button 
+              startIcon={<Analytics />}
+              onClick={() => setShowAnalyticsModal(true)}
+              variant="outlined"
+            >
+              View Analytics Dashboard
+            </Button>
+          </Box>
+        )}
       </Paper>
 
       <AnalyticsDashboard />

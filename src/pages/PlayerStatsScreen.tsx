@@ -87,7 +87,7 @@ import {
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 
-// Mock data for players
+// Mock data for players (fallback)
 const mockPlayers = {
   NFL: [
     {
@@ -604,40 +604,90 @@ const PlayerStatsScreen = () => {
   
   const [searchHistory, setSearchHistory] = useState<string[]>(['Patrick Mahomes', 'Quarterbacks', 'Top receivers']);
   const [analyticsEvents, setAnalyticsEvents] = useState<any[]>([]);
-
-  const players = mockPlayers[selectedSport as keyof typeof mockPlayers] || [];
   
-  const filteredPlayers = players.filter(player => {
-    // Filter by position
-    if (selectedPosition !== 'All Positions' && player.position !== selectedPosition) {
-      return false;
-    }
-    
-    // Filter by team
-    if (selectedTeam !== 'All Teams' && !player.team.includes(selectedTeam)) {
-      return false;
-    }
-    
-    // Filter by search
-    if (searchInput) {
-      const searchLower = searchInput.toLowerCase();
-      return (
-        player.name.toLowerCase().includes(searchLower) ||
-        player.team.toLowerCase().includes(searchLower) ||
-        player.position.toLowerCase().includes(searchLower)
-      );
-    }
-    
-    return true;
-  });
+  // NEW STATE: Store players from API
+  const [players, setPlayers] = useState<any[]>([]);
+  const [filteredPlayers, setFilteredPlayers] = useState<any[]>([]);
 
-  useEffect(() => {
-    // Simulate loading data
-    setTimeout(() => {
+  // NEW FUNCTION: Fetch player stats from API
+  const fetchPlayerStats = async () => {
+    try {
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      console.log(`🎯 Fetching players from: ${apiBaseUrl}/api/players`);
+      
+      const response = await fetch(`${apiBaseUrl}/api/players`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ Player data received:', result);
+      
+      if (result && result.success && Array.isArray(result.players)) {
+        console.log(`✅ Using REAL player data: ${result.players.length} players`);
+        // Filter by sport if needed
+        const filtered = result.players.filter((p: any) => p.sport === selectedSport);
+        setPlayers(filtered);
+        setFilteredPlayers(filtered);
+      } else {
+        throw new Error('Invalid player data structure');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to fetch player stats, using mock data:', error);
+      // Fallback to mock
+      const players = mockPlayers[selectedSport as keyof typeof mockPlayers] || [];
+      setPlayers(players);
+      setFilteredPlayers(players);
+    } finally {
       setLoading(false);
       setRefreshing(false);
-    }, 1000);
+    }
+  };
+
+  // NEW FUNCTION: Handle refresh
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchPlayerStats();
+  };
+
+  // NEW: Fetch data on component mount and when selectedSport changes
+  useEffect(() => {
+    fetchPlayerStats();
   }, [selectedSport]);
+
+  // NEW: Filter players based on filters and search
+  useEffect(() => {
+    const filtered = players.filter(player => {
+      // Filter by position
+      if (selectedPosition !== 'All Positions' && player.position !== selectedPosition) {
+        return false;
+      }
+      
+      // Filter by team
+      if (selectedTeam !== 'All Teams' && !player.team.includes(selectedTeam)) {
+        return false;
+      }
+      
+      // Filter by search
+      if (searchInput) {
+        const searchLower = searchInput.toLowerCase();
+        return (
+          player.name.toLowerCase().includes(searchLower) ||
+          player.team.toLowerCase().includes(searchLower) ||
+          player.position.toLowerCase().includes(searchLower)
+        );
+      }
+      
+      return true;
+    });
+    
+    setFilteredPlayers(filtered);
+  }, [players, selectedPosition, selectedTeam, searchInput]);
 
   const calculateAdvancedMetrics = (player: any) => {
     if (!player || !player.stats) return {};
@@ -714,13 +764,6 @@ const PlayerStatsScreen = () => {
     setAdvancedMetrics(metrics);
   };
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  };
-
   const handleSearch = () => {
     if (searchInput.trim()) {
       setSearchHistory([searchInput.trim(), ...searchHistory.slice(0, 4)]);
@@ -775,7 +818,7 @@ const PlayerStatsScreen = () => {
               <Grid item xs={6} sm={3} key={index}>
                 <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
                   <Typography variant="h6" fontWeight="bold">
-                    '0'
+                    {String(value)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
@@ -913,7 +956,7 @@ const PlayerStatsScreen = () => {
               <Grid item xs={6} sm={4} md={3} key={index}>
                 <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
                   <Typography variant="h6" fontWeight="bold">
-                    '0'
+                   {String(value)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}

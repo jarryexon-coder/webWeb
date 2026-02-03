@@ -1,8 +1,8 @@
 // src/services/NHLService.js - NHL-specific API calls with real API integration
 import { apiService } from './ApiService';
-import { fetchFromBackend } from '../config/api';
 
 // API Configuration from your provided keys
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
 const NHL_API_KEY = '2I2qnUQq7kcNAuhaCo3ElrgoVfHcdSBNoKXGTiqj';
 const THE_ODDS_API_KEY = '14befba45463dc61bb71eb3da6428e9e';
 const RAPIDAPI_KEY_PLAYER_PROPS = 'a0e5e0f406mshe0e4ba9f4f4daeap19859djsnfd92d0da5884';
@@ -14,13 +14,59 @@ const SPORTRADAR_NHL_BASE = 'https://api.sportradar.us/nhl';
 const ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const RAPIDAPI_BASE = 'https://api-nhl-v1.p.rapidapi.com';
 
+// Helper function from file 1
+export const fetchNHLData = async (endpoint) => {
+  try {
+    console.log(`🎯 Fetching NHL data from: ${API_BASE}${endpoint}`);
+    
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    }
+
+    const result = await response.json();
+    console.log(`✅ NHL backend response for ${endpoint}:`, result);
+    
+    return result;
+    
+  } catch (error) {
+    console.error(`❌ NHL backend fetch failed for ${endpoint}:`, error);
+    console.warn('⚠️ Falling back to mock NHL data');
+    // Return mock data ONLY if backend fails
+    return getMockNHLData();
+  }
+};
+
+// Helper function for mock data fallback
+const getMockNHLData = () => {
+  return {
+    success: false,
+    message: 'Using mock data',
+    games: [],
+    standings: [],
+    teams: [],
+    players: []
+  };
+};
+
+// Update all functions (fixing typo from fetchNFLData to fetchNHLData)
+export const getNHLGames = () => fetchNHLData('/api/nhl/games');
+export const getNHLStandings = () => fetchNHLData('/api/nhl/standings');
+export const getNHLPlayerStats = () => fetchNHLData('/api/nhl/players');
+
 export const NHLService = {
   // ========== PRIMARY BACKEND API METHODS ==========
   
   async fetchGames(season = '2024') {
     try {
       console.log('📡 Fetching NHL games from backend...');
-      const response = await fetchFromBackend('NHL', 'games');
+      const response = await fetchNHLData('/api/nhl/games');
       
       if (response && response.success) {
         console.log(`✅ NHL: ${response.games?.length || 0} games loaded`);
@@ -38,7 +84,7 @@ export const NHLService = {
   async fetchStandings() {
     try {
       console.log('📡 Fetching NHL standings from backend...');
-      const response = await fetchFromBackend('NHL', 'standings');
+      const response = await fetchNHLData('/api/nhl/standings');
       if (response && response.success) {
         console.log(`✅ NHL: Standings loaded from backend`);
         return response.standings || [];
@@ -54,7 +100,7 @@ export const NHLService = {
   async fetchTeams() {
     try {
       console.log('📡 Fetching NHL teams from backend...');
-      const response = await fetchFromBackend('NHL', 'teams');
+      const response = await fetchNHLData('/api/nhl/teams');
       if (response && response.success) {
         console.log(`✅ NHL: Teams loaded from backend`);
         return response.teams || [];
@@ -69,7 +115,7 @@ export const NHLService = {
   
   async getGameSummary(gameId) {
     try {
-      const response = await fetchFromBackend('NHL', 'gameSummary', { gameId });
+      const response = await fetchNHLData(`/api/nhl/game/${gameId}`);
       
       if (response && response.message && response.message.includes('Stub')) {
         console.log('⚠️ Using stub game summary - backend not fully implemented');
@@ -586,7 +632,77 @@ export const NHLService = {
       awayTeam: 'NHL Away Team',
       status: 'scheduled',
     };
+  },
+
+  // ========== API HEALTH CHECK ==========
+  
+  async checkApiHealth() {
+    const endpoints = [
+      { 
+        name: 'Backend API', 
+        test: async () => {
+          try {
+            const response = await fetchNHLData('/api/nhl/games');
+            return response && response.success && response.games && response.games.length > 0;
+          } catch (error) {
+            return false;
+          }
+        }
+      },
+      { 
+        name: 'Sportradar NHL', 
+        url: `${SPORTRADAR_NHL_BASE}/trial/v8/en/games/2024/R/schedule.json`
+      },
+      { 
+        name: 'ESPN NHL', 
+        url: `${ESPN_NHL_BASE}/scoreboard` 
+      }
+    ];
+
+    const results = [];
+    
+    for (const endpoint of endpoints) {
+      try {
+        const startTime = Date.now();
+        
+        if (endpoint.test) {
+          // Test backend API
+          const isHealthy = await endpoint.test();
+          const latency = Date.now() - startTime;
+          
+          results.push({
+            name: endpoint.name,
+            status: isHealthy ? '✅ Healthy' : '⚠️ Issues',
+            latency: `${latency}ms`
+          });
+        } else {
+          // Test external APIs
+          const params = endpoint.name.includes('Sportradar') ? { api_key: NHL_API_KEY, format: 'json' } : {};
+          const url = new URL(endpoint.url);
+          Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+          
+          const response = await fetch(url.toString(), { timeout: 5000 });
+          const latency = Date.now() - startTime;
+          
+          results.push({
+            name: endpoint.name,
+            status: response.status === 200 ? '✅ Healthy' : '⚠️ Issues',
+            statusCode: response.status,
+            latency: `${latency}ms`
+          });
+        }
+      } catch (error) {
+        results.push({
+          name: endpoint.name,
+          status: '❌ Unavailable',
+          error: error.message
+        });
+      }
+    }
+    
+    return results;
   }
 };
 
 export default NHLService;
+export { fetchNHLData };

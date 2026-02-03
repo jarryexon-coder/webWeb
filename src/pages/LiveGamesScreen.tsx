@@ -204,13 +204,13 @@ const LiveGamesScreen = () => {
           // Apply sport filter
           let filtered = games;
           if (selectedSport !== 'all') {
-            filtered = games.filter(game => game.sport === selectedSport);
+            filtered = games.filter((game: any) => game.sport === selectedSport);
           }
           
           // Apply search filter
           if (searchText) {
             const searchLower = searchText.toLowerCase();
-            filtered = filtered.filter(game => 
+            filtered = filtered.filter((game: any) => 
               game.awayTeam.toLowerCase().includes(searchLower) ||
               game.homeTeam.toLowerCase().includes(searchLower) ||
               (game.arena || '').toLowerCase().includes(searchLower) ||
@@ -223,9 +223,9 @@ const LiveGamesScreen = () => {
           setAllGames(games);
           
           // Calculate stats
-          const liveGamesCount = filtered.filter(game => game.status === 'live').length;
-          const finalGamesCount = filtered.filter(game => game.status === 'final').length;
-          const totalPoints = filtered.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
+          const liveGamesCount = filtered.filter((game: any) => game.status === 'live').length;
+          const finalGamesCount = filtered.filter((game: any) => game.status === 'final').length;
+          const totalPoints = filtered.reduce((sum: number, game: any) => sum + game.awayScore + game.homeScore, 0);
           const averageScore = filtered.length > 0 ? 
             Math.round(totalPoints / filtered.length) : 0;
           
