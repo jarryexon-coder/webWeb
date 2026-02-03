@@ -1,6 +1,9 @@
-// src/App.tsx - COMPLETE PRODUCTION VERSION
+// src/App.tsx - COMPLETE PRODUCTION VERSION WITH ERROR BOUNDARY
 import React, { useEffect } from 'react'
 import { Routes, Route, Navigate, BrowserRouter as Router } from 'react-router-dom'
+
+// Import Global Error Boundary
+import GlobalErrorBoundary from './components/GlobalErrorBoundary'
 
 // Import all screens
 import Layout from './layouts/Layout'
@@ -71,38 +74,40 @@ function App() {
   }, [])
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          {/* Home Route */}
-          <Route index element={<HomeScreen />} />
-          
-          {/* All Application Routes */}
-          <Route path="live-games" element={<LiveGamesScreen />} />
-          <Route path="nfl-analytics" element={<NFLAnalyticsScreen />} />
-          <Route path="news-desk" element={<NewsDeskScreen />} />
-          <Route path="fantasy-hub" element={<FantasyHubScreen />} />
-          <Route path="player-stats" element={<PlayerStatsScreen />} />
-          <Route path="sports-wire" element={<SportsWireScreen />} />
-          <Route path="nhl-trends" element={<NHLTrendsScreen />} />
-          <Route path="match-analytics" element={<MatchAnalyticsScreen />} />
-          <Route path="daily-picks" element={<DailyPicksScreen />} />
-          <Route path="parlay-architect" element={<ParlayArchitectScreen />} />
-          <Route path="advanced-analytics" element={<AdvancedAnalyticsScreen />} />
-          <Route path="predictions-outcome" element={<PredictionsOutcomeScreen />} />
-          <Route path="kalshi-predictions" element={<KalshiPredictionsScreen />} />
-          <Route path="secret-phrases" element={<SecretPhraseScreen />} />
-          <Route path="prize-picks" element={<PrizePicksScreen />} />
-          <Route path="subscription" element={<SubscriptionScreen />} />
-          <Route path="login" element={<LoginScreenEnhanced />} />
-          <Route path="diagnostic" element={<DiagnosticScreen />} />
-          <Route path="backend-test" element={<BackendTestScreen />} />
-          
-          {/* Catch-all redirect */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </Router>
+    <GlobalErrorBoundary>
+      <Router>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            {/* Home Route */}
+            <Route index element={<HomeScreen />} />
+            
+            {/* All Application Routes */}
+            <Route path="live-games" element={<LiveGamesScreen />} />
+            <Route path="nfl-analytics" element={<NFLAnalyticsScreen />} />
+            <Route path="news-desk" element={<NewsDeskScreen />} />
+            <Route path="fantasy-hub" element={<FantasyHubScreen />} />
+            <Route path="player-stats" element={<PlayerStatsScreen />} />
+            <Route path="sports-wire" element={<SportsWireScreen />} />
+            <Route path="nhl-trends" element={<NHLTrendsScreen />} />
+            <Route path="match-analytics" element={<MatchAnalyticsScreen />} />
+            <Route path="daily-picks" element={<DailyPicksScreen />} />
+            <Route path="parlay-architect" element={<ParlayArchitectScreen />} />
+            <Route path="advanced-analytics" element={<AdvancedAnalyticsScreen />} />
+            <Route path="predictions-outcome" element={<PredictionsOutcomeScreen />} />
+            <Route path="kalshi-predictions" element={<KalshiPredictionsScreen />} />
+            <Route path="secret-phrases" element={<SecretPhraseScreen />} />
+            <Route path="prize-picks" element={<PrizePicksScreen />} />
+            <Route path="subscription" element={<SubscriptionScreen />} />
+            <Route path="login" element={<LoginScreenEnhanced />} />
+            <Route path="diagnostic" element={<DiagnosticScreen />} />
+            <Route path="backend-test" element={<BackendTestScreen />} />
+            
+            {/* Catch-all redirect */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </Router>
+    </GlobalErrorBoundary>
   )
 }
 
