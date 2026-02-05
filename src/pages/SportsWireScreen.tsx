@@ -212,13 +212,98 @@ interface TrendingProp {
   aiInsights?: string[];
 }
 
+// Helper function to safely extract array from hook response
+const extractArrayFromHook = (hookData: any): any[] => {
+  console.log('🔍 [extractArrayFromHook] Processing data:', {
+    rawData: hookData,
+    isArray: Array.isArray(hookData),
+    keys: hookData && typeof hookData === 'object' ? Object.keys(hookData) : 'N/A'
+  });
+  
+  if (Array.isArray(hookData)) {
+    console.log('✅ Data is already an array');
+    return hookData;
+  }
+  
+  if (!hookData || typeof hookData !== 'object') {
+    console.log('⚠️ Hook data is not an object or is null');
+    return [];
+  }
+  
+  // Check for different API response patterns
+  if (hookData.selections && Array.isArray(hookData.selections)) {
+    console.log('✅ Found selections array:', hookData.selections.length);
+    return hookData.selections;
+  }
+  
+  if (hookData.data && Array.isArray(hookData.data)) {
+    console.log('✅ Found data array');
+    return hookData.data;
+  }
+  
+  if (hookData.results && Array.isArray(hookData.results)) {
+    console.log('✅ Found results array');
+    return hookData.results;
+  }
+  
+  if (hookData.items && Array.isArray(hookData.items)) {
+    console.log('✅ Found items array');
+    return hookData.items;
+  }
+  
+  // If it's an object but we don't recognize the structure, return empty
+  console.log('⚠️ No recognized array structure found');
+  return [];
+};
+
+// Helper function to convert confidence string to number
+const convertConfidenceToNumber = (confidence: any): number => {
+  if (typeof confidence === 'number') return confidence;
+  if (typeof confidence === 'string') {
+    switch (confidence.toLowerCase()) {
+      case 'high': return 85;
+      case 'medium': return 65;
+      case 'low': return 45;
+      default:
+        // Try to parse as number
+        const num = parseInt(confidence);
+        return isNaN(num) ? 50 : Math.min(Math.max(num, 0), 100);
+    }
+  }
+  return 50; // Default
+};
+
+// Helper function to parse odds
+const parseOdds = (odds: any): string => {
+  if (!odds) return '+100';
+  if (typeof odds === 'string') return odds;
+  if (typeof odds === 'number') {
+    return odds > 0 ? `+${odds}` : odds.toString();
+  }
+  return '+100';
+};
+
 // Inside your component, replace fetch logic with:
 const SportsWireScreen = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   
-  const { data: playerProps, loading, error } = useSportsWire();
+  const { data: hookData, loading, error } = useSportsWire();
   
+  // Add debugging console logs
+  console.log('🔍 [SportsWireScreen] HOOKS DEBUG:', {
+    dataFromHook: {
+      value: hookData,
+      type: typeof hookData,
+      isArray: Array.isArray(hookData),
+      isObject: hookData && typeof hookData === 'object',
+      keys: hookData && typeof hookData === 'object' ? Object.keys(hookData) : 'N/A',
+      fullObject: hookData // Log the full object to see its structure
+    },
+    loading: loading,
+    error: error
+  });
+
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [trendingFilter, setTrendingFilter] = useState('all');
@@ -227,7 +312,93 @@ const SportsWireScreen = () => {
   const [bookmarked, setBookmarked] = useState<number[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [trendingProps, setTrendingProps] = useState<TrendingProp[]>(MOCK_TRENDING_PROPS);
+  const [processedPlayerProps, setProcessedPlayerProps] = useState<PlayerProp[]>([]);
   
+  // Process hook data to ensure it's an array
+  useEffect(() => {
+    console.log('🔄 [SportsWireScreen useEffect] Processing hook data:', { 
+      hookData, 
+      loading, 
+      error 
+    });
+    
+    // Check data validation
+    console.log('🔍 [SportsWireScreen useEffect] Data validation:', {
+      isDataValid: hookData && typeof hookData === 'object',
+      dataType: typeof hookData,
+      dataKeys: hookData && typeof hookData === 'object' ? Object.keys(hookData) : 'N/A'
+    });
+    
+    // Extract data from object structure
+    console.log('🔧 [SportsWireScreen useEffect] Extracted data:', {
+      // Common patterns to try
+      asArray: Array.isArray(hookData) ? hookData : 'Not an array',
+      fromDataProp: hookData?.data ? hookData.data : 'No .data property',
+      fromResultsProp: hookData?.results ? hookData.results : 'No .results property',
+      fromItemsProp: hookData?.items ? hookData.items : 'No .items property'
+    });
+
+    const extractedData = extractArrayFromHook(hookData);
+    
+    // Ensure all required fields exist and transform to PlayerProp format
+    const validatedData = extractedData.map((selection: any, index: number) => {
+      // Create the prop line string from type and line
+      const lineValue = typeof selection.line === 'number' ? selection.line.toFixed(1) : selection.line || '0.0';
+      const propLine = selection.type ? `${selection.type} ${lineValue}` : `Over ${lineValue}`;
+      
+      // Extract matchup from analysis if available
+      let matchup = 'Home vs Away';
+      if (selection.analysis) {
+        const match = selection.analysis.match(/in (.+?)$/);
+        if (match) matchup = match[1];
+      }
+      
+      // Calculate implied probability from odds (simplified calculation)
+      const oddsString = parseOdds(selection.odds);
+      let impliedProbability = 50;
+      if (oddsString.startsWith('+')) {
+        const oddsNum = parseInt(oddsString.substring(1));
+        if (!isNaN(oddsNum)) {
+          impliedProbability = Math.round(100 / (oddsNum / 100 + 1));
+        }
+      } else if (oddsString.startsWith('-')) {
+        const oddsNum = parseInt(oddsString.substring(1));
+        if (!isNaN(oddsNum)) {
+          impliedProbability = Math.round((oddsNum / (oddsNum + 100)) * 100);
+        }
+      }
+      
+      return {
+        id: selection.id || `selection-${index}`,
+        playerName: selection.player || selection.playerName || 'Unknown Player',
+        team: selection.team || 'Unknown Team',
+        sport: selection.sport || 'NBA',
+        propType: selection.stat ? selection.stat.charAt(0).toUpperCase() + selection.stat.slice(1) : 'Points',
+        line: propLine,
+        odds: oddsString,
+        impliedProbability: impliedProbability,
+        matchup: matchup,
+        time: selection.timestamp ? new Date(selection.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+        confidence: convertConfidenceToNumber(selection.confidence),
+        isBookmarked: false,
+        aiInsights: selection.analysis ? [selection.analysis] : []
+      };
+    });
+    
+    console.log('✅ [SportsWireScreen] Validated player props:', {
+      validatedLength: validatedData.length,
+      validatedData: validatedData.slice(0, 3), // Show first 3 items
+      usingMock: validatedData.length === 0
+    });
+    
+    // Use validated data or fallback to mock
+    const finalData = validatedData.length > 0 ? validatedData : MOCK_PLAYER_PROPS;
+    setProcessedPlayerProps(finalData);
+    
+    // Initial filter with the processed data
+    applyFilters(finalData, selectedCategory, searchQuery);
+  }, [hookData, selectedCategory, searchQuery]);
+
   const categories = [
     { id: 'all', name: 'All Sports', icon: <LocalFireDepartment />, color: '#ef4444' },
     { id: 'NBA', name: 'NBA', icon: <SportsBasketball />, color: '#ef4444' },
@@ -260,47 +431,70 @@ const SportsWireScreen = () => {
     ]
   });
 
-  // Filter props when category or search changes
-  useEffect(() => {
-    if (!playerProps || playerProps.length === 0) {
-      setFilteredProps(MOCK_PLAYER_PROPS);
+  // Helper function to apply filters
+  const applyFilters = (data: PlayerProp[], category: string, query: string) => {
+    if (!data || data.length === 0) {
+      setFilteredProps([]);
       return;
     }
 
-    // Cast playerProps to PlayerProp[] to help TypeScript
-    let filtered = [...playerProps] as PlayerProp[];
+    let filtered = [...data];
     
     // Filter by category
-    if (selectedCategory !== 'all') {
-      if (selectedCategory === 'value') {
+    if (category !== 'all') {
+      if (category === 'value') {
         filtered = filtered.filter(prop => {
-          const oddsValue = parseInt(prop.odds);
-          return oddsValue > 0 || prop.impliedProbability > 60;
+          // Safely parse odds
+          if (!prop.odds) return false;
+          
+          try {
+            const oddsString = prop.odds.toString();
+            // Remove + or - signs for parsing
+            const oddsValue = parseInt(oddsString.replace(/[+-]/, ''));
+            const isPositive = oddsString.startsWith('+');
+            
+            return isPositive || prop.impliedProbability > 60;
+          } catch (error) {
+            console.warn('Error parsing odds:', prop.odds, error);
+            return false;
+          }
         });
-      } else if (selectedCategory === 'high-confidence') {
+      } else if (category === 'high-confidence') {
         filtered = filtered.filter(prop => prop.confidence > 80);
       } else {
-        filtered = filtered.filter(prop => prop.sport === selectedCategory);
+        filtered = filtered.filter(prop => prop.sport === category);
       }
     }
     
     // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
+    if (query.trim()) {
+      const searchQueryLower = query.toLowerCase().trim();
       filtered = filtered.filter(prop => 
-        prop.playerName.toLowerCase().includes(query) ||
-        prop.team.toLowerCase().includes(query) ||
-        prop.propType.toLowerCase().includes(query)
+        prop.playerName.toLowerCase().includes(searchQueryLower) ||
+        prop.team.toLowerCase().includes(searchQueryLower) ||
+        prop.propType.toLowerCase().includes(searchQueryLower)
       );
     }
     
+    console.log('🎯 [SportsWireScreen] Filtered props:', {
+      originalCount: data.length,
+      filteredCount: filtered.length,
+      category,
+      query
+    });
+    
     setFilteredProps(filtered);
-  }, [selectedCategory, searchQuery, playerProps]);
+  };
 
   const getOddsColor = (odds: string) => {
+    // Handle undefined, null, or empty odds
+    if (!odds || typeof odds !== 'string') {
+      return '#6b7280'; // Default gray
+    }
+    
     if (odds.startsWith('+')) return '#10b981'; // Positive odds = green
     if (odds.startsWith('-')) return '#ef4444'; // Negative odds = red
-    return '#6b7280';
+    return '#6b7280'; // Default gray
   };
 
   const getConfidenceColor = (confidence: number) => {
@@ -698,12 +892,12 @@ const SportsWireScreen = () => {
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {playerProps?.length || 0}
+                {processedPlayerProps.length || 0}
               </Typography>
               <Typography variant="caption" color="text.secondary">Total Props</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={Math.min(playerProps?.length || 0, 100)} 
+                value={Math.min(processedPlayerProps.length || 0, 100)} 
                 sx={{ mt: 1 }}
               />
             </Paper>
@@ -794,10 +988,24 @@ const SportsWireScreen = () => {
     </Dialog>
   );
 
-  if (loading) return <div>Loading player props...</div>;
-  if (error) return <div>Error: {error}</div>;
+  if (loading) return (
+    <Container maxWidth="lg">
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading player props...</Typography>
+      </Box>
+    </Container>
+  );
   
-  // Use playerProps directly in your rendering
+  if (error) return (
+    <Container maxWidth="lg">
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Typography color="error">Error loading player props: {error.message}</Typography>
+      </Box>
+    </Container>
+  );
+
+  // Use processedPlayerProps instead of raw hook data
   return (
     <Container maxWidth="lg">
       {/* Header */}
@@ -814,7 +1022,7 @@ const SportsWireScreen = () => {
             </IconButton>
             <Box sx={{ flex: 1 }}>
               <Typography variant="h4" fontWeight="bold">
-                SportsWire ({playerProps?.length || 0} props)
+                SportsWire ({processedPlayerProps.length || 0} props)
               </Typography>
               <Typography variant="body1">
                 Player props, odds & analytics insights
@@ -934,7 +1142,7 @@ const SportsWireScreen = () => {
             {categories.find(c => c.id === selectedCategory)?.name} • {filteredProps.length} props
           </Typography>
           <Badge 
-            badgeContent={playerProps?.length || 0} 
+            badgeContent={processedPlayerProps?.length || 0} 
             color="error"
             sx={{ cursor: 'pointer' }}
           >
@@ -977,9 +1185,9 @@ const SportsWireScreen = () => {
           ))}
         </Box>
         
-        {/* Trending Cards */}
+        {/* Trending Cards - Safe iteration */}
         <Box sx={{ overflow: 'auto', whiteSpace: 'nowrap', pb: 1 }}>
-          {trendingProps.map(renderTrendingCard)}
+          {(Array.isArray(trendingProps) ? trendingProps : []).map(renderTrendingCard)}
         </Box>
       </Paper>
 
@@ -1002,13 +1210,14 @@ const SportsWireScreen = () => {
           />
         </Box>
         
-        {loading ? (
+        {loading || refreshing ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
             <Typography sx={{ ml: 2 }}>Loading player props...</Typography>
           </Box>
         ) : filteredProps.length > 0 ? (
-          filteredProps.map(renderPropCard)
+          // Safe iteration with Array.isArray check
+          (Array.isArray(filteredProps) ? filteredProps : []).map(renderPropCard)
         ) : (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Newspaper sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
@@ -1026,10 +1235,10 @@ const SportsWireScreen = () => {
           </Box>
         )}
         
-        {!loading && filteredProps.length > 0 && (
+        {!loading && !refreshing && filteredProps.length > 0 && (
           <Box sx={{ textAlign: 'center', py: 3 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Showing {filteredProps.length} of {playerProps?.length || 0} props
+              Showing {filteredProps.length} of {processedPlayerProps?.length || 0} props
             </Typography>
             <Button 
               startIcon={<Analytics />}

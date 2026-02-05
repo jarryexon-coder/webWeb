@@ -1,102 +1,166 @@
 // src/hooks/useSportsData.ts - UPDATED VERSION
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL, API_ENDPOINTS, buildApiUrl } from '../config/api';
 
-// Generic fetch hook
+// Generic response structure based on your API
+interface ApiResponse<T> {
+  success?: boolean;
+  message?: string;
+  timestamp?: string;
+  data?: T;
+  analytics?: T;
+  players?: T;
+  trends?: T;
+  predictions?: T;
+  picks?: T;
+  suggestions?: T;
+  history?: T;
+  [key: string]: any; // Allow other properties
+}
+
+// Generic fetch hook with proper response handling
 const useApiData = <T,>(endpoint: string, initialData: T, params?: Record<string, string>) => {
   const [data, setData] = useState<T>(initialData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        let url = `${API_BASE_URL}${endpoint}`;
-        
-        // Add query parameters if provided
-        if (params) {
-          const queryString = new URLSearchParams(params).toString();
-          url += `?${queryString}`;
-        }
-        
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
-        const result = await response.json();
-        
-        // Handle different API response structures
-        if (result.data !== undefined) {
-          setData(result.data);
-        } else if (Array.isArray(result)) {
-          setData(result as T);
-        } else {
-          setData(result as T);
-        }
-        
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unknown error');
-        console.error(`Error fetching ${endpoint}:`, err);
-      } finally {
-        setLoading(false);
+  // Helper function to extract data from API response
+  const extractDataFromResponse = (response: any): T => {
+    // Handle different API response structures
+    if (!response) return initialData;
+    
+    // If response is already the expected type
+    if (Array.isArray(response) || typeof response === typeof initialData) {
+      return response as T;
+    }
+    
+    // Extract from common property names
+    const propertyPriority = ['data', 'analytics', 'players', 'trends', 'predictions', 'picks', 'suggestions', 'history', 'results', 'items'];
+    
+    for (const prop of propertyPriority) {
+      if (response[prop] !== undefined) {
+        return response[prop] as T;
       }
-    };
+    }
+    
+    // If no matching property found, return the entire response
+    return response as T;
+  };
 
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      let url = `${API_BASE_URL}${endpoint}`;
+      
+      // Add query parameters if provided
+      if (params) {
+        const queryString = new URLSearchParams(params).toString();
+        url += `?${queryString}`;
+      }
+      
+      console.log(`📡 [useApiData] Fetching from: ${url}`);
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result: ApiResponse<T> = await response.json();
+      console.log(`📦 [useApiData] Raw API response for ${endpoint}:`, result);
+      
+      // Extract data from response
+      const extractedData = extractDataFromResponse(result);
+      console.log(`✅ [useApiData] Extracted data for ${endpoint}:`, extractedData);
+      
+      setData(extractedData);
+      setError(null);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error(`❌ [useApiData] Error fetching ${endpoint}:`, err);
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [endpoint, JSON.stringify(params)]);
+
+  useEffect(() => {
     fetchData();
-  }, [endpoint, JSON.stringify(params)]); // Re-run when params change
+  }, [fetchData]);
 
-  return { data, loading, error, refetch: () => {
-    // Trigger re-fetch by updating the params slightly
-    const newParams = params ? { ...params, _t: Date.now().toString() } : { _t: Date.now().toString() };
-    return fetch(`${API_BASE_URL}${endpoint}?${new URLSearchParams(newParams).toString()}`)
-      .then(res => res.json())
-      .then(result => {
-        if (result.data !== undefined) setData(result.data);
-        else setData(result as T);
-        return result;
-      });
-  } };
+  // Refetch function
+  const refetch = useCallback(async () => {
+    console.log(`🔄 [useApiData] Refetching ${endpoint}`);
+    await fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch };
 };
 
-// 🎯 PRIZEPICKS SCREEN HOOK - THIS IS NEW AND CRITICAL
-export const usePrizePicks = (sport: 'nba' | 'nfl' | 'mlb' = 'nba') => 
-  useApiData(API_ENDPOINTS.prizePicksSelections, [], { sport });
+// Type-safe hooks with proper return types
 
-// SPORTS WIRE SCREEN (uses same data as PrizePicks)
+// 🎯 PRIZEPICKS SCREEN HOOK
+export const usePrizePicks = (sport: 'nba' | 'nfl' | 'mlb' = 'nba') => 
+  useApiData<any[]>(API_ENDPOINTS.prizePicksSelections, [], { sport });
+
+// SPORTS WIRE SCREEN
 export const useSportsWire = (sport: 'nba' | 'nfl' | 'mlb' = 'nba') => 
-  useApiData(API_ENDPOINTS.sportsWire, [], { sport });
+  useApiData<any[]>(API_ENDPOINTS.sportsWire, [], { sport });
 
 // DAILY PICKS SCREEN
 export const useDailyPicks = () => 
-  useApiData(API_ENDPOINTS.dailyPicks, []);
+  useApiData<any[]>(API_ENDPOINTS.dailyPicks, []);
 
 // ADVANCED ANALYTICS SCREEN
 export const useAdvancedAnalytics = () => 
-  useApiData(API_ENDPOINTS.advancedAnalytics, {});
+  useApiData<any[]>(API_ENDPOINTS.advancedAnalytics, []);
 
 // PARLAY ARCHITECT SCREEN
 export const useParlaySuggestions = () => 
-  useApiData(API_ENDPOINTS.parlaySuggestions, []);
+  useApiData<any[]>(API_ENDPOINTS.parlaySuggestions, []);
 
 // KALSHI PREDICTIONS SCREEN
 export const useKalshiPredictions = () => 
-  useApiData(API_ENDPOINTS.kalshiPredictions, []);
+  useApiData<any[]>(API_ENDPOINTS.kalshiPredictions, []);
 
 // PREDICTIONS OUTCOME SCREEN
 export const usePredictionsHistory = () => 
-  useApiData(API_ENDPOINTS.predictionsHistory, []);
+  useApiData<any[]>(API_ENDPOINTS.predictionsHistory, []);
 
 // FANTASYHUB PLAYERS
 export const useFantasyPlayers = () => 
-  useApiData(API_ENDPOINTS.fantasyPlayers, []);
+  useApiData<any[]>(API_ENDPOINTS.fantasyPlayers, []);
 
 // PLAYER STATS TRENDS
 export const usePlayerTrends = (playerName?: string) => {
   const params = playerName ? { player: playerName } : undefined;
-  return useApiData(API_ENDPOINTS.playerTrends, [], params);
+  return useApiData<any[]>(API_ENDPOINTS.playerTrends, [], params);
 };
 
 // SYSTEM STATUS
 export const useSystemStatus = () => 
-  useApiData(API_ENDPOINTS.systemStatus, {});
+  useApiData<any>(API_ENDPOINTS.systemStatus, {});
+
+// Export helper function for other components to use
+export const extractArrayFromResponse = (response: any): any[] => {
+  if (!response) return [];
+  
+  // If response is already an array
+  if (Array.isArray(response)) return response;
+  
+  // If response is an object, look for array properties
+  if (typeof response === 'object') {
+    const arrayProps = ['data', 'analytics', 'players', 'trends', 'predictions', 'picks', 'suggestions', 'history', 'results', 'items'];
+    
+    for (const prop of arrayProps) {
+      if (response[prop] && Array.isArray(response[prop])) {
+        return response[prop];
+      }
+    }
+    
+    // If it's a single object, wrap it in array
+    return [response];
+  }
+  
+  // Fallback to empty array
+  return [];
+};

@@ -1,4 +1,4 @@
-// src/pages/AdvancedAnalyticsScreen.tsx - UPDATED WITH HOOK INTEGRATION
+// src/pages/AdvancedAnalyticsScreen.tsx - FIXED FOR OBJECT DATA
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
@@ -109,7 +109,7 @@ interface AnalyticsData {
   advancedStats: Record<string, number | string>;
   trendingStats: Record<string, string>;
   playerTrendsData: any[];
-  rawAnalytics?: AnalyticsItem[];
+  rawAnalytics?: any; // Changed to any to handle both array and object
 }
 
 const AnalyticsScreen = () => {
@@ -146,9 +146,33 @@ const AnalyticsScreen = () => {
   const [customQuery, setCustomQuery] = useState('');
   const [selectedPromptCategory, setSelectedPromptCategory] = useState('Team Performance');
 
+  // Debug: Log everything about the hooks
+  console.log('🔍 [AnalyticsScreen] HOOKS DEBUG:', {
+    apiAnalytics: {
+      value: apiAnalytics,
+      type: typeof apiAnalytics,
+      isArray: Array.isArray(apiAnalytics),
+      isObject: apiAnalytics && typeof apiAnalytics === 'object',
+      keys: apiAnalytics && typeof apiAnalytics === 'object' ? Object.keys(apiAnalytics) : 'N/A',
+      fullObject: apiAnalytics // Log the full object to see its structure
+    },
+    apiLoading,
+    apiError,
+    playerTrends: {
+      value: playerTrends,
+      type: typeof playerTrends,
+      isArray: Array.isArray(playerTrends),
+      isObject: playerTrends && typeof playerTrends === 'object',
+      keys: playerTrends && typeof playerTrends === 'object' ? Object.keys(playerTrends) : 'N/A',
+      fullObject: playerTrends // Log the full object to see its structure
+    },
+    trendsLoading,
+    trendsError
+  });
+
   // ✅ TRANSFORM API DATA WHEN HOOK RETURNS IT (File 1 pattern)
   useEffect(() => {
-    console.log('🔄 API data changed:', { 
+    console.log('🔄 [AnalyticsScreen useEffect] API data changed:', { 
       apiAnalytics, 
       apiLoading, 
       apiError,
@@ -158,18 +182,21 @@ const AnalyticsScreen = () => {
     });
     
     if (apiLoading || trendsLoading) {
+      console.log('⏳ [AnalyticsScreen useEffect] Still loading...');
       setLoading(true);
       return;
     }
     
     if (apiError || trendsError) {
-      console.error('❌ API Errors:', { apiError, trendsError });
+      console.error('❌ [AnalyticsScreen useEffect] API Errors:', { apiError, trendsError });
       const errorMessage = apiError || trendsError || 'Failed to load analytics data';
       setError(errorMessage);
       
       // ✅ File 1: Fallback to mock data when error occurs
-      console.log('🔄 Falling back to mock data');
-      setAnalyticsData(getCurrentSportData());
+      console.log('🔄 [AnalyticsScreen useEffect] Falling back to mock data');
+      const mockData = getCurrentSportData();
+      console.log('📦 [AnalyticsScreen useEffect] Mock data created:', mockData);
+      setAnalyticsData(mockData);
       setLoading(false);
       
       // ✅ Store for debugging
@@ -177,45 +204,81 @@ const AnalyticsScreen = () => {
         apiError,
         trendsError,
         usingMockData: true,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        mockData
       };
       return;
     }
     
-    if (apiAnalytics && Array.isArray(apiAnalytics)) {
-      console.log(`✅ Using REAL advanced analytics: ${apiAnalytics.length || 0} analytics`);
+    // ✅ FIX: Handle both array and object responses
+    const isApiAnalyticsValid = apiAnalytics && typeof apiAnalytics === 'object';
+    const isPlayerTrendsValid = playerTrends && typeof playerTrends === 'object';
+    
+    console.log('🔍 [AnalyticsScreen useEffect] Data validation:', {
+      isApiAnalyticsValid,
+      isPlayerTrendsValid,
+      apiAnalyticsType: typeof apiAnalytics,
+      playerTrendsType: typeof playerTrends,
+      apiAnalyticsKeys: isApiAnalyticsValid ? Object.keys(apiAnalytics) : 'N/A',
+      playerTrendsKeys: isPlayerTrendsValid ? Object.keys(playerTrends) : 'N/A'
+    });
+    
+    if (isApiAnalyticsValid) {
+      console.log(`✅ [AnalyticsScreen useEffect] Using API analytics data`);
+      console.log('📊 [AnalyticsScreen useEffect] API Analytics structure:', apiAnalytics);
+      
+      // ✅ Extract data from object - handle different possible structures
+      // Try to get data from common property names
+      const analyticsArray = 
+        Array.isArray(apiAnalytics) ? apiAnalytics :
+        apiAnalytics.data ? (Array.isArray(apiAnalytics.data) ? apiAnalytics.data : [apiAnalytics.data]) :
+        apiAnalytics.analytics ? (Array.isArray(apiAnalytics.analytics) ? apiAnalytics.analytics : [apiAnalytics.analytics]) :
+        apiAnalytics.results ? (Array.isArray(apiAnalytics.results) ? apiAnalytics.results : [apiAnalytics.results]) :
+        [apiAnalytics]; // Wrap single object in array
+      
+      console.log('🔧 [AnalyticsScreen useEffect] Extracted analytics array:', analyticsArray);
+      
+      // ✅ Extract player trends data
+      const trendsArray = 
+        Array.isArray(playerTrends) ? playerTrends :
+        playerTrends?.data ? (Array.isArray(playerTrends.data) ? playerTrends.data : [playerTrends.data]) :
+        playerTrends?.trends ? (Array.isArray(playerTrends.trends) ? playerTrends.trends : [playerTrends.trends]) :
+        playerTrends?.players ? (Array.isArray(playerTrends.players) ? playerTrends.players : [playerTrends.players]) :
+        playerTrends ? [playerTrends] : [];
+      
+      console.log('🔧 [AnalyticsScreen useEffect] Extracted trends array:', trendsArray);
       
       // ✅ Transform API data to match our component structure
       const transformedData: AnalyticsData = {
         overview: {
-          totalGames: (apiAnalytics[0]?.metrics?.length || 0) * 10 || 1230,
-          avgPoints: apiAnalytics[0]?.metrics?.[0]?.value || 112.4,
-          homeWinRate: `${(apiAnalytics[0]?.metrics?.[0]?.percentile || 58.2).toFixed(1)}%`,
-          avgMargin: apiAnalytics[0]?.metrics?.[1]?.value || 11.8,
-          overUnder: `${(apiAnalytics[0]?.metrics?.[0]?.percentile || 54).toFixed(0)}% Over`,
-          keyTrend: apiAnalytics[0]?.description || 'Points up +3.2% from last season',
+          totalGames: (analyticsArray[0]?.metrics?.length || 0) * 10 || 1230,
+          avgPoints: analyticsArray[0]?.metrics?.[0]?.value || 112.4,
+          homeWinRate: `${(analyticsArray[0]?.metrics?.[0]?.percentile || 58.2).toFixed(1)}%`,
+          avgMargin: analyticsArray[0]?.metrics?.[1]?.value || 11.8,
+          overUnder: `${(analyticsArray[0]?.metrics?.[0]?.percentile || 54).toFixed(0)}% Over`,
+          keyTrend: analyticsArray[0]?.description || 'Points up +3.2% from last season',
         },
         advancedStats: {
-          pace: apiAnalytics[1]?.metrics?.[0]?.value || 99.3,
-          offRating: apiAnalytics[1]?.metrics?.[1]?.value || 114.2,
-          defRating: apiAnalytics[1]?.metrics?.[2]?.value || 111.8,
-          netRating: apiAnalytics[0]?.metrics?.[0]?.percentile || 2.4,
-          trueShooting: apiAnalytics[1]?.metrics?.[3]?.value || 58.1,
-          assistRatio: apiAnalytics[1]?.metrics?.[4]?.value || 62.3,
+          pace: analyticsArray[1]?.metrics?.[0]?.value || 99.3,
+          offRating: analyticsArray[1]?.metrics?.[1]?.value || 114.2,
+          defRating: analyticsArray[1]?.metrics?.[2]?.value || 111.8,
+          netRating: analyticsArray[0]?.metrics?.[0]?.percentile || 2.4,
+          trueShooting: analyticsArray[1]?.metrics?.[3]?.value || 58.1,
+          assistRatio: analyticsArray[1]?.metrics?.[4]?.value || 62.3,
         },
         trendingStats: {
-          bestOffense: `${apiAnalytics[0]?.metrics?.[0]?.player || 'Dallas Mavericks'} (${apiAnalytics[0]?.metrics?.[0]?.value || 121.4} PPG)`,
-          bestDefense: `${apiAnalytics[0]?.metrics?.[1]?.player || 'Boston Celtics'} (${apiAnalytics[0]?.metrics?.[1]?.value || 107.8} PPG)`,
-          mostImproving: apiAnalytics[0]?.title || 'Orlando Magic (+12 wins)',
-          surpriseTeam: apiAnalytics[0]?.metrics?.[2]?.team || 'Oklahoma City Thunder',
-          playerToWatch: apiAnalytics[0]?.metrics?.[0]?.player || 'Shai Gilgeous-Alexander',
+          bestOffense: `${analyticsArray[0]?.metrics?.[0]?.player || 'Dallas Mavericks'} (${analyticsArray[0]?.metrics?.[0]?.value || 121.4} PPG)`,
+          bestDefense: `${analyticsArray[0]?.metrics?.[1]?.player || 'Boston Celtics'} (${analyticsArray[0]?.metrics?.[1]?.value || 107.8} PPG)`,
+          mostImproving: analyticsArray[0]?.title || 'Orlando Magic (+12 wins)',
+          surpriseTeam: analyticsArray[0]?.metrics?.[2]?.team || 'Oklahoma City Thunder',
+          playerToWatch: analyticsArray[0]?.metrics?.[0]?.player || 'Shai Gilgeous-Alexander',
           fantasyDraftTip: "FanDuel Snake Draft Strategy: Prioritize Jokic, Doncic, Giannis in early rounds."
         },
-        playerTrendsData: playerTrends || [],
-        rawAnalytics: apiAnalytics // Store raw data for reference
+        playerTrendsData: trendsArray,
+        rawAnalytics: analyticsArray // Store raw data for reference
       };
       
-      console.log('📊 Transformed analytics data:', transformedData);
+      console.log('📊 [AnalyticsScreen useEffect] Transformed analytics data:', transformedData);
       setAnalyticsData(transformedData);
       setLoading(false);
       setError(null);
@@ -228,14 +291,15 @@ const AnalyticsScreen = () => {
         timestamp: new Date().toISOString(),
         source: 'useAdvancedAnalytics + usePlayerTrends hooks'
       };
-    } else if (apiAnalytics && Array.isArray(apiAnalytics) && apiAnalytics.length === 0) {
-      // ✅ API returns empty array - use mock data (File 1 pattern)
-      console.log('⚠️ API returned empty array, using mock data');
-      setAnalyticsData(getCurrentSportData());
-      setLoading(false);
     } else {
-      // No data yet, but loading is false
-      setLoading(apiLoading || trendsLoading);
+      // No valid data, use mock data
+      console.log('⚠️ [AnalyticsScreen useEffect] No valid API data, using mock data');
+      console.log('🔍 [AnalyticsScreen useEffect] apiAnalytics is:', apiAnalytics);
+      console.log('🔍 [AnalyticsScreen useEffect] playerTrends is:', playerTrends);
+      
+      const mockData = getCurrentSportData();
+      setAnalyticsData(mockData);
+      setLoading(false);
     }
   }, [apiAnalytics, apiLoading, apiError, playerTrends, trendsLoading, trendsError]);
 
@@ -363,6 +427,8 @@ const AnalyticsScreen = () => {
 
   // ✅ Mock data functions - KEEP AS FALLBACK (File 1 pattern)
   const getCurrentSportData = (): AnalyticsData => {
+    console.log(`🎯 [getCurrentSportData] Creating mock data for sport: ${selectedSport}`);
+    
     switch(selectedSport) {
       case 'NBA':
         return {
@@ -424,7 +490,7 @@ const AnalyticsScreen = () => {
         return {
           overview: {
             totalGames: 1312,
-            avgPoints: 6.1, // Changed from avgGoals to avgPoints to match interface
+            avgPoints: 6.1,
             homeWinRate: '53.8%',
             avgMargin: 2.4,
             overUnder: '52% Over',
@@ -467,6 +533,16 @@ const AnalyticsScreen = () => {
 
   // Use real data if available, otherwise use fallback
   const sportData = analyticsData || getCurrentSportData();
+  
+  console.log('📦 [AnalyticsScreen] Current sportData:', {
+    sportData,
+    hasAnalyticsData: !!analyticsData,
+    sportDataOverview: sportData?.overview,
+    sportDataAdvancedStats: sportData?.advancedStats,
+    sportDataTrendingStats: sportData?.trendingStats,
+    sportDataPlayerTrendsData: sportData?.playerTrendsData,
+    sportDataRawAnalytics: sportData?.rawAnalytics
+  });
 
   // Event handlers
   const handleSearchSubmit = () => {
@@ -489,7 +565,7 @@ const AnalyticsScreen = () => {
 
   // ✅ Updated refresh function to use hooks' refetch functions
   const handleRefresh = useCallback(async () => {
-    console.log('🔄 Manual refresh triggered');
+    console.log('🔄 [handleRefresh] Manual refresh triggered');
     setRefreshing(true);
     try {
       await Promise.all([
@@ -503,15 +579,18 @@ const AnalyticsScreen = () => {
   }, [refetchAnalytics, refetchTrends]);
 
   const handleSportChange = (event: any) => {
+    console.log('🎯 [handleSportChange] Changing sport to:', event.target.value);
     setSelectedSport(event.target.value);
   };
 
   const handleMetricChange = (event: any, newValue: string) => {
+    console.log('📊 [handleMetricChange] Changing metric to:', newValue);
     setSelectedMetric(newValue);
   };
 
   // ✅ ADD LOADING STATE (File 1 pattern)
   if (loading) {
+    console.log('⏳ [AnalyticsScreen] Rendering loading state');
     return (
       <Container maxWidth="lg">
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
@@ -525,6 +604,7 @@ const AnalyticsScreen = () => {
   // ✅ ADD ERROR STATE (File 1 pattern)
   const displayError = error || apiError || trendsError;
   if (displayError) {
+    console.log('❌ [AnalyticsScreen] Rendering error state:', displayError);
     return (
       <Container maxWidth="lg">
         <Alert 
@@ -572,7 +652,7 @@ const AnalyticsScreen = () => {
           showSimulationModal={showSimulationModal}
           simulating={simulating}
           setShowSimulationModal={setShowSimulationModal}
-          playerTrends={sportData.playerTrendsData}
+          playerTrends={Array.isArray(sportData.playerTrendsData) ? sportData.playerTrendsData : []}
           analyticsData={analyticsData}
         />
         <Box sx={{ mt: 4, textAlign: 'center' }}>
@@ -584,6 +664,7 @@ const AnalyticsScreen = () => {
     );
   }
 
+  console.log('✅ [AnalyticsScreen] Rendering main content');
   // ✅ KEEP YOUR ENTIRE EXISTING RETURN STATEMENT
   return (
     <MainContent 
@@ -618,7 +699,7 @@ const AnalyticsScreen = () => {
       showSimulationModal={showSimulationModal}
       simulating={simulating}
       setShowSimulationModal={setShowSimulationModal}
-      playerTrends={sportData.playerTrendsData}
+      playerTrends={Array.isArray(sportData.playerTrendsData) ? sportData.playerTrendsData : []}
       analyticsData={analyticsData}
     />
   );
@@ -696,366 +777,426 @@ const MainContent = ({
   playerTrends,
   analyticsData
 }: MainContentProps) => {
-  const renderHeader = () => (
-    <Box sx={{
-      background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
-      color: 'white',
-      py: 6,
-      px: 4,
-      borderRadius: 3,
-      mb: 4,
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
+  console.log('🚀 [MainContent] Rendering with props:', {
+    sportData,
+    selectedSport,
+    selectedMetric,
+    playerTrends,
+    playerTrendsType: typeof playerTrends,
+    playerTrendsIsArray: Array.isArray(playerTrends),
+    playerTrendsLength: Array.isArray(playerTrends) ? playerTrends.length : 'N/A',
+    sportDataKeys: sportData ? Object.keys(sportData) : 'No sportData',
+    sportDataOverview: sportData?.overview,
+    sportDataAdvancedStats: sportData?.advancedStats,
+    sportDataTrendingStats: sportData?.trendingStats,
+    sportDataPlayerTrendsData: sportData?.playerTrendsData,
+    sportDataRawAnalytics: sportData?.rawAnalytics
+  });
+
+  const renderHeader = () => {
+    console.log('🔤 [MainContent] Rendering header');
+    return (
       <Box sx={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'radial-gradient(circle at 20% 80%, rgba(255,255,255,0.1) 0%, transparent 50%)'
-      }} />
-      <Container maxWidth="lg">
-        <Box sx={{ position: 'relative', zIndex: 1 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
-            <Box>
-              <Typography variant="h2" gutterBottom sx={{ fontWeight: 'bold' }}>
-                🤖 AI Analytics & Predictions Hub
-              </Typography>
-              <Typography variant="h5" sx={{ opacity: 0.9 }}>
-                Advanced analytics, real-time insights & AI predictions
-              </Typography>
-            </Box>
-            <IconButton 
-              color="inherit" 
-              onClick={() => setShowSearch(!showSearch)}
-              sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}
-            >
-              <SearchIcon />
-            </IconButton>
-          </Box>
-          
-          {showSearch && (
-            <Paper sx={{ mt: 3, p: 2 }}>
-              <TextField
-                fullWidth
-                variant="outlined"
-                placeholder="Search analytics, predictions, or trends..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearchSubmit()}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                  endAdornment: searchInput && (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setSearchInput('')}>
-                        <CloseIcon />
-                      </IconButton>
-                    </InputAdornment>
-                  )
-                }}
-              />
-            </Paper>
-          )}
-        </Box>
-      </Container>
-    </Box>
-  );
-
-  const renderRefreshIndicator = () => (
-    <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-        <RefreshIcon sx={{ mr: 1, color: 'primary.main' }} />
-        <Typography variant="body2" color="text.secondary">
-          Last updated: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </Typography>
-      </Box>
-      <Button
-        startIcon={<RefreshIcon />}
-        onClick={handleRefresh}
-        disabled={refreshing}
-        variant="outlined"
-        size="small"
-      >
-        {refreshing ? 'Refreshing...' : 'Refresh'}
-      </Button>
-    </Paper>
-  );
-
-  const renderSportSelector = () => (
-    <Paper sx={{ p: 3, mb: 4 }}>
-      <Typography variant="h6" gutterBottom>
-        Select Sport
-      </Typography>
-      <Grid container spacing={2}>
-        {sports.map((sport: any) => (
-          <Grid item key={sport.id}>
-            <Card
-              sx={{
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                border: selectedSport === sport.id ? `2px solid ${sport.color}` : '2px solid transparent',
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: 4
-                }
-              }}
-              onClick={() => handleSportChange({ target: { value: sport.id } })}
-            >
-              <CardContent sx={{ textAlign: 'center', minWidth: 100 }}>
-                <Box sx={{ color: sport.color, mb: 1 }}>
-                  {sport.icon}
-                </Box>
-                <Typography variant="body2" fontWeight="medium">
-                  {sport.name}
+        background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
+        color: 'white',
+        py: 6,
+        px: 4,
+        borderRadius: 3,
+        mb: 4,
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        <Box sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'radial-gradient(circle at 20% 80%, rgba(255,255,255,0.1) 0%, transparent 50%)'
+        }} />
+        <Container maxWidth="lg">
+          <Box sx={{ position: 'relative', zIndex: 1 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+              <Box>
+                <Typography variant="h2" gutterBottom sx={{ fontWeight: 'bold' }}>
+                  🤖 AI Analytics & Predictions Hub
                 </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-    </Paper>
-  );
-
-  const renderMetricTabs = () => (
-    <Paper sx={{ mb: 4 }}>
-      <Tabs
-        value={selectedMetric}
-        onChange={handleMetricChange}
-        variant="scrollable"
-        scrollButtons="auto"
-        sx={{ borderBottom: 1, borderColor: 'divider' }}
-      >
-        {metrics.map((metric: any) => (
-          <Tab
-            key={metric.id}
-            value={metric.id}
-            label={metric.label}
-            icon={metric.icon}
-            iconPosition="start"
-          />
-        ))}
-      </Tabs>
-    </Paper>
-  );
-
-  const renderPredictionGenerator = () => (
-    <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>
-      <Box sx={{ textAlign: 'center', mb: 3 }}>
-        <RocketLaunchIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-        <Typography variant="h4" gutterBottom>
-          🚀 AI Prediction Generator
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Generate custom predictions using advanced AI models
-        </Typography>
+                <Typography variant="h5" sx={{ opacity: 0.9 }}>
+                  Advanced analytics, real-time insights & AI predictions
+                </Typography>
+              </Box>
+              <IconButton 
+                color="inherit" 
+                onClick={() => setShowSearch(!showSearch)}
+                sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}
+              >
+                <SearchIcon />
+              </IconButton>
+            </Box>
+            
+            {showSearch && (
+              <Paper sx={{ mt: 3, p: 2 }}>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  placeholder="Search analytics, predictions, or trends..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearchSubmit()}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon />
+                      </InputAdornment>
+                    ),
+                    endAdornment: searchInput && (
+                      <InputAdornment position="end">
+                        <IconButton onClick={() => setSearchInput('')}>
+                          <CloseIcon />
+                        </IconButton>
+                      </InputAdornment>
+                    )
+                  }}
+                />
+              </Paper>
+            )}
+          </Box>
+        </Container>
       </Box>
+    );
+  };
 
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Quick Prediction Queries
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
-          {predictionQueries.map((query: string, index: number) => (
-            <Chip
-              key={index}
-              label={query}
-              onClick={() => setCustomQuery(query)}
-              icon={<SparklesIcon />}
-              sx={{ 
-                backgroundColor: 'primary.light',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'primary.main'
-                }
-              }}
-            />
-          ))}
-        </Box>
-      </Box>
-
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Custom Prediction Query
-        </Typography>
-        <TextField
-          fullWidth
-          multiline
-          rows={3}
-          placeholder="Enter custom prediction query..."
-          value={customQuery}
-          onChange={(e) => setCustomQuery(e.target.value)}
-          variant="outlined"
-          sx={{ mb: 2 }}
-        />
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          startIcon={<AutoAwesomeIcon />}
-          onClick={handleGeneratePredictions}
-          disabled={!customQuery.trim() || generatingPredictions}
-        >
-          {generatingPredictions ? 'Generating...' : 'Generate AI Prediction'}
-        </Button>
-      </Box>
-
-      <Alert severity="info" icon={<PsychologyIcon />}>
-        Uses neural networks, statistical modeling, and historical data for accurate predictions
-      </Alert>
-    </Paper>
-  );
-
-  const renderOverview = () => (
-    <>
-      <Paper sx={{ p: 4, mb: 4 }}>
-        <Typography variant="h5" gutterBottom>
-          📊 Season Overview - {selectedSport}
-        </Typography>
-        
-        <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <EmojiEventsIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1 }} />
-                <Typography variant="h4">{sportData.overview.totalGames}</Typography>
-                <Typography variant="body2" color="text.secondary">Games Tracked</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <TrendingUpIcon sx={{ fontSize: 40, color: 'success.main', mb: 1 }} />
-                <Typography variant="h4">{sportData.overview.homeWinRate}</Typography>
-                <Typography variant="body2" color="text.secondary">Home Win Rate</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <BarChartIcon sx={{ fontSize: 40, color: 'error.main', mb: 1 }} />
-                <Typography variant="h4">{sportData.overview.avgPoints}</Typography>
-                <Typography variant="body2" color="text.secondary">Avg Points/Game</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <TimelineIcon sx={{ fontSize: 40, color: 'warning.main', mb: 1 }} />
-                <Typography variant="h4">{sportData.overview.overUnder}</Typography>
-                <Typography variant="body2" color="text.secondary">Over Rate</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
-
-        <Alert severity="info" icon={<BoltIcon />}>
-          <Typography variant="body1" fontWeight="medium">
-            🔥 Current Trend: {sportData.overview.keyTrend}
+  const renderRefreshIndicator = () => {
+    console.log('🔄 [MainContent] Rendering refresh indicator');
+    return (
+      <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <RefreshIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="body2" color="text.secondary">
+            Last updated: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Typography>
-        </Alert>
+        </Box>
+        <Button
+          startIcon={<RefreshIcon />}
+          onClick={handleRefresh}
+          disabled={refreshing}
+          variant="outlined"
+          size="small"
+        >
+          {refreshing ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </Paper>
+    );
+  };
 
-      {/* Team Selector */}
+  const renderSportSelector = () => {
+    console.log('🏀 [MainContent] Rendering sport selector');
+    return (
       <Paper sx={{ p: 3, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
-          Filter by Team
+          Select Sport
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Chip
-            label="All Teams"
-            onClick={() => setSelectedTeam('all')}
-            color={selectedTeam === 'all' ? 'primary' : 'default'}
-            variant={selectedTeam === 'all' ? 'filled' : 'outlined'}
-          />
-          {teams[selectedSport as keyof typeof teams]?.map((team: any) => (
-            <Chip
-              key={team.id}
-              label={team.name.split(' ').pop()}
-              onClick={() => setSelectedTeam(team.id)}
-              color={selectedTeam === team.id ? 'primary' : 'default'}
-              variant={selectedTeam === team.id ? 'filled' : 'outlined'}
+        <Grid container spacing={2}>
+          {sports.map((sport: any) => (
+            <Grid item key={sport.id}>
+              <Card
+                sx={{
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  border: selectedSport === sport.id ? `2px solid ${sport.color}` : '2px solid transparent',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4
+                  }
+                }}
+                onClick={() => handleSportChange({ target: { value: sport.id } })}
+              >
+                <CardContent sx={{ textAlign: 'center', minWidth: 100 }}>
+                  <Box sx={{ color: sport.color, mb: 1 }}>
+                    {sport.icon}
+                  </Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    {sport.name}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Paper>
+    );
+  };
+
+  const renderMetricTabs = () => {
+    console.log('📊 [MainContent] Rendering metric tabs');
+    return (
+      <Paper sx={{ mb: 4 }}>
+        <Tabs
+          value={selectedMetric}
+          onChange={handleMetricChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          {metrics.map((metric: any) => (
+            <Tab
+              key={metric.id}
+              value={metric.id}
+              label={metric.label}
+              icon={metric.icon}
+              iconPosition="start"
             />
           ))}
-        </Box>
+        </Tabs>
       </Paper>
-    </>
-  );
+    );
+  };
 
-  const renderTrendingStats = () => (
-    <Paper sx={{ p: 4, mb: 4 }}>
-      <Typography variant="h5" gutterBottom>
-        🚀 Trending This Season
-      </Typography>
-      <Grid container spacing={3}>
-        {Object.entries(sportData.trendingStats).map(([key, value], index) => (
-          <Grid item xs={12} sm={6} key={key}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  {key === 'fantasyDraftTip' ? (
-                    <EmojiEventsIcon sx={{ mr: 1, color: 'warning.main' }} />
-                  ) : (
-                    <TrendingUpIcon sx={{ mr: 1, color: index % 2 === 0 ? 'success.main' : 'info.main' }} />
-                  )}
-                  <Typography variant="h6" sx={{ textTransform: 'capitalize' }}>
+  const renderPredictionGenerator = () => {
+    console.log('🤖 [MainContent] Rendering prediction generator');
+    return (
+      <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>
+        <Box sx={{ textAlign: 'center', mb: 3 }}>
+          <RocketLaunchIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+          <Typography variant="h4" gutterBottom>
+            🚀 AI Prediction Generator
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Generate custom predictions using advanced AI models
+          </Typography>
+        </Box>
+
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Quick Prediction Queries
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
+            {predictionQueries.map((query: string, index: number) => (
+              <Chip
+                key={index}
+                label={query}
+                onClick={() => setCustomQuery(query)}
+                icon={<SparklesIcon />}
+                sx={{ 
+                  backgroundColor: 'primary.light',
+                  color: 'white',
+                  '&:hover': {
+                    backgroundColor: 'primary.main'
+                  }
+                }}
+              />
+            ))}
+          </Box>
+        </Box>
+
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Custom Prediction Query
+          </Typography>
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            placeholder="Enter custom prediction query..."
+            value={customQuery}
+            onChange={(e) => setCustomQuery(e.target.value)}
+            variant="outlined"
+            sx={{ mb: 2 }}
+          />
+          <Button
+            fullWidth
+            variant="contained"
+            size="large"
+            startIcon={<AutoAwesomeIcon />}
+            onClick={handleGeneratePredictions}
+            disabled={!customQuery.trim() || generatingPredictions}
+          >
+            {generatingPredictions ? 'Generating...' : 'Generate AI Prediction'}
+          </Button>
+        </Box>
+
+        <Alert severity="info" icon={<PsychologyIcon />}>
+          Uses neural networks, statistical modeling, and historical data for accurate predictions
+        </Alert>
+      </Paper>
+    );
+  };
+
+  const renderOverview = () => {
+    console.log('📈 [MainContent] Rendering overview');
+    return (
+      <>
+        <Paper sx={{ p: 4, mb: 4 }}>
+          <Typography variant="h5" gutterBottom>
+            📊 Season Overview - {selectedSport}
+          </Typography>
+          
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <EmojiEventsIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1 }} />
+                  <Typography variant="h4">{sportData.overview.totalGames}</Typography>
+                  <Typography variant="body2" color="text.secondary">Games Tracked</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <TrendingUpIcon sx={{ fontSize: 40, color: 'success.main', mb: 1 }} />
+                  <Typography variant="h4">{sportData.overview.homeWinRate}</Typography>
+                  <Typography variant="body2" color="text.secondary">Home Win Rate</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <BarChartIcon sx={{ fontSize: 40, color: 'error.main', mb: 1 }} />
+                  <Typography variant="h4">{sportData.overview.avgPoints}</Typography>
+                  <Typography variant="body2" color="text.secondary">Avg Points/Game</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <TimelineIcon sx={{ fontSize: 40, color: 'warning.main', mb: 1 }} />
+                  <Typography variant="h4">{sportData.overview.overUnder}</Typography>
+                  <Typography variant="body2" color="text.secondary">Over Rate</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          <Alert severity="info" icon={<BoltIcon />}>
+            <Typography variant="body1" fontWeight="medium">
+              🔥 Current Trend: {sportData.overview.keyTrend}
+            </Typography>
+          </Alert>
+        </Paper>
+
+        {/* Team Selector */}
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Typography variant="h6" gutterBottom>
+            Filter by Team
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Chip
+              label="All Teams"
+              onClick={() => setSelectedTeam('all')}
+              color={selectedTeam === 'all' ? 'primary' : 'default'}
+              variant={selectedTeam === 'all' ? 'filled' : 'outlined'}
+            />
+            {teams[selectedSport as keyof typeof teams]?.map((team: any) => (
+              <Chip
+                key={team.id}
+                label={team.name.split(' ').pop()}
+                onClick={() => setSelectedTeam(team.id)}
+                color={selectedTeam === team.id ? 'primary' : 'default'}
+                variant={selectedTeam === team.id ? 'filled' : 'outlined'}
+              />
+            ))}
+          </Box>
+        </Paper>
+      </>
+    );
+  };
+
+  const renderTrendingStats = () => {
+    console.log('📈 [MainContent] Rendering trending stats');
+    console.log('🔍 [renderTrendingStats] sportData.trendingStats:', sportData.trendingStats);
+    
+    // Safe iteration - ensure trendingStats exists and is an object
+    const trendingStatsObj = sportData?.trendingStats || {};
+    const trendingStatsEntries = Object.entries(trendingStatsObj);
+    
+    console.log('🔍 [renderTrendingStats] Entries to render:', trendingStatsEntries);
+    
+    return (
+      <Paper sx={{ p: 4, mb: 4 }}>
+        <Typography variant="h5" gutterBottom>
+          🚀 Trending This Season
+        </Typography>
+        <Grid container spacing={3}>
+          {trendingStatsEntries.map(([key, value], index) => (
+            <Grid item xs={12} sm={6} key={key}>
+              <Card>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    {key === 'fantasyDraftTip' ? (
+                      <EmojiEventsIcon sx={{ mr: 1, color: 'warning.main' }} />
+                    ) : (
+                      <TrendingUpIcon sx={{ mr: 1, color: index % 2 === 0 ? 'success.main' : 'info.main' }} />
+                    )}
+                    <Typography variant="h6" sx={{ textTransform: 'capitalize' }}>
+                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, (str: string) => str.toUpperCase())}
+                    </Typography>
+                  </Box>
+                  <Typography variant="body1">
+                    {String(value)}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Paper>
+    );
+  };
+
+  const renderAdvancedMetrics = () => {
+    console.log('🧠 [MainContent] Rendering advanced metrics');
+    console.log('🔍 [renderAdvancedMetrics] sportData.advancedStats:', sportData.advancedStats);
+    
+    // Safe iteration - ensure advancedStats exists and is an object
+    const advancedStatsObj = sportData?.advancedStats || {};
+    const advancedStatsEntries = Object.entries(advancedStatsObj);
+    
+    console.log('🔍 [renderAdvancedMetrics] Entries to render:', advancedStatsEntries);
+    
+    return (
+      <Paper sx={{ p: 4, mb: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <ScienceIcon sx={{ mr: 2, fontSize: 32, color: 'primary.main' }} />
+          <Typography variant="h5">
+            🧠 Advanced Metrics
+          </Typography>
+        </Box>
+        
+        <Grid container spacing={3}>
+          {advancedStatsEntries.map(([key, value]) => (
+            <Grid item xs={12} sm={6} md={4} key={key}>
+              <Card>
+                <CardContent>
+                  <Typography variant="body2" color="text.secondary" gutterBottom sx={{ textTransform: 'capitalize' }}>
                     {key.replace(/([A-Z])/g, ' $1').replace(/^./, (str: string) => str.toUpperCase())}
                   </Typography>
-                </Box>
-                <Typography variant="body1">
-                  {String(value)} {/* Fixed: Convert to string */}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-    </Paper>
-  );
-
-  const renderAdvancedMetrics = () => (
-    <Paper sx={{ p: 4, mb: 4 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-        <ScienceIcon sx={{ mr: 2, fontSize: 32, color: 'primary.main' }} />
-        <Typography variant="h5">
-          🧠 Advanced Metrics
-        </Typography>
-      </Box>
-      
-      <Grid container spacing={3}>
-        {Object.entries(sportData.advancedStats).map(([key, value]) => (
-          <Grid item xs={12} sm={6} md={4} key={key}>
-            <Card>
-              <CardContent>
-                <Typography variant="body2" color="text.secondary" gutterBottom sx={{ textTransform: 'capitalize' }}>
-                  {key.replace(/([A-Z])/g, ' $1').replace(/^./, (str: string) => str.toUpperCase())}
-                </Typography>
-                <Typography variant="h4" gutterBottom>
-                  {String(value)} {/* Fixed: Convert to string */}
-                </Typography>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={Math.min(100, Number(value) * 2)} 
-                  sx={{ height: 8, borderRadius: 4 }}
-                />
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-    </Paper>
-  );
+                  <Typography variant="h4" gutterBottom>
+                    {String(value)}
+                  </Typography>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={Math.min(100, Number(value) * 2)} 
+                    sx={{ height: 8, borderRadius: 4 }}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Paper>
+    );
+  };
 
   // ✅ ADD PlayerTrendsChart component (from File 2 pattern)
   const PlayerTrendsChart = ({ trends }: { trends: any[] }) => {
-    if (!trends || trends.length === 0) {
+    console.log('👤 [PlayerTrendsChart] Rendering with trends:', trends);
+    
+    // ✅ FIX: Check if trends is an array before trying to iterate
+    if (!trends || !Array.isArray(trends) || trends.length === 0) {
+      console.log('⚠️ [PlayerTrendsChart] No trends data or not an array');
       return (
         <Paper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
           <PersonIcon sx={{ fontSize: 64, color: 'primary.main', mb: 3 }} />
@@ -1072,6 +1213,7 @@ const MainContent = ({
       );
     }
 
+    console.log(`✅ [PlayerTrendsChart] Rendering ${trends.length} trends`);
     return (
       <Paper sx={{ p: 4, mb: 4 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -1121,7 +1263,11 @@ const MainContent = ({
 
   // ✅ ADD MetricsDashboard component (from File 2 pattern)
   const MetricsDashboard = ({ data }: { data: any[] }) => {
-    if (!data || data.length === 0) {
+    console.log('📊 [MetricsDashboard] Rendering with data:', data);
+    
+    // ✅ FIX: Check if data is an array before trying to iterate
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      console.log('⚠️ [MetricsDashboard] No data or not an array');
       return (
         <Paper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
           <BarChartIcon sx={{ fontSize: 64, color: 'primary.main', mb: 3 }} />
@@ -1135,6 +1281,7 @@ const MainContent = ({
       );
     }
 
+    console.log(`✅ [MetricsDashboard] Rendering ${data.length} metrics`);
     return (
       <Paper sx={{ p: 4, mb: 4 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -1174,77 +1321,82 @@ const MainContent = ({
     );
   };
 
-  const renderPrompts = () => (
-    <Paper sx={{ p: 4, mb: 4 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <InsightsIcon sx={{ mr: 1, color: 'primary.main' }} />
-          <Typography variant="h5">
-            Smart Search Prompts
+  const renderPrompts = () => {
+    console.log('💡 [MainContent] Rendering prompts');
+    return (
+      <Paper sx={{ p: 4, mb: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <InsightsIcon sx={{ mr: 1, color: 'primary.main' }} />
+            <Typography variant="h5">
+              Smart Search Prompts
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Prompt Categories
           </Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
+            {USEFUL_PROMPTS.map((category: any) => (
+              <Chip
+                key={category.category}
+                label={category.category}
+                onClick={() => setSelectedPromptCategory(category.category)}
+                color={selectedPromptCategory === category.category ? 'primary' : 'default'}
+                variant={selectedPromptCategory === category.category ? 'filled' : 'outlined'}
+              />
+            ))}
+          </Box>
         </Box>
-      </Box>
 
-      <Box sx={{ mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Prompt Categories
+          Quick Prompts
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
-          {USEFUL_PROMPTS.map((category: any) => (
-            <Chip
-              key={category.category}
-              label={category.category}
-              onClick={() => setSelectedPromptCategory(category.category)}
-              color={selectedPromptCategory === category.category ? 'primary' : 'default'}
-              variant={selectedPromptCategory === category.category ? 'filled' : 'outlined'}
-            />
+        <Grid container spacing={2}>
+          {USEFUL_PROMPTS.find((cat: any) => cat.category === selectedPromptCategory)?.prompts.map((prompt: string, index: number) => (
+            <Grid item xs={12} sm={6} md={4} key={index}>
+              <Card
+                sx={{
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4,
+                    borderColor: 'primary.main'
+                  }
+                }}
+                onClick={() => {
+                  setSearchInput(prompt);
+                  setSearchQuery(prompt);
+                }}
+              >
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <SearchIcon sx={{ mr: 1, color: 'primary.main', fontSize: 16 }} />
+                    <Typography variant="body2">
+                      {prompt}
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
           ))}
-        </Box>
-      </Box>
+        </Grid>
 
-      <Typography variant="h6" gutterBottom>
-        Quick Prompts
-      </Typography>
-      <Grid container spacing={2}>
-        {USEFUL_PROMPTS.find((cat: any) => cat.category === selectedPromptCategory)?.prompts.map((prompt: string, index: number) => (
-          <Grid item xs={12} sm={6} md={4} key={index}>
-            <Card
-              sx={{
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: 4,
-                  borderColor: 'primary.main'
-                }
-              }}
-              onClick={() => {
-                setSearchInput(prompt);
-                setSearchQuery(prompt);
-              }}
-            >
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <SearchIcon sx={{ mr: 1, color: 'primary.main', fontSize: 16 }} />
-                  <Typography variant="body2">
-                    {prompt}
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-
-      <Alert severity="info" sx={{ mt: 3 }}>
-        <Typography variant="body2">
-          Tap any prompt to search • Edit prompts for custom queries • Results show real game data
-        </Typography>
-      </Alert>
-    </Paper>
-  );
+        <Alert severity="info" sx={{ mt: 3 }}>
+          <Typography variant="body2">
+            Tap any prompt to search • Edit prompts for custom queries • Results show real game data
+          </Typography>
+        </Alert>
+      </Paper>
+    );
+  };
 
   const renderContent = () => {
+    console.log(`🎯 [MainContent] Rendering content for metric: ${selectedMetric}`);
+    
     switch(selectedMetric) {
       case 'overview':
         return (
@@ -1253,7 +1405,7 @@ const MainContent = ({
             {renderTrendingStats()}
             {renderPredictionGenerator()}
             {/* ✅ Add MetricsDashboard (from File 2) */}
-            {sportData.rawAnalytics && (
+            {sportData.rawAnalytics && Array.isArray(sportData.rawAnalytics) && (
               <MetricsDashboard data={sportData.rawAnalytics[0]?.metrics || []} />
             )}
             {renderPrompts()}
@@ -1264,7 +1416,7 @@ const MainContent = ({
           <>
             {renderAdvancedMetrics()}
             {/* ✅ Add PlayerTrendsChart (from File 2) */}
-            {playerTrends && playerTrends.length > 0 && (
+            {playerTrends && Array.isArray(playerTrends) && playerTrends.length > 0 && (
               <PlayerTrendsChart trends={playerTrends} />
             )}
           </>
@@ -1273,10 +1425,10 @@ const MainContent = ({
         return (
           <>
             {/* ✅ Add both components for trends view */}
-            {sportData.rawAnalytics && (
+            {sportData.rawAnalytics && Array.isArray(sportData.rawAnalytics) && (
               <MetricsDashboard data={sportData.rawAnalytics[0]?.metrics || []} />
             )}
-            {playerTrends && playerTrends.length > 0 && (
+            {playerTrends && Array.isArray(playerTrends) && playerTrends.length > 0 && (
               <PlayerTrendsChart trends={playerTrends} />
             )}
             <Paper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
@@ -1297,7 +1449,7 @@ const MainContent = ({
         return (
           <>
             {/* ✅ Add PlayerTrendsChart for players view */}
-            {playerTrends && playerTrends.length > 0 ? (
+            {playerTrends && Array.isArray(playerTrends) && playerTrends.length > 0 ? (
               <PlayerTrendsChart trends={playerTrends} />
             ) : (
               <Paper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
@@ -1342,86 +1494,90 @@ const MainContent = ({
     }
   };
 
-  const renderSimulationModal = () => (
-    <Dialog open={showSimulationModal} onClose={() => !simulating && setShowSimulationModal(false)}>
-      <DialogTitle>
-        {simulating || generatingPredictions ? 'Processing...' : 'Success!'}
-      </DialogTitle>
-      <DialogContent>
-        {simulating || generatingPredictions ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <CircularProgress size={60} sx={{ mb: 3 }} />
-            <Typography variant="h6" gutterBottom>
-              {generatingPredictions ? 'Generating Predictions...' : 'Simulating Outcome...'}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {generatingPredictions 
-                ? 'Analyzing data and generating AI predictions' 
-                : 'Running simulation with advanced models'
-              }
-            </Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              {[1, 2, 3].map((step) => (
-                <Box key={step} sx={{ display: 'flex', alignItems: 'center' }}>
+  const renderSimulationModal = () => {
+    console.log('⚡ [MainContent] Rendering simulation modal');
+    return (
+      <Dialog open={showSimulationModal} onClose={() => !simulating && setShowSimulationModal(false)}>
+        <DialogTitle>
+          {simulating || generatingPredictions ? 'Processing...' : 'Success!'}
+        </DialogTitle>
+        <DialogContent>
+          {simulating || generatingPredictions ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <CircularProgress size={60} sx={{ mb: 3 }} />
+              <Typography variant="h6" gutterBottom>
+                {generatingPredictions ? 'Generating Predictions...' : 'Simulating Outcome...'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {generatingPredictions 
+                  ? 'Analyzing data and generating AI predictions' 
+                  : 'Running simulation with advanced models'
+                }
+              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                {[1, 2, 3].map((step) => (
                   <Box key={step} sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      bgcolor: step <= 2 ? 'primary.main' : 'grey.300',
-                      mr: step < 3 ? 1 : 0
-                    }} />
-                    {step < 3 && <Box sx={{ width: 20, height: 2, bgcolor: 'grey.300', mr: 1 }} />}
+                    <Box key={step} sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Box sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        bgcolor: step <= 2 ? 'primary.main' : 'grey.300',
+                        mr: step < 3 ? 1 : 0
+                      }} />
+                      {step < 3 && <Box sx={{ width: 20, height: 2, bgcolor: 'grey.300', mr: 1 }} />}
+                    </Box>
                   </Box>
-                </Box>
-              ))}
+                ))}
+              </Box>
             </Box>
-          </Box>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Box sx={{
-              width: 80,
-              height: 80,
-              borderRadius: '50%',
-              bgcolor: 'primary.main',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              mx: 'auto',
-              mb: 3
-            }}>
-              <SparklesIcon sx={{ fontSize: 40, color: 'white' }} />
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Box sx={{
+                width: 80,
+                height: 80,
+                borderRadius: '50%',
+                bgcolor: 'primary.main',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                mx: 'auto',
+                mb: 3
+              }}>
+                <SparklesIcon sx={{ fontSize: 40, color: 'white' }} />
+              </Box>
+              <Typography variant="h6" gutterBottom>
+                AI Predictions Generated!
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                AI predictions created with 84.2% model confidence
+              </Typography>
             </Box>
-            <Typography variant="h6" gutterBottom>
-              AI Predictions Generated!
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              AI predictions created with 84.2% model confidence
-            </Typography>
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        {!(simulating || generatingPredictions) && (
-          <Button onClick={() => setShowSimulationModal(false)} variant="contained" fullWidth>
-            Continue
-          </Button>
-        )}
-      </DialogActions>
-    </Dialog>
-  );
+          )}
+        </DialogContent>
+        <DialogActions>
+          {!(simulating || generatingPredictions) && (
+            <Button onClick={() => setShowSimulationModal(false)} variant="contained" fullWidth>
+              Continue
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    );
+  };
 
   // Debug banner
   const debugInfo = import.meta.env.DEV && (
     <Alert severity="info" sx={{ mb: 2 }}>
       <Typography variant="caption">
         🔍 Debug: Using {analyticsData?.rawAnalytics ? 'REAL API DATA via hooks' : 'MOCK DATA'} • 
-        Analytics: {sportData.rawAnalytics?.length || 0} • 
-        Trends: {playerTrends?.length || 0}
+        Analytics: {Array.isArray(sportData.rawAnalytics) ? sportData.rawAnalytics.length : 0} • 
+        Trends: {Array.isArray(playerTrends) ? playerTrends.length : 0}
       </Typography>
     </Alert>
   );
 
+  console.log('✅ [MainContent] Final render');
   return (
     <Container maxWidth="lg">
       {debugInfo}

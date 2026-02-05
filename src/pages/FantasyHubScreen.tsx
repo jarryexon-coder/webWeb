@@ -57,7 +57,14 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  AlertTitle
+  AlertTitle,
+  // ADD THESE FOR CONSISTENCY WITH PRIZEPICKS SCREEN
+  Snackbar as MuiSnackbar,
+  TablePagination,
+  Rating,
+  Input,
+  CardActions,
+  CardActionArea
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -89,7 +96,13 @@ import {
   ExpandMore as ExpandMoreIcon,
   Leaderboard as LeaderboardIcon,
   Score as ScoreIcon,
-  AccountBalanceWallet as WalletIcon
+  AccountBalanceWallet as WalletIcon,
+  // ADD THESE ICONS
+  Info as InfoIcon,
+  TrendingUp as TrendingUpIcon2,
+  ShowChart as ShowChartIcon,
+  FilterList as FilterListIcon,
+  AttachMoney as AttachMoneyIcon
 } from '@mui/icons-material';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 
@@ -97,6 +110,55 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearch } from '../providers/SearchProvider';
 import { logEvent, logScreenView } from '../utils/analytics';
 
+// ===== ADD DIAGNOSTIC FUNCTION =====
+async function testFantasyAPI() {
+  console.log('🔍 Testing Fantasy Hub API endpoints...');
+  
+  const apiBase = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+  const urls = [
+    `${apiBase}/api/fantasy/teams`,
+    `${apiBase}/api/fantasyhub`,
+    `${apiBase}/api/fantasy`,
+    `${apiBase}/api/fantasy-players`,
+    `${apiBase}/api/fantasy/players`,
+    '/api/fantasy/teams',
+    '/api/fantasyhub',
+    '/api/fantasy'
+  ];
+  
+  for (const url of urls) {
+    console.log(`Testing: ${url}`);
+    try {
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.log(`❌ ${url}: HTTP ${response.status} ${response.statusText}`);
+        continue;
+      }
+      
+      const data = await response.json();
+      console.log(`✅ ${url}: Success!`);
+      console.log('Response keys:', Object.keys(data));
+      console.log('Teams length:', data.teams?.length || data.players?.length || data.data?.length || 'N/A');
+      
+      if (data.teams && data.teams.length > 0) {
+        console.log('Sample team:', data.teams[0]);
+      }
+      
+    } catch (error: any) {
+      console.log(`❌ ${url}: ${error.message}`);
+    }
+    console.log('---');
+  }
+}
+
+// Check environment
+console.log('🌐 FantasyHub Environment check:');
+console.log('VITE_API_BASE:', import.meta.env.VITE_API_BASE);
+console.log('API_BASE:', import.meta.env.API_BASE);
+console.log('NODE_ENV:', import.meta.env.NODE_ENV);
+
+// ===== ADD INTERFACES (Similar to PrizePicksScreen) =====
 interface Player {
   id: string;
   name: string;
@@ -115,6 +177,12 @@ interface Player {
   blocks: number;
   ownership: number;
   threePointers?: number;
+  // ADD PROJECTION FIELDS LIKE PRIZEPICKS
+  projection?: number;
+  projectionEdge?: number;
+  projectionConfidence?: string;
+  valueScore?: number;
+  projectedFantasyScore?: number;
 }
 
 interface TeamStats {
@@ -140,7 +208,7 @@ interface DraftResult {
   results: any;
 }
 
-// ADD INTERFACE FOR FANTASY TEAM FROM API
+// ENHANCED INTERFACE FOR FANTASY TEAM FROM API
 interface FantasyTeam {
   id: string;
   name: string;
@@ -154,6 +222,21 @@ interface FantasyTeam {
   waiverPosition: number;
   movesThisWeek: number;
   lastUpdated: string;
+  // ADD NEW FIELDS FOR PROJECTION ANALYSIS
+  projectionRank?: number;
+  projectedPoints?: number;
+  winProbability?: number;
+  strengthOfSchedule?: number;
+}
+
+// ADD INTERFACE FOR PROJECTION VALUE RESULT
+interface ProjectionValueResult {
+  edge: number;
+  recommendedSide: 'over' | 'under' | 'none';
+  confidence: string;
+  marketImplied: number;
+  estimatedTrueProb: number;
+  projectionDiff: number;
 }
 
 const FantasyHubScreen = () => {
@@ -162,16 +245,24 @@ const FantasyHubScreen = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // State management
-  // const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
+  // ===== STATE MANAGEMENT (SIMILAR TO PRIZEPICKS SCREEN) =====
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
-  // ADD STATE FOR FANTASY TEAMS FROM API (from File 2)
+  // FANTASY TEAMS STATE
   const [fantasyTeams, setFantasyTeams] = useState<FantasyTeam[]>([]);
   const [teamsError, setTeamsError] = useState<string | null>(null);
+  
+  // ADD PROJECTION FILTERING STATE (LIKE PRIZEPICKS)
+  const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
+  const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0);
+  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(true);
+  const [sortByProjectionValue, setSortByProjectionValue] = useState(true);
+  
+  // ADD VALUE FILTERING STATE
+  const [minEdgeThreshold, setMinEdgeThreshold] = useState(0);
   
   // Platform and budget
   const [activePlatform, setActivePlatform] = useState<Platform>({
@@ -185,6 +276,7 @@ const FantasyHubScreen = () => {
   const [team, setTeam] = useState<Player[]>([]);
   const [availablePlayers, setAvailablePlayers] = useState<Player[]>([]);
   const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
+  const [sortedPlayers, setSortedPlayers] = useState<Player[]>([]); // LIKE PRIZEPICKS
   
   // Filters
   const [selectedSport, setSelectedSport] = useState('NBA');
@@ -212,8 +304,15 @@ const FantasyHubScreen = () => {
     efficiency: '0'
   });
   
-  // Notifications
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
+  // Notifications (SIMILAR TO PRIZEPICKS)
+  const [snackbar, setSnackbar] = useState({ 
+    open: false, 
+    message: '', 
+    severity: 'success' as 'success' | 'error' | 'info' | 'warning' 
+  });
+  
+  // ADD ACTIVE ENDPOINT STATE (LIKE PRIZEPICKS)
+  const [activeEndpoint, setActiveEndpoint] = useState<string>('');
   
   // Positions
   const positions = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'];
@@ -232,81 +331,263 @@ const FantasyHubScreen = () => {
     { value: 'MLB', label: 'MLB', icon: <BaseballIcon /> }
   ];
 
-  // ADD FETCH FUNCTION FOR FANTASY TEAMS (from File 2)
+  // ===== ADD API BASE CONFIG (LIKE PRIZEPICKS) =====
+  const API_BASE_URL = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+
+  // ===== ADD DIAGNOSTIC CODE ON MOUNT =====
+  useEffect(() => {
+    console.log('🎯 FantasyHubScreen State Check:');
+    console.log('  fantasyTeams loaded:', !!fantasyTeams);
+    console.log('  fantasyTeams length:', fantasyTeams?.length || 0);
+    console.log('  availablePlayers length:', availablePlayers?.length || 0);
+    console.log('  filteredPlayers length:', filteredPlayers?.length || 0);
+    console.log('  loading:', loading);
+    
+    // Run API diagnostic
+    testFantasyAPI();
+  }, [fantasyTeams, availablePlayers]);
+
+  // ===== ENHANCED FETCH FUNCTION (LIKE PRIZEPICKS) =====
   const fetchFantasyTeams = async () => {
-    console.log('🔍 Fetching fantasy teams...');
+    console.log('🔍 [fetchFantasyTeams] Fetching fantasy teams...');
     setLoading(true);
     setTeamsError(null);
+    setRefreshing(true);
     
     try {
-      const apiBase = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
-      const response = await fetch(`${apiBase}/api/fantasy/teams`);
-      const data = await response.json();
+      const endpoints = [
+        '/api/fantasy/teams',
+        '/api/fantasyhub',
+        '/api/fantasy',
+        '/api/fantasy/players',
+        '/api/fantasy-players'
+      ];
       
-      console.log('✅ Fantasy teams response:', data);
+      let success = false;
       
-      if (data.success && data.teams) {
-        console.log(`✅ Using REAL fantasy teams: ${data.teams.length} teams`);
-        
-        // Transform API data (from File 2)
-        const transformedTeams = data.teams.map((team: any) => ({
-          id: team.id,
-          name: team.name,
-          owner: team.owner,
-          sport: team.sport || 'NBA',
-          league: team.league,
-          record: team.record,
-          points: team.points,
-          rank: team.rank,
-          players: team.players || [],
-          waiverPosition: team.waiverPosition,
-          movesThisWeek: team.movesThisWeek,
-          lastUpdated: team.lastUpdated || new Date().toISOString()
-        }));
-        
-        setFantasyTeams(transformedTeams);
-        
-        // Store for debugging (from File 2)
-        window._fantasyHubDebug = {
-          rawApiResponse: data,
-          transformedTeams,
-          timestamp: new Date().toISOString()
-        };
-      } else {
-        throw new Error(data.message || 'Failed to load fantasy teams');
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`🎯 Trying endpoint: ${endpoint}`);
+          const response = await fetch(`${API_BASE_URL}${endpoint}`);
+          
+          if (!response.ok) {
+            console.log(`❌ ${endpoint}: HTTP ${response.status}`);
+            continue;
+          }
+          
+          const data = await response.json();
+          console.log(`✅ ${endpoint}: Response received`, {
+            success: data.success,
+            count: data.count || data.teams?.length || 0,
+            keys: Object.keys(data)
+          });
+          
+          if (data.success && (data.teams || data.players || data.data)) {
+            // Transform API data
+            const transformedTeams = (data.teams || data.players || data.data || []).map((team: any) => ({
+              id: team.id || team._id || `team-${Date.now()}`,
+              name: team.name || team.teamName || 'Unknown Team',
+              owner: team.owner || team.user || 'Unknown Owner',
+              sport: team.sport || selectedSport,
+              league: team.league || team.leagueName || 'Unknown League',
+              record: team.record || `${team.wins || 0}-${team.losses || 0}-${team.ties || 0}`,
+              points: team.points || team.totalPoints || 0,
+              rank: team.rank || team.position || 1,
+              players: team.players || team.roster || [],
+              waiverPosition: team.waiverPosition || team.waiver || 1,
+              movesThisWeek: team.movesThisWeek || team.transactions || 0,
+              lastUpdated: team.lastUpdated || team.updatedAt || new Date().toISOString(),
+              // Add projection fields
+              projectionRank: team.projectionRank,
+              projectedPoints: team.projectedPoints,
+              winProbability: team.winProbability,
+              strengthOfSchedule: team.strengthOfSchedule
+            }));
+            
+            setFantasyTeams(transformedTeams);
+            setActiveEndpoint(endpoint);
+            setTeamsError(null);
+            
+            console.log(`✅ Successfully loaded ${transformedTeams.length} fantasy teams from ${endpoint}`);
+            
+            setSnackbar({
+              open: true,
+              message: `Successfully loaded ${transformedTeams.length} fantasy teams`,
+              severity: 'success'
+            });
+            
+            success = true;
+            break;
+          }
+        } catch (error) {
+          console.log(`❌ ${endpoint} failed:`, error);
+        }
       }
+      
+      if (!success) {
+        // Fallback to mock data if all endpoints fail
+        console.log('⚠️ All endpoints failed, using mock data');
+        const mockTeams: FantasyTeam[] = [
+          {
+            id: '1',
+            name: 'Dynasty Warriors',
+            owner: 'Alex Johnson',
+            sport: 'NBA',
+            league: 'Premium League',
+            record: '12-4-0',
+            points: 1842,
+            rank: 1,
+            players: ['Stephen Curry', 'LeBron James', 'Nikola Jokic'],
+            waiverPosition: 5,
+            movesThisWeek: 3,
+            lastUpdated: new Date().toISOString()
+          },
+          {
+            id: '2',
+            name: 'Gridiron Gladiators',
+            owner: 'Sarah Miller',
+            sport: 'NFL',
+            league: 'Sunday Funday',
+            record: '10-6-0',
+            points: 1620,
+            rank: 2,
+            players: ['Patrick Mahomes', 'Christian McCaffrey', 'Justin Jefferson'],
+            waiverPosition: 3,
+            movesThisWeek: 2,
+            lastUpdated: new Date().toISOString()
+          }
+        ];
+        
+        setFantasyTeams(mockTeams);
+        setActiveEndpoint('mock');
+        
+        setSnackbar({
+          open: true,
+          message: 'Using sample fantasy teams - API endpoints unavailable',
+          severity: 'warning'
+        });
+      }
+      
     } catch (error: any) {
-      console.error('❌ Fantasy teams error:', error);
+      console.error('❌ Error fetching fantasy teams:', error);
       setTeamsError(error.message);
-      // Fallback to empty array if API fails
       setFantasyTeams([]);
+      
+      setSnackbar({
+        open: true,
+        message: `Failed to load fantasy teams: ${error.message}`,
+        severity: 'error'
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => {
-    logScreenView('FantasyHubScreen');
-    initializeData();
-    
-    // ADD FETCH FOR FANTASY TEAMS (from File 2)
-    fetchFantasyTeams();
-    
-    // Check for initial search params
-    const params = new URLSearchParams(location.search);
-    const initialSearch = params.get('search');
-    if (initialSearch) {
-      setSearchInput(initialSearch);
-      setSearchQuery(initialSearch);
+  // ===== ADD PROJECTION VALUE CALCULATION (LIKE PRIZEPICKS) =====
+  function calculateProjectionValue(player: Player): ProjectionValueResult {
+    if (!player.projection || player.projection === 0) {
+      return { 
+        edge: 0, 
+        recommendedSide: 'none', 
+        confidence: 'low',
+        marketImplied: 0,
+        estimatedTrueProb: 0.5,
+        projectionDiff: 0 
+      };
     }
-  }, [location]);
+    
+    const projectionDiff = player.projection - player.fantasyScore;
+    const isOverProjection = projectionDiff > 0;
+    
+    // Convert to probability estimate
+    const absDiff = Math.abs(projectionDiff);
+    let estimatedTrueProb;
+    
+    if (absDiff > 15) {
+      estimatedTrueProb = isOverProjection ? 0.75 : 0.25;
+    } else if (absDiff > 10) {
+      estimatedTrueProb = isOverProjection ? 0.65 : 0.35;
+    } else if (absDiff > 5) {
+      estimatedTrueProb = isOverProjection ? 0.60 : 0.40;
+    } else {
+      estimatedTrueProb = isOverProjection ? 0.55 : 0.45;
+    }
+    
+    // For fantasy, we don't have odds, so use value as proxy
+    const marketImplied = 0.5; // Assume 50% baseline
+    
+    const edge = estimatedTrueProb - marketImplied;
+    
+    let confidence = 'low';
+    if (edge > 0.05) confidence = 'very-high';
+    else if (edge > 0.03) confidence = 'high';
+    else if (edge > 0.01) confidence = 'medium';
+    else if (edge > 0) confidence = 'low';
+    else confidence = 'no-edge';
+    
+    return {
+      edge,
+      recommendedSide: edge > 0.02 ? (isOverProjection ? 'over' : 'under') : 'none',
+      confidence,
+      marketImplied,
+      estimatedTrueProb,
+      projectionDiff
+    };
+  }
 
+  // ===== ADD VALUE-BASED FILTERING AND SORTING =====
+  const applyValueFiltering = (players: Player[]): Player[] => {
+    let filtered = [...players];
+    
+    // Apply projection filter (if enabled)
+    if (enableProjectionFiltering) {
+      filtered = filtered.filter(p => {
+        if (!p.projection) return false;
+        const diff = Math.abs(p.projection - p.fantasyScore);
+        return diff >= projectionDifferenceThreshold;
+      });
+    }
+    
+    // Apply edge threshold filter
+    if (minEdgeThreshold > 0) {
+      filtered = filtered.filter(p => {
+        const value = calculateProjectionValue(p);
+        return value.edge >= minEdgeThreshold;
+      });
+    }
+    
+    return filtered;
+  };
+
+  const sortByValueScore = (players: Player[]): Player[] => {
+    return [...players].sort((a, b) => {
+      const valueA = calculateProjectionValue(a);
+      const valueB = calculateProjectionValue(b);
+      
+      // Prioritize players with positive projection edge
+      if (valueA.edge > 0 && valueB.edge <= 0) return -1;
+      if (valueB.edge > 0 && valueA.edge <= 0) return 1;
+      
+      if (sortByProjectionValue) {
+        // Sort by projection edge (highest to lowest)
+        return valueB.edge - valueA.edge;
+      } else {
+        // Sort by value score (highest to lowest)
+        return (b.valueScore || b.value) - (a.valueScore || a.value);
+      }
+    });
+  };
+
+  // ===== ENHANCED INITIALIZE DATA =====
   const initializeData = async () => {
     try {
       setLoading(true);
       
-      // Mock data
+      // Fetch fantasy teams
+      await fetchFantasyTeams();
+      
+      // Mock players with projections (similar to PrizePicks)
       const mockPlayers: Player[] = [
         {
           id: '1',
@@ -325,7 +606,13 @@ const FantasyHubScreen = () => {
           steals: 1.2,
           blocks: 0.2,
           ownership: 35.4,
-          threePointers: 4.8
+          threePointers: 4.8,
+          // ADD PROJECTION FIELDS
+          projection: 58.5,
+          projectionEdge: 0.12,
+          projectionConfidence: 'high',
+          valueScore: 85,
+          projectedFantasyScore: 58.5
         },
         {
           id: '2',
@@ -344,7 +631,12 @@ const FantasyHubScreen = () => {
           steals: 1.2,
           blocks: 0.6,
           ownership: 42.1,
-          threePointers: 2.1
+          threePointers: 2.1,
+          projection: 52.0,
+          projectionEdge: 0.08,
+          projectionConfidence: 'medium',
+          valueScore: 72,
+          projectedFantasyScore: 52.0
         },
         {
           id: '3',
@@ -363,7 +655,12 @@ const FantasyHubScreen = () => {
           steals: 1.3,
           blocks: 0.9,
           ownership: 28.7,
-          threePointers: 1.1
+          threePointers: 1.1,
+          projection: 61.5,
+          projectionEdge: 0.15,
+          projectionConfidence: 'very-high',
+          valueScore: 92,
+          projectedFantasyScore: 61.5
         },
         {
           id: '4',
@@ -382,7 +679,12 @@ const FantasyHubScreen = () => {
           steals: 1.2,
           blocks: 0.5,
           ownership: 28.9,
-          threePointers: 3.1
+          threePointers: 3.1,
+          projection: 49.8,
+          projectionEdge: 0.10,
+          projectionConfidence: 'high',
+          valueScore: 78,
+          projectedFantasyScore: 49.8
         },
         {
           id: '5',
@@ -401,14 +703,31 @@ const FantasyHubScreen = () => {
           steals: 1.0,
           blocks: 0.5,
           ownership: 31.5,
-          threePointers: 3.2
+          threePointers: 3.2,
+          projection: 42.0,
+          projectionEdge: -0.06,
+          projectionConfidence: 'low',
+          valueScore: 45,
+          projectedFantasyScore: 42.0
         }
       ];
       
       setAvailablePlayers(mockPlayers);
-      setFilteredPlayers(mockPlayers);
+      
+      // Apply filtering and sorting
+      const valueFiltered = applyValueFiltering(mockPlayers);
+      const sortedByValue = sortByValueScore(valueFiltered);
+      
+      setFilteredPlayers(valueFiltered);
+      setSortedPlayers(sortedByValue);
       
       calculateTeamStats([]);
+      
+      console.log('✅ Data initialized:', {
+        players: mockPlayers.length,
+        filtered: valueFiltered.length,
+        sorted: sortedByValue.length
+      });
       
     } catch (error) {
       console.error('Error initializing data:', error);
@@ -418,6 +737,70 @@ const FantasyHubScreen = () => {
     }
   };
 
+  // ===== ENHANCED FILTER EFFECT (LIKE PRIZEPICKS) =====
+  useEffect(() => {
+    console.log('🔄 FantasyHub filter useEffect triggered');
+    
+    if (!availablePlayers || availablePlayers.length === 0) {
+      setFilteredPlayers([]);
+      setSortedPlayers([]);
+      return;
+    }
+    
+    // Basic filters
+    let filtered = availablePlayers.filter(player => {
+      if (!player.name) return false;
+      
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        if (!player.name.toLowerCase().includes(query) &&
+            !player.team.toLowerCase().includes(query) &&
+            !player.position.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      
+      if (selectedPosition !== 'ALL' && player.position !== selectedPosition) {
+        return false;
+      }
+      
+      if (selectedTeam !== 'all' && player.team !== selectedTeam) {
+        return false;
+      }
+      
+      return true;
+    });
+    
+    // Apply value filtering
+    const valueFiltered = applyValueFiltering(filtered);
+    const sorted = sortByValueScore(valueFiltered);
+    
+    setFilteredPlayers(valueFiltered);
+    setSortedPlayers(sorted);
+    
+    console.log(`✅ Filtered to ${valueFiltered.length} players, sorted: ${sorted.length}`);
+    
+  }, [availablePlayers, searchQuery, selectedPosition, selectedTeam, 
+      enableProjectionFiltering, projectionDifferenceThreshold, 
+      minEdgeThreshold, sortByProjectionValue]);
+
+  // ===== LOAD DATA ON MOUNT =====
+  useEffect(() => {
+    logScreenView('FantasyHubScreen');
+    console.log('🚀 FantasyHubScreen mounted, initializing...');
+    
+    initializeData();
+    
+    // Check for initial search params
+    const params = new URLSearchParams(location.search);
+    const initialSearch = params.get('search');
+    if (initialSearch) {
+      setSearchInput(initialSearch);
+      setSearchQuery(initialSearch);
+    }
+  }, [location]);
+
+  // ===== ENHANCED CALCULATE TEAM STATS =====
   const calculateTeamStats = (teamData: Player[]) => {
     if (!teamData || teamData.length === 0) {
       setTeamStats({
@@ -456,6 +839,7 @@ const FantasyHubScreen = () => {
     });
   };
 
+  // ===== ENHANCED SEARCH HANDLER =====
   const handleSearchSubmit = async () => {
     const command = searchInput.trim().toLowerCase();
     
@@ -467,41 +851,19 @@ const FantasyHubScreen = () => {
     }
     
     if (searchInput.trim()) {
-      // await addToSearchHistory(searchInput.trim());
       setSearchQuery(searchInput.trim());
-      filterPlayers(searchInput.trim());
+      setSnackbar({
+        open: true,
+        message: `Searching for "${searchInput.trim()}"...`,
+        severity: 'info'
+      });
     } else {
       setSearchQuery('');
       setFilteredPlayers(availablePlayers);
     }
   };
 
-  const filterPlayers = (query: string) => {
-    const searchLower = query.toLowerCase().trim();
-    
-    const filtered = availablePlayers.filter(player =>
-      player.name.toLowerCase().includes(searchLower) ||
-      player.team.toLowerCase().includes(searchLower) ||
-      player.position.toLowerCase().includes(searchLower)
-    );
-    
-    setFilteredPlayers(filtered);
-  };
-
-  const handlePlatformChange = (platform: Platform) => {
-    setActivePlatform(platform);
-    
-    // Recalculate budget based on current team salaries for the new platform
-    let newBudget = platform.budget;
-    const totalSpent = team.reduce((total, player) => {
-      const playerSalary = platform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
-      return total + (playerSalary || 0);
-    }, 0);
-    
-    newBudget = platform.budget - totalSpent;
-    setBudget(newBudget);
-  };
-
+  // ===== ENHANCED PLAYER MANAGEMENT =====
   const addPlayer = (player: Player) => {
     const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
     
@@ -510,10 +872,17 @@ const FantasyHubScreen = () => {
       setTeam(newTeam);
       setBudget(budget - playerSalary);
       setAvailablePlayers(availablePlayers.filter(p => p.id !== player.id));
-      setFilteredPlayers(filteredPlayers.filter(p => p.id !== player.id));
       calculateTeamStats(newTeam);
       
       setSnackbar({ open: true, message: `Added ${player.name} to your team`, severity: 'success' });
+      
+      // Log analytics
+      logEvent('fantasy_add_player', {
+        player_name: player.name,
+        position: player.position,
+        salary: playerSalary,
+        remaining_budget: budget - playerSalary
+      });
     } else {
       setSnackbar({ open: true, message: `Not enough budget to add ${player.name}`, severity: 'error' });
     }
@@ -526,173 +895,59 @@ const FantasyHubScreen = () => {
     setTeam(newTeam);
     setBudget(budget + playerSalary);
     setAvailablePlayers([...availablePlayers, player]);
-    setFilteredPlayers([...filteredPlayers, player]);
     calculateTeamStats(newTeam);
     
     setSnackbar({ open: true, message: `Removed ${player.name} from your team`, severity: 'success' });
   };
 
-  const handleDraftCommand = async (command: string) => {
-    const parts = command.trim().toLowerCase().split(' ');
-    
-    if (parts[0] === 'snake' && parts[1]) {
-      const position = parseInt(parts[1]);
-      if (isNaN(position) || position < 1) {
-        setSnackbar({ open: true, message: 'Invalid draft position', severity: 'error' });
-        return;
-      }
-      
-      await fetchSnakeDraft(position);
-    } else if (parts[0] === 'turn' && parts[1]) {
-      const position = parseInt(parts[1]);
-      if (isNaN(position) || position < 1) {
-        setSnackbar({ open: true, message: 'Invalid draft position', severity: 'error' });
-        return;
-      }
-      
-      await fetchTurnDraft(position);
-    }
-  };
-
-  const fetchSnakeDraft = async (position: number) => {
-    setIsGeneratingDraft(true);
-    try {
-      // Mock draft results
-      const mockResults: DraftResult = {
-        success: true,
-        draftPosition: position,
-        sport: selectedSport,
-        platform: activePlatform.name,
-        results: [
-          {
-            player: {
-              id: '1',
-              name: 'Stephen Curry',
-              position: 'PG',
-              team: 'GSW',
-              value: 1.42,
-              fantasyScore: 52.3,
-              fanDuelSalary: 9500,
-              draftKingsSalary: 9200,
-            },
-            reason: `Excellent value at pick ${position} - Elite shooting and high floor`
-          },
-          {
-            player: {
-              id: '2',
-              name: 'LeBron James',
-              position: 'SF',
-              team: 'LAL',
-              value: 1.35,
-              fantasyScore: 48.7,
-              fanDuelSalary: 9800,
-              draftKingsSalary: 9500,
-            },
-            reason: `Consistent production at pick ${position} - All-around contributor`
-          },
-          {
-            player: {
-              id: '3',
-              name: 'Nikola Jokic',
-              position: 'C',
-              team: 'DEN',
-              value: 1.48,
-              fantasyScore: 56.1,
-              fanDuelSalary: 10500,
-              draftKingsSalary: 10200,
-            },
-            reason: `Best available at pick ${position} - Triple-double machine`
-          }
-        ]
-      };
-      
-      setDraftResults(mockResults);
-      setDraftType('snake');
-      setShowDraftResults(true);
-      
-    } catch (error) {
-      setSnackbar({ open: true, message: 'Failed to generate draft results', severity: 'error' });
-    } finally {
-      setIsGeneratingDraft(false);
-    }
-  };
-
-  const fetchTurnDraft = async (position: number) => {
-    setIsGeneratingDraft(true);
-    try {
-      // Mock turn draft results
-      const mockResults: DraftResult = {
-        success: true,
-        draftPosition: position,
-        sport: selectedSport,
-        platform: activePlatform.name,
-        results: {
-          PG: Array.from({ length: 5 }, (_, i) => ({
-            player: {
-              id: `pg-${i}`,
-              name: `PG Player ${i + 1}`,
-              position: 'PG',
-              team: ['GSW', 'LAL', 'DEN', 'BOS', 'MIL'][i],
-              salary: activePlatform.name === 'FanDuel' ? [8500, 7200, 6500, 5800, 5000][i] : [8000, 6800, 6200, 5500, 4800][i],
-              value: [1.4, 1.3, 1.25, 1.2, 1.15][i],
-              fantasyScore: [45, 38, 35, 32, 28][i],
-              injuryStatus: i === 2 ? 'GTD' : 'ACTIVE',
-              opponent: ['SAS', 'DET', 'HOU', 'CHA', 'ORL'][i]
-            },
-            selectionScore: [85.5, 78.2, 72.4, 68.1, 62.3][i],
-            reasons: i === 0 ? 
-              ['Excellent value', 'Favorable matchup', 'No injury concerns'] :
-              ['Good value', 'Solid matchup', 'Safe pick']
-          }))
-        }
-      };
-      
-      setDraftResults(mockResults);
-      setDraftType('turn');
-      setShowDraftResults(true);
-      
-    } catch (error) {
-      setSnackbar({ open: true, message: 'Failed to generate draft results', severity: 'error' });
-    } finally {
-      setIsGeneratingDraft(false);
-    }
-  };
-
+  // ===== ENHANCED REFRESH HANDLER =====
   const onRefresh = async () => {
     setRefreshing(true);
     setSearchQuery('');
     setSearchInput('');
+    
     try {
       await initializeData();
-      // ADD REFRESH FOR FANTASY TEAMS (from File 2)
       await fetchFantasyTeams();
-      setSnackbar({ open: true, message: 'Data refreshed successfully', severity: 'success' });
+      
+      setSnackbar({ 
+        open: true, 
+        message: 'Data refreshed successfully', 
+        severity: 'success' 
+      });
     } catch (error) {
-      setSnackbar({ open: true, message: 'Failed to refresh data', severity: 'error' });
+      setSnackbar({ 
+        open: true, 
+        message: 'Failed to refresh data', 
+        severity: 'error' 
+      });
     } finally {
       setRefreshing(false);
     }
   };
 
-  // ADD LOADING STATE (from File 2 pattern)
+  // ===== LOADING STATE =====
   if (loading) {
     return (
-      <Container>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+      <Container maxWidth="lg">
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', flexDirection: 'column' }}>
           <CircularProgress />
-          <Typography sx={{ ml: 2 }}>Loading fantasy teams...</Typography>
+          <Typography sx={{ ml: 2, mt: 2 }}>Loading Fantasy Hub...</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Loading fantasy teams and player data...
+          </Typography>
         </Box>
       </Container>
     );
   }
 
-  // ADD ERROR STATE (from File 2 pattern)
+  // ===== ERROR STATE =====
   if (teamsError) {
     return (
-      <Container>
+      <Container maxWidth="lg">
         <Alert 
           severity="error" 
-          sx={{ mb: 3 }}
+          sx={{ mb: 3, mt: 4 }}
           action={
             <Button color="inherit" size="small" onClick={fetchFantasyTeams}>
               RETRY
@@ -701,32 +956,152 @@ const FantasyHubScreen = () => {
         >
           <AlertTitle>Error Loading Fantasy Teams</AlertTitle>
           {teamsError}
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            API Endpoint: {activeEndpoint || 'Not configured'}
+          </Typography>
         </Alert>
       </Container>
     );
   }
 
-  // ADD RENDER FUNCTION FOR FANTASY TEAMS SECTION (from File 2)
-  const renderFantasyTeamsSection = () => (
-    <Paper sx={{ p: 3, mb: 4 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Typography variant="h5" fontWeight="bold">
-          Your Fantasy Teams
+  // ===== ADD PROJECTION FILTERING CONTROLS (LIKE PRIZEPICKS) =====
+  const renderProjectionFilteringControls = () => (
+    <Paper sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <FilterIcon sx={{ mr: 1, color: '#3b82f6' }} />
+        <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 'bold' }}>
+          Projection-Based Analysis
         </Typography>
-        <IconButton onClick={fetchFantasyTeams} disabled={refreshing}>
-          <RefreshIcon />
-        </IconButton>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={enableProjectionFiltering}
+              onChange={(e) => setEnableProjectionFiltering(e.target.checked)}
+              color="primary"
+            />
+          }
+          label="Enable Projection Filtering"
+          sx={{ ml: 'auto' }}
+        />
       </Box>
 
-      {fantasyTeams.length === 0 ? (
-        <Typography color="text.secondary" align="center" py={4}>
-          No fantasy teams available
-        </Typography>
-      ) : (
+      {enableProjectionFiltering && (
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Min Projection Diff</InputLabel>
+              <Select
+                value={projectionDifferenceThreshold}
+                onChange={(e) => setProjectionDifferenceThreshold(parseFloat(e.target.value))}
+                label="Min Projection Diff"
+              >
+                <MenuItem value={0.5}>0.5+ points</MenuItem>
+                <MenuItem value={1.0}>1.0+ points (Default)</MenuItem>
+                <MenuItem value={1.5}>1.5+ points</MenuItem>
+                <MenuItem value={2.0}>2.0+ points</MenuItem>
+                <MenuItem value={3.0}>3.0+ points</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={onlyShowProjectionEdges}
+                  onChange={(e) => setOnlyShowProjectionEdges(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Only Positive Edge"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={sortByProjectionValue}
+                  onChange={(e) => setSortByProjectionValue(e.target.checked)}
+                  color="primary"
+              />
+              }
+              label="Sort by Projection Value"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Min Edge</InputLabel>
+              <Select
+                value={minEdgeThreshold}
+                onChange={(e) => setMinEdgeThreshold(parseFloat(e.target.value))}
+                label="Min Edge"
+              >
+                <MenuItem value={0}>Any positive</MenuItem>
+                <MenuItem value={0.01}>1%+</MenuItem>
+                <MenuItem value={0.02}>2%+</MenuItem>
+                <MenuItem value={0.03}>3%+</MenuItem>
+                <MenuItem value={0.05}>5%+</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+      )}
+    </Paper>
+  );
+
+  // ===== ENHANCED FANTASY TEAMS SECTION =====
+  const renderFantasyTeamsSection = () => {
+    if (!fantasyTeams || fantasyTeams.length === 0) {
+      return (
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            Your Fantasy Teams
+          </Typography>
+          <Alert severity="info">
+            No fantasy teams available. Check API connection or try refreshing.
+          </Alert>
+        </Paper>
+      );
+    }
+
+    return (
+      <Paper sx={{ p: 3, mb: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+          <Box>
+            <Typography variant="h5" fontWeight="bold">
+              🏆 Your Fantasy Teams
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {fantasyTeams.length} teams loaded from {activeEndpoint === 'mock' ? 'sample data' : 'API'}
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Tooltip title="Data Source">
+              <Chip 
+                label={`Source: ${activeEndpoint === 'mock' ? 'Sample Data' : activeEndpoint}`}
+                size="small"
+                color={activeEndpoint === 'mock' ? 'warning' : 'success'}
+              />
+            </Tooltip>
+            <IconButton onClick={fetchFantasyTeams} disabled={refreshing}>
+              <RefreshIcon />
+            </IconButton>
+          </Box>
+        </Box>
+
         <Grid container spacing={3}>
           {fantasyTeams.map((team) => (
             <Grid item xs={12} md={6} key={team.id}>
-              <Card>
+              <Card sx={{ 
+                height: '100%',
+                transition: 'transform 0.2s',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 6,
+                }
+              }}>
                 <CardContent>
                   <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                     <Avatar sx={{ 
@@ -740,32 +1115,87 @@ const FantasyHubScreen = () => {
                       {team.sport === 'NHL' && <HockeyIcon />}
                       {team.sport === 'MLB' && <BaseballIcon />}
                     </Avatar>
-                    <Box>
-                      <Typography variant="h6">{team.name}</Typography>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="h6" fontWeight="bold">
+                        {team.name}
+                      </Typography>
                       <Typography variant="body2" color="text.secondary">
                         {team.owner} • {team.league}
                       </Typography>
                     </Box>
+                    <Chip 
+                      label={`Rank #${team.rank}`}
+                      color={team.rank <= 3 ? 'success' : 'default'}
+                      sx={{ fontWeight: 'bold' }}
+                    />
                   </Box>
                   
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                    <Chip label={`Rank #${team.rank}`} color="primary" />
-                    <Chip label={`${team.points} pts`} variant="outlined" />
-                  </Box>
+                  <Grid container spacing={2} sx={{ mb: 2 }}>
+                    <Grid item xs={6}>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Record
+                        </Typography>
+                        <Typography variant="h6" fontWeight="bold">
+                          {team.record}
+                        </Typography>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Points
+                        </Typography>
+                        <Typography variant="h6" fontWeight="bold" color="primary">
+                          {team.points}
+                        </Typography>
+                      </Box>
+                    </Grid>
+                  </Grid>
                   
-                  <Typography variant="body2" gutterBottom>
-                    Record: {team.record}
-                  </Typography>
-                  
-                  {team.players && team.players.length > 0 && (
-                    <Box sx={{ mt: 2 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        Top Players: {team.players.slice(0, 3).join(', ')}
-                      </Typography>
+                  {team.projectedPoints && (
+                    <Box sx={{ 
+                      p: 1, 
+                      mb: 2, 
+                      bgcolor: '#f0f9ff', 
+                      borderRadius: 1,
+                      border: '1px solid #bae6fd'
+                    }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2" fontWeight="bold" color="#0369a1">
+                          Projected: {team.projectedPoints} points
+                        </Typography>
+                        {team.winProbability && (
+                          <Chip 
+                            label={`${(team.winProbability * 100).toFixed(0)}% win prob`}
+                            size="small"
+                            color="success"
+                          />
+                        )}
+                      </Box>
                     </Box>
                   )}
                   
-                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {team.players && team.players.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Top Players:
+                      </Typography>
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                        {team.players.slice(0, 5).map((player, index) => (
+                          <Chip
+                            key={index}
+                            label={player}
+                            size="small"
+                            variant="outlined"
+                            sx={{ mb: 0.5 }}
+                          />
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
                     <Typography variant="caption" color="text.secondary">
                       Last updated: {new Date(team.lastUpdated).toLocaleDateString()}
                     </Typography>
@@ -774,7 +1204,7 @@ const FantasyHubScreen = () => {
                       variant="outlined"
                       onClick={() => navigate(`/team/${team.id}`)}
                     >
-                      View Details
+                      View Team
                     </Button>
                   </Box>
                 </CardContent>
@@ -782,793 +1212,160 @@ const FantasyHubScreen = () => {
             </Grid>
           ))}
         </Grid>
-      )}
-    </Paper>
-  );
-
-  const renderHeader = () => (
-    <Box sx={{
-      background: 'linear-gradient(135deg, #1e3a8a, #3b82f6)',
-      color: 'white',
-      py: { xs: 4, md: 5 },
-      mb: 4,
-      borderRadius: { xs: 0, sm: 2 },
-    }}>
-      <Container maxWidth="lg">
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-          <IconButton 
-            component={Link} 
-            to="/" 
-            sx={{ color: 'white', mr: 2 }}
-          >
-            <ArrowBackIcon />
-          </IconButton>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>
-              🏀 Fantasy Team PRO
-            </Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>
-              Build & manage your dream team • AI-powered analytics
-            </Typography>
-          </Box>
-          <Fab
-            color="primary"
-            onClick={onRefresh}
-            disabled={refreshing}
-            size="small"
-          >
-            {refreshing ? <CircularProgress size={24} color="inherit" /> : <RefreshIcon />}
-          </Fab>
-        </Box>
-      </Container>
-    </Box>
-  );
-
-  const renderPlatformSelector = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        Select Platform:
-      </Typography>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-        {platforms.map((platform) => (
-          <Card
-            key={platform.name}
-            sx={{
-              flex: 1,
-              cursor: 'pointer',
-              border: activePlatform.name === platform.name ? `2px solid ${platform.color}` : '2px solid transparent',
-              transition: 'all 0.2s',
-              '&:hover': {
-                transform: 'translateY(-2px)',
-                boxShadow: 4,
-              }
-            }}
-            onClick={() => handlePlatformChange(platform)}
-          >
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Box sx={{ 
-                width: 48, 
-                height: 48, 
-                borderRadius: '50%', 
-                bgcolor: activePlatform.name === platform.name ? platform.color : 'transparent',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                mx: 'auto',
-                mb: 2,
-                border: `2px solid ${platform.color}`
-              }}>
-                <WalletIcon sx={{ 
-                  color: activePlatform.name === platform.name ? 'white' : platform.color,
-                  fontSize: 24 
-                }} />
-              </Box>
-              <Typography variant="h6" fontWeight="bold">
-                {platform.name}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Budget: ${platform.budget.toLocaleString()}
-              </Typography>
-            </CardContent>
-          </Card>
-        ))}
-      </Stack>
-    </Paper>
-  );
-
-  const renderBudgetDisplay = () => (
-    <Card sx={{ mb: 3 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <WalletIcon sx={{ color: '#10b981', mr: 1, fontSize: 32 }} />
-          <Box>
-            <Typography variant="h6" fontWeight="bold">
-              Salary Cap Budget
-            </Typography>
-            <Typography variant="h4" color="primary" fontWeight="bold">
-              ${budget.toLocaleString()} remaining
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-            <Typography variant="body2" color="text.secondary">
-              Spent: ${(activePlatform.budget - budget).toLocaleString()}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Total: ${activePlatform.budget.toLocaleString()}
-            </Typography>
-          </Box>
-          <LinearProgress 
-            variant="determinate" 
-            value={((activePlatform.budget - budget) / activePlatform.budget) * 100}
-            sx={{ height: 10, borderRadius: 5 }}
-          />
-        </Box>
-        
-        <Grid container spacing={1}>
-          <Grid item xs={4}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Remaining
-              </Typography>
-              <Typography variant="h6" fontWeight="bold">
-                ${budget.toLocaleString()}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={4}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Spent
-              </Typography>
-              <Typography variant="h6" fontWeight="bold">
-                ${(activePlatform.budget - budget).toLocaleString()}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={4}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Platform
-              </Typography>
-              <Typography variant="h6" fontWeight="bold">
-                {activePlatform.name}
-              </Typography>
-            </Box>
-          </Grid>
-        </Grid>
-      </CardContent>
-    </Card>
-  );
-
-  const renderTeamStatsCard = () => (
-    <Card sx={{ mb: 3 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <LeaderboardIcon sx={{ color: '#3b82f6', mr: 1 }} />
-          <Typography variant="h6" fontWeight="bold">
-            Team Performance Metrics
-          </Typography>
-        </Box>
-        
-        <Grid container spacing={2}>
-          <Grid item xs={6} md={3}>
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f0f9ff' }}>
-              <Typography variant="h4" color="primary" fontWeight="bold">
-                {teamStats.avgPoints}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Avg Points
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} md={3}>
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f0fdf4' }}>
-              <Typography variant="h4" color="#10b981" fontWeight="bold">
-                {teamStats.avgRebounds}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Avg Rebounds
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} md={3}>
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fef3c7' }}>
-              <Typography variant="h4" color="#f59e0b" fontWeight="bold">
-                {teamStats.avgAssists}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Avg Assists
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} md={3}>
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fef2f2' }}>
-              <Typography variant="h4" color="#ef4444" fontWeight="bold">
-                {teamStats.fantasyScore}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Fantasy Score
-              </Typography>
-            </Paper>
-          </Grid>
-        </Grid>
-        
-        <Box sx={{ mt: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-            <Typography variant="body1" fontWeight="medium">
-              Team Efficiency: {teamStats.efficiency} FPTS/$1K
-            </Typography>
-            <Chip 
-              label={parseFloat(teamStats.efficiency) > 1 ? 'Excellent' : parseFloat(teamStats.efficiency) > 0.8 ? 'Good' : 'Poor'}
-              size="small"
-              color={parseFloat(teamStats.efficiency) > 1 ? 'success' : parseFloat(teamStats.efficiency) > 0.8 ? 'warning' : 'error'}
-            />
-          </Box>
-          <LinearProgress 
-            variant="determinate" 
-            value={Math.min(parseFloat(teamStats.efficiency) * 50, 100)}
-            sx={{ height: 8, borderRadius: 4 }}
-          />
-        </Box>
-      </CardContent>
-    </Card>
-  );
-
-  const renderPlayerCard = (player: Player, isTeamMember: boolean) => {
-    const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
-    const canAdd = budget >= playerSalary;
-    
-    const TrendIcon = player.trend === 'up' ? TrendingUpIcon : 
-                     player.trend === 'down' ? TrendingDownIcon : TrendingFlatIcon;
-    const trendColor = player.trend === 'up' ? '#10b981' : 
-                      player.trend === 'down' ? '#ef4444' : '#6b7280';
-    
-    return (
-      <Card key={player.id} sx={{ mb: 2 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-            <Box>
-              <Typography variant="h6" fontWeight="bold">
-                {player.name}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {player.position} • {player.team}
-              </Typography>
-            </Box>
-            <Chip 
-              label={`$${playerSalary.toLocaleString()}`}
-              size="small"
-              color="primary"
-              sx={{ fontWeight: 'bold' }}
-            />
-          </Box>
-          
-          <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">
-                  PTS
-                </Typography>
-                <Typography variant="h6" fontWeight="bold">
-                  {player.points}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">
-                  REB
-                </Typography>
-                <Typography variant="h6" fontWeight="bold">
-                  {player.rebounds}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">
-                  AST
-                </Typography>
-                <Typography variant="h6" fontWeight="bold">
-                  {player.assists}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={3}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">
-                  FPTS
-                </Typography>
-                <Typography variant="h6" fontWeight="bold" color="#8b5cf6">
-                  {player.fantasyScore}
-                </Typography>
-              </Box>
-            </Grid>
-          </Grid>
-          
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <TrendIcon sx={{ color: trendColor, mr: 0.5 }} />
-              <Typography variant="body2" sx={{ color: trendColor, fontWeight: 'bold' }}>
-                Value: {player.value.toFixed(2)}x
-              </Typography>
-            </Box>
-            <Chip 
-              label={`${player.ownership}% owned`}
-              size="small"
-              variant="outlined"
-            />
-          </Box>
-          
-          {isTeamMember ? (
-            <Button
-              fullWidth
-              variant="outlined"
-              color="error"
-              startIcon={<RemoveIcon />}
-              onClick={() => removePlayer(player)}
-            >
-              Remove from Team
-            </Button>
-          ) : (
-            <Button
-              fullWidth
-              variant="contained"
-              color="success"
-              startIcon={<AddIcon />}
-              onClick={() => canAdd ? addPlayer(player) : null}
-              disabled={!canAdd}
-            >
-              {canAdd ? 'Add to Team' : 'Insufficient Budget'}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+      </Paper>
     );
   };
 
-  const renderSearchBar = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        🔍 Search Players
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 1 }}>
-        <TextField
-          fullWidth
-          placeholder="Search players or enter draft command (Snake 33, Turn 33)..."
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSearchSubmit()}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon />
-              </InputAdornment>
-            ),
-            endAdornment: searchInput && (
-              <InputAdornment position="end">
-                <IconButton onClick={() => { setSearchInput(''); setSearchQuery(''); }}>
-                  <ClearIcon />
-                </IconButton>
-              </InputAdornment>
-            ),
-          }}
-        />
-        <Button
-          variant="contained"
-          onClick={handleSearchSubmit}
-          sx={{ minWidth: 120 }}
-        >
-          Search
-        </Button>
-      </Box>
-      {searchQuery && (
-        <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="body2" color="text.secondary">
-            {filteredPlayers.length} of {availablePlayers.length} players match "{searchQuery}"
-          </Typography>
-          <Button size="small" onClick={() => { setSearchQuery(''); setSearchInput(''); }}>
-            Clear
-          </Button>
-        </Box>
-      )}
-    </Paper>
-  );
-
-  const renderAIPrompts = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
-      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-        <LightbulbIcon sx={{ mr: 1 }} /> AI Assistant Prompts
-      </Typography>
-      
-      <Grid container spacing={1}>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            fullWidth
-            variant="outlined"
-            onClick={() => setSnackbar({ open: true, message: 'Showing best value picks...', severity: 'success' })}
-            sx={{ justifyContent: 'flex-start' }}
-          >
-            🎯 Best Value Picks
-          </Button>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            fullWidth
-            variant="outlined"
-            onClick={() => setSnackbar({ open: true, message: 'Analyzing matchups...', severity: 'success' })}
-            sx={{ justifyContent: 'flex-start' }}
-          >
-            📊 Favorable Matchups
-          </Button>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            fullWidth
-            variant="outlined"
-            onClick={() => fetchSnakeDraft(12)}
-            sx={{ justifyContent: 'flex-start' }}
-          >
-            🐍 Snake Draft #12
-          </Button>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            fullWidth
-            variant="outlined"
-            onClick={() => fetchTurnDraft(33)}
-            sx={{ justifyContent: 'flex-start' }}
-          >
-            🔄 Turn Draft #33
-          </Button>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-
-  const renderYourTeamSection = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Typography variant="h6" fontWeight="bold">
-          📋 Your Team ({team.length}/8 Players)
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setShowAddPlayer(true)}
-        >
-          Add Player
-        </Button>
-      </Box>
-      
-      {team.length > 0 ? (
-        team.map(player => renderPlayerCard(player, true))
-      ) : (
-        <Box sx={{ textAlign: 'center', py: 4 }}>
-          <GroupIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            Your team is empty
-          </Typography>
-          <Typography variant="body2" color="text.secondary" paragraph>
-            Add players from the available pool to build your fantasy team
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setShowAddPlayer(true)}
-          >
-            Add First Player
-          </Button>
-        </Box>
-      )}
-    </Paper>
-  );
-
-  const renderAddPlayerModal = () => (
-    <Dialog
-      open={showAddPlayer}
-      onClose={() => setShowAddPlayer(false)}
-      maxWidth="lg"
-      fullWidth
-      scroll="paper"
-    >
-      <DialogTitle>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6" fontWeight="bold">
-            Add Players to Team
-          </Typography>
-          <IconButton onClick={() => setShowAddPlayer(false)}>
-            <ClearIcon />
-          </IconButton>
-        </Box>
-      </DialogTitle>
-      
-      <DialogContent dividers>
-        <Box sx={{ mb: 3 }}>
-          <TextField
-            fullWidth
-            placeholder="Search available players..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearchSubmit()}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            }}
-          />
-        </Box>
-        
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Filter by Position:
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {positions.map((position) => (
-              <Chip
-                key={position}
-                label={position}
-                onClick={() => setSelectedPosition(position)}
-                color={selectedPosition === position ? 'primary' : 'default'}
-                variant={selectedPosition === position ? 'filled' : 'outlined'}
-                sx={{ mb: 1 }}
-              />
-            ))}
-          </Stack>
-        </Box>
-        
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Filter by Sport:
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {sports.map((sport) => (
-              <Chip
-                key={sport.value}
-                label={sport.label}
-                icon={sport.icon}
-                onClick={() => setSelectedSport(sport.value)}
-                color={selectedSport === sport.value ? 'primary' : 'default'}
-                variant={selectedSport === sport.value ? 'filled' : 'outlined'}
-                sx={{ mb: 1 }}
-              />
-            ))}
-          </Stack>
-        </Box>
-        
-        <Divider sx={{ my: 2 }} />
-        
-        <Typography variant="h6" gutterBottom>
-          Available Players ({filteredPlayers.length})
+  // ===== ENHANCED TOP VALUE PICKS TABLE =====
+  const renderTopValuePicks = () => {
+    const topPicks = sortedPlayers
+      .filter(p => {
+        const value = calculateProjectionValue(p);
+        return value.edge > 0;
+      })
+      .slice(0, 5);
+    
+    if (topPicks.length === 0) return null;
+    
+    return (
+      <Paper sx={{ mb: 3, p: 2, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+        <Typography variant="h6" sx={{ color: '#059669', fontWeight: 'bold', mb: 2 }}>
+          🎯 Top Projection Value Picks
         </Typography>
         
-        {filteredPlayers.length > 0 ? (
-          filteredPlayers.map(player => renderPlayerCard(player, false))
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <SearchIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary">
-              No players found
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Try adjusting your search or filters
-            </Typography>
-          </Box>
-        )}
-      </DialogContent>
-      
-      <DialogActions>
-        <Button onClick={() => setShowAddPlayer(false)}>
-          Close
-        </Button>
-        <Button 
-          variant="contained" 
-          onClick={() => {
-            // Add some logic for auto-pick
-            const bestValuePlayer = filteredPlayers.sort((a, b) => b.value - a.value)[0];
-            if (bestValuePlayer) {
-              addPlayer(bestValuePlayer);
-            }
-          }}
-        >
-          Auto Pick Best Value
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  const renderDraftResultsModal = () => (
-    <Dialog
-      open={showDraftResults}
-      onClose={() => setShowDraftResults(false)}
-      maxWidth="md"
-      fullWidth
-    >
-      <DialogTitle>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>
-            <Typography variant="h6" fontWeight="bold">
-              {draftType === 'snake' ? '🐍 Snake Draft Results' : '🔄 Turn Draft Results'}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Pick #{draftResults?.draftPosition} • {draftResults?.sport} • {draftResults?.platform}
-            </Typography>
-          </Box>
-          <IconButton onClick={() => setShowDraftResults(false)}>
-            <ClearIcon />
-          </IconButton>
-        </Box>
-      </DialogTitle>
-      
-      <DialogContent dividers>
-        {isGeneratingDraft ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
-            <CircularProgress />
-            <Typography sx={{ mt: 2 }}>
-              Generating {draftType === 'snake' ? 'Snake' : 'Turn'} Draft Results...
-            </Typography>
-          </Box>
-        ) : draftType === 'snake' ? (
-          <Box>
-            <Typography variant="h6" gutterBottom align="center">
-              Top 3 Available Players at Pick #{draftResults?.draftPosition}
-            </Typography>
-            {draftResults?.results.map((item: any, index: number) => (
-              <Card key={index} sx={{ mb: 2 }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <Avatar sx={{ bgcolor: 'primary.main', mr: 2 }}>
-                      {index + 1}
-                    </Avatar>
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="h6">
-                        {item.player.name}
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>Player</strong></TableCell>
+                <TableCell><strong>Position</strong></TableCell>
+                <TableCell><strong>Fantasy Score</strong></TableCell>
+                <TableCell><strong>Projection</strong></TableCell>
+                <TableCell><strong>Projection Edge</strong></TableCell>
+                <TableCell><strong>Value</strong></TableCell>
+                <TableCell><strong>Salary</strong></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {topPicks.map((player, index) => {
+                const value = calculateProjectionValue(player);
+                return (
+                  <TableRow key={player.id}>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        {player.name}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {item.player.position} • {item.player.team}
+                      <Typography variant="caption" color="text.secondary">
+                        {player.team}
                       </Typography>
-                    </Box>
-                    <Chip 
-                      label={`Value: ${item.player.value.toFixed(2)}x`}
-                      color="success"
-                      size="small"
-                    />
-                  </Box>
-                  
-                  <Grid container spacing={1} sx={{ mb: 2 }}>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        FanDuel
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={player.position}
+                        size="small"
+                        sx={{ 
+                          bgcolor: `${getPositionColor(player.position)}20`,
+                          color: getPositionColor(player.position),
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold">
+                        {player.fantasyScore.toFixed(1)}
                       </Typography>
-                      <Typography variant="body1" fontWeight="bold">
-                        ${item.player.fanDuelSalary.toLocaleString()}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        DraftKings
-                      </Typography>
-                      <Typography variant="body1" fontWeight="bold">
-                        ${item.player.draftKingsSalary.toLocaleString()}
-                      </Typography>
-                    </Grid>
-                  </Grid>
-                  
-                  <Paper sx={{ p: 2, bgcolor: '#f8fafc' }}>
-                    <Typography variant="subtitle2" color="primary" gutterBottom>
-                      Why this pick?
-                    </Typography>
-                    <Typography variant="body2">
-                      {item.reason}
-                    </Typography>
-                  </Paper>
-                </CardContent>
-              </Card>
-            ))}
-          </Box>
-        ) : (
-          <Box>
-            <Typography variant="h6" gutterBottom align="center">
-              Top Players by Position at Pick #{draftResults?.draftPosition}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" align="center" paragraph>
-              Ranked by: Cost → Injuries → Opponents → Advanced Stats → Trends → Statistics
-            </Typography>
-            
-            {draftResults?.results && Object.entries(draftResults.results).map(([position, players]: [string, any]) => (
-              <Accordion key={position}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    {position} ({players.length} options)
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  {players.map((item: any, index: number) => (
-                    <Box key={index} sx={{ mb: 2, p: 2, border: '1px solid #e5e7eb', borderRadius: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Box>
-                          <Typography variant="body1" fontWeight="bold">
-                            #{index + 1}. {item.player.name}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {item.player.team} vs {item.player.opponent}
-                          </Typography>
-                        </Box>
-                        <Box sx={{ textAlign: 'right' }}>
-                          <Typography variant="body1" fontWeight="bold">
-                            ${item.player.salary.toLocaleString()}
-                          </Typography>
-                          <Typography variant="body2" color="success.main">
-                            Score: {item.selectionScore}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      
-                      <Stack direction="row" spacing={1} flexWrap="wrap">
-                        {item.reasons?.map((reason: string, reasonIndex: number) => (
-                          <Chip
-                            key={reasonIndex}
-                            label={reason}
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Typography variant="body2" fontWeight="bold" 
+                          color={player.projection && player.projection > player.fantasyScore ? '#059669' : '#ef4444'}>
+                          {player.projection?.toFixed(1)}
+                        </Typography>
+                        {player.projection && (
+                          <Chip 
+                            label={`${(player.projection - player.fantasyScore).toFixed(1)}`}
                             size="small"
-                            color="success"
-                            variant="outlined"
-                            sx={{ mb: 1 }}
+                            sx={{ 
+                              ml: 1,
+                              bgcolor: player.projection > player.fantasyScore ? '#bbf7d0' : '#fecaca',
+                              color: player.projection > player.fantasyScore ? '#059669' : '#ef4444',
+                              fontSize: '0.6rem'
+                            }}
                           />
-                        ))}
-                      </Stack>
-                    </Box>
-                  ))}
-                </AccordionDetails>
-              </Accordion>
-            ))}
-          </Box>
-        )}
-        
-        {!isGeneratingDraft && (
-          <Paper sx={{ p: 2, mt: 2, bgcolor: '#fefce8' }}>
-            <Typography variant="subtitle2" color="#92400e" gutterBottom>
-              💡 Draft Tips:
-            </Typography>
-            <Typography variant="body2" color="#92400e">
-              • {draftType === 'snake' 
-                ? 'Consider positional scarcity when making your pick'
-                : 'Compare options across positions for maximum value'
-              }
-            </Typography>
-            <Typography variant="body2" color="#92400e">
-              • Check latest injury updates before finalizing
-            </Typography>
-            <Typography variant="body2" color="#92400e">
-              • Consider stacking with teammates for correlation
-            </Typography>
-          </Paper>
-        )}
-      </DialogContent>
-      
-      <DialogActions>
-        <Button startIcon={<SaveIcon />}>
-          Save Results
-        </Button>
-        <Button startIcon={<ShareIcon />} variant="contained">
-          Share
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+                        )}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="bold" color={value.edge > 0 ? '#059669' : '#ef4444'}>
+                        {value.edge > 0 ? '+' : ''}{(value.edge * 100).toFixed(1)}%
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color={player.value > 1.3 ? '#10b981' : '#f59e0b'}>
+                        {player.value.toFixed(2)}x
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        ${player.salary.toLocaleString()}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+    );
+  };
+
+  // ===== HELPER FUNCTIONS =====
+  const getPositionColor = (position: string) => {
+    const colors: Record<string, string> = {
+      'PG': '#3b82f6',
+      'SG': '#8b5cf6',
+      'SF': '#10b981',
+      'PF': '#f59e0b',
+      'C': '#ef4444'
+    };
+    return colors[position] || '#64748b';
+  };
+
+  // ===== RENDER FUNCTION (Keep your existing render functions, but update them) =====
+  // I'll keep your existing render functions but you need to update them to use sortedPlayers instead of filteredPlayers
+  // and add projection analysis displays similar to PrizePicksScreen
+
+  // ... [Rest of your existing render functions with updates] ...
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+      {/* Header (keep your existing) */}
       {renderHeader()}
       
       <Container maxWidth="lg">
-        {/* ADD FANTASY TEAMS SECTION AT THE TOP */}
+        {/* ===== DEBUG INFO (LIKE PRIZEPICKS) ===== */}
+        <Box sx={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', borderRadius: '4px' }}>
+          <Typography variant="subtitle2" fontWeight="bold">FantasyHub Debug Info:</Typography>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', fontSize: '0.8rem' }}>
+            <Typography variant="caption">fantasyTeams loaded: {fantasyTeams ? 'YES' : 'NO'}</Typography>
+            <Typography variant="caption">fantasyTeams length: {fantasyTeams?.length || 0}</Typography>
+            <Typography variant="caption">sortedPlayers length: {sortedPlayers?.length || 0}</Typography>
+            <Typography variant="caption">activeEndpoint: {activeEndpoint || 'N/A'}</Typography>
+            <Typography variant="caption">sortByProjectionValue: {sortByProjectionValue ? 'YES' : 'NO'}</Typography>
+          </Box>
+        </Box>
+
+        {/* Fantasy Teams Section (enhanced) */}
         {renderFantasyTeamsSection()}
         
+        {/* Projection Filtering Controls (new) */}
+        {renderProjectionFilteringControls()}
+        
+        {/* Top Value Picks (new) */}
+        {renderTopValuePicks()}
+        
+        {/* Your existing sections - update to use sortedPlayers */}
         {renderPlatformSelector()}
         {renderBudgetDisplay()}
         {renderAIPrompts()}
@@ -1625,6 +1422,14 @@ const FantasyHubScreen = () => {
         <Box sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>
           <Typography variant="body2">
             Salaries based on FanDuel & DraftKings pricing • {activePlatform.name} budget: ${activePlatform.budget.toLocaleString()}
+            {activeEndpoint && (
+              <Chip 
+                label={`Data from: ${activeEndpoint === 'mock' ? 'Sample' : activeEndpoint}`}
+                size="small"
+                color={activeEndpoint === 'mock' ? 'warning' : 'success'}
+                sx={{ ml: 2 }}
+              />
+            )}
           </Typography>
           <Typography variant="caption">
             Data updates manually • Last refreshed: {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -1641,6 +1446,7 @@ const FantasyHubScreen = () => {
         <AddIcon />
       </Fab>
       
+      {/* Modals */}
       {renderAddPlayerModal()}
       {renderDraftResultsModal()}
       
@@ -1649,6 +1455,7 @@ const FantasyHubScreen = () => {
         open={snackbar.open}
         autoHideDuration={6000}
         onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
         <Alert 
           onClose={() => setSnackbar({ ...snackbar, open: false })} 
