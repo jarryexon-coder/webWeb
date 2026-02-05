@@ -206,7 +206,7 @@ const MatchAnalyticsScreen = () => {
   // Add this fetch function near your existing useEffect
   const fetchAnalyticsData = async () => {
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
       const sport = selectedSport.toLowerCase(); // 'nba' or 'nfl'
       
       console.log(`🎯 Fetching ${sport} analytics from: ${apiBaseUrl}/api/${sport}/analytics`);

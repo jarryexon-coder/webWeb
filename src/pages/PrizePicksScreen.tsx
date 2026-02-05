@@ -162,7 +162,7 @@ const PrizePicksScreen: React.FC = () => {
   const [minEdgeThreshold, setMinEdgeThreshold] = useState(0); // Minimum edge required
 
   // API configuration
-  const API_BASE_URL = process.env.VITE_API_URL || 'https://pleasing-determination-production.up.railway.app';
+  const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:5001';
 
   // ===== Diagnostic Code =====
   console.log('🎯 Component State Check:');

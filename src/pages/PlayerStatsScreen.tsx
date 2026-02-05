@@ -612,7 +612,7 @@ const PlayerStatsScreen = () => {
   // NEW FUNCTION: Fetch player stats from API
   const fetchPlayerStats = async () => {
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
       console.log(`🎯 Fetching players from: ${apiBaseUrl}/api/players`);
       
       const response = await fetch(`${apiBaseUrl}/api/players`, {

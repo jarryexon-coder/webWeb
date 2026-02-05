@@ -6,7 +6,24 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "vercel-build": "npm run build"
+    "vercel-build": "npm run build",
+    
+    "dev:local": "vite --mode development",
+    "dev:railway": "vite --mode production",
+    
+    "build:local": "vite build --mode development",
+    "build:railway": "vite build --mode production",
+    "build:vercel": "vite build --mode production",
+    
+    "type-check": "tsc --noEmit",
+    "type-check:watch": "tsc --noEmit --watch",
+    
+    "clean": "rm -rf dist node_modules/.vite",
+    "reinstall": "rm -rf node_modules && npm install",
+    
+    "dev:3000": "vite --port 3000",
+    "dev:5173": "vite --port 5173",
+    "dev:8080": "vite --port 8080"
   },
   "dependencies": {
     "@emotion/react": "^11.13.0",
@@ -34,10 +51,30 @@
     "@types/recharts": "^1.8.29",
     "@vitejs/plugin-react": "^5.1.2",
     "typescript": "^5.9.3",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "eslint": "^9.18.0",
+    "eslint-plugin-react": "^7.37.4",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.19"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
   },
-  "type": "module"
+  "type": "module",
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
 }

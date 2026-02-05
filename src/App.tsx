@@ -19,7 +19,7 @@ import DailyPicksScreen from './pages/DailyPicksScreen'
 import ParlayArchitectScreen from './pages/ParlayArchitectScreen'
 import AdvancedAnalyticsScreen from './pages/AdvancedAnalyticsScreen'
 import PredictionsOutcomeScreen from './pages/PredictionsOutcomeScreen'
-import KalshiPredictionsScreen from './pages/kalshiPredictionsScreen'
+import KalshiPredictionsScreen from './pages/KalshiPredictionsScreen'
 import SecretPhraseScreen from './pages/SecretPhraseScreen'
 import SubscriptionScreen from './pages/SubscriptionScreen'
 import BackendTestScreen from './pages/BackendTestScreen'
@@ -94,7 +94,7 @@ function App() {
             <Route path="parlay-architect" element={<ParlayArchitectScreen />} />
             <Route path="advanced-analytics" element={<AdvancedAnalyticsScreen />} />
             <Route path="predictions-outcome" element={<PredictionsOutcomeScreen />} />
-            <Route path="kalshi-predictions" element={<KalshiPredictionsScreen />} />
+            <Route path="Kalshi-predictions" element={<KalshiPredictionsScreen />} />
             <Route path="secret-phrases" element={<SecretPhraseScreen />} />
             <Route path="prize-picks" element={<PrizePicksScreen />} />
             <Route path="subscription" element={<SubscriptionScreen />} />

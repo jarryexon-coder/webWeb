@@ -1,0 +1,174 @@
+--- a/src/pages/FantasyHubScreen.tsx
++++ b/src/pages/FantasyHubScreen.tsx
+@@ -1,4 +1,4 @@
+-import React, { useState, useEffect, useMemo } from 'react';
++import React, { useState, useEffect } from 'react';
+ import {
+   Box,
+   Typography,
+@@ -26,6 +26,9 @@
+ import FantasyTeamModal from '../components/modals/FantasyTeamModal';
+ import PlayerComparisonModal from '../components/modals/PlayerComparisonModal';
+ 
++// API Configuration
++const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
++
+ // Interfaces matching your API data structure
+ interface Player {
+   id: string;
+@@ -34,6 +37,7 @@
+   playerName?: string;
+   team: string;
+   teamAbbrev: string;
++  pos: string;
+   position: string;
+   salary: number;
+   fanDuelSalary?: number;
+@@ -54,6 +58,29 @@
+   projectionConfidence?: string;
+   valueScore?: number;
+   injuryStatus?: string;
++  // Additional fields from your API
++  fdSalary?: number;
++  dkSalary?: number;
++  fp?: number;
++  pts?: number;
++  reb?: number;
++  ast?: number;
++  stl?: number;
++  blk?: number;
++  own?: number;
++  threes?: number;
++  proj?: number;
++  projFP?: number;
++  trend?: string;
++  minutesProjected?: number;
++  usageRate?: number;
++  efficiency?: number;
++  last5Avg?: number;
++  seasonAvg?: number;
++  homeAway?: string;
++  opponent?: string;
++  opponentRank?: number;
++  weatherImpact?: string;
+ }
+ 
+ interface FantasyTeam {
+@@ -80,13 +107,10 @@
+   draftPosition?: number;
+   playoffStatus?: string;
+   nextOpponent?: string;
+-  players: Player[];
++  players: Player[];  // Full player objects from your API
+   roster?: Array<{
+-    id: string;
+     name: string;
+     position: string;
+-    team: string;
+-    salary?: number;
+   }>;
+ }
+ 
+@@ -106,15 +130,15 @@
+   const [selectedTeam, setSelectedTeam] = useState<FantasyTeam | null>(null);
+   const [players, setPlayers] = useState<Player[]>([]);
+   const [fantasyTeams, setFantasyTeams] = useState<FantasyTeam[]>([]);
+-  const [loading, setLoading] = useState(false);
++  const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'info' | 'success' | 'warning' | 'error' });
+ 
+   // Fetch data on component mount
+   useEffect(() => {
+     const fetchData = async () => {
+-      setLoading(true);
+       try {
++        setLoading(true);
+         // Fetch players
+         const playersResponse = await fetch(`${API_BASE_URL}/api/players`);
+         const playersData = await playersResponse.json();
+@@ -125,24 +149,12 @@
+         }
+         
+         // Fetch fantasy teams
+-        const teamsResponse = await fetch(`${API_BASE_URL}/api/fantasy/teams`);
++        const teamsResponse = await fetch(`${API_BASE_URL}/api/fantasy/teams`);  
+         const teamsData = await teamsResponse.json();
+         
+         if (teamsData.success) {
+-          // Transform team data to include full player objects
+-          const teamsWithPlayers = teamsData.teams.map((team: any) => ({
+-            ...team,
+-            players: team.players.map((playerData: any) => {
+-              // Find the full player object from players array
+-              const fullPlayer = players.find(p => p.id === playerData.id) || playerData;
+-              return {
+-                ...fullPlayer,
+-                // Ensure we have at least basic fields
+-                name: fullPlayer.name || playerData.name,
+-                position: fullPlayer.position || playerData.position
+-              };
+-            })
+-          }));
++          // Use the teams directly - they already have full player objects from your API
++          const teamsWithPlayers = teamsData.teams;
+           setFantasyTeams(teamsWithPlayers);
+         } else {
+           console.error('Error fetching fantasy teams:', teamsData.message);
+@@ -179,57 +191,6 @@
+     fetchData();
+   }, []);
+ 
+-  // Mock data generation - REMOVE THIS since we're using real API
+-  // const generateMockPlayers = () => { ... }
+-  // const generateMockFantasyTeams = (players: Player[]) => { ... }
+-
+-  // Remove or comment out the mock data generation in useEffect
+-  // Replace with real API calls as shown above
+-
+-  // Update player value calculation to use real data
+-  const calculatePlayerValue = (player: Player) => {
+-    if (!player.salary || player.salary === 0) return 0;
+-    // Use fantasyScore if available, otherwise use projection
+-    const score = player.fantasyScore || player.projection || 0;
+-    return score / (player.salary / 1000);
+-  };
+-
+-  // Update injury color logic
+-  const getInjuryColor = (status: string = 'healthy') => {
+-    switch (status.toLowerCase()) {
+-      case 'healthy': return '#10b981';
+-      case 'day-to-day': return '#f59e0b';
+-      case 'out': return '#ef4444';
+-      default: return '#6b7280';
+-    }
+-  };
+-
+-  // Update position color logic
+-  const getPositionColor = (position: string) => {
+-    switch (position) {
+-      case 'PG': return '#3b82f6';
+-      case 'SG': return '#8b5cf6';
+-      case 'SF': return '#10b981';
+-      case 'PF': return '#f59e0b';
+-      case 'C': return '#ef4444';
+-      default: return '#6b7280';
+-    }
+-  };
+-
+-  // Update player sorting - use real data fields
+-  const sortedPlayers = useMemo(() => {
+-    return [...players].sort((a, b) => {
+-      const aValue = calculatePlayerValue(a);
+-      const bValue = calculatePlayerValue(b);
+-      return bValue - aValue;
+-    });
+-  }, [players]);
+-
+-  // Top value players
+-  const topValuePlayers = useMemo(() => {
+-    return sortedPlayers.slice(0, 10);
+-  }, [sortedPlayers]);
+-
+   // ... rest of the component remains mostly the same
+   // Just update to use real data fields instead of mock fields

@@ -1,33 +1,52 @@
 // src/config/api.ts - UPDATED VERSION
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 
-  'https://pleasing-determination-production.up.railway.app';
-
+export const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
 export const API_ENDPOINTS = {
-  // PrizePicks Screen - THIS IS NEW
-  prizePicksSelections: '/api/prizepicks/selections',
+  // Fantasy Hub endpoints
+  fantasyPlayers: '/api/players',
+  fantasyTeams: '/api/fantasy/teams',
   
-  // Existing endpoints from before
-  sportsWire: '/api/prizepicks/selections', // Same as prizePicks, but keep for compatibility
+  // PrizePicks endpoints
+  prizePicksSelections: '/api/prizepicks/selections',
+  prizePicksAnalytics: '/api/prizepicks/analytics',
+  
+  // Sports Wire
+  sportsWire: '/api/sportswire',
+  
+  // Daily Picks
   dailyPicks: '/api/picks/daily',
-  advancedAnalytics: '/api/advanced/analytics',
+  
+  // Advanced Analytics
+  advancedAnalytics: '/api/analytics/advanced',
+  
+  // Parlay Architect
   parlaySuggestions: '/api/parlay/suggestions',
+  
+  // Kalshi Predictions
   kalshiPredictions: '/api/kalshi/predictions',
+  
+  // Predictions History
   predictionsHistory: '/api/predictions/history',
-  fantasyPlayers: '/api/fantasyhub/players',
-  playerTrends: '/api/player/stats/trends',
+  
+  // Player Trends
+  playerTrends: '/api/players/trends',
+  
+  // System Status
   systemStatus: '/api/system/status',
   
-  // Optional: Add more endpoints as they exist
-  nbaGames: '/api/nba/games',
-  nflGames: '/api/nfl/games',
-  sportsNews: '/api/news'
-} as const;
-
-// Helper function to build full URLs
-export const buildApiUrl = (endpoint: keyof typeof API_ENDPOINTS, params?: Record<string, string>) => {
-  let url = `${API_BASE_URL}${API_ENDPOINTS[endpoint]}`;
+  // Alerts
+  alerts: '/api/alerts',
   
-  if (params) {
+  // Injuries
+  injuries: '/api/injuries',
+  
+  // Weather impacts
+  weather: '/api/weather/impacts',
+};
+
+export const buildApiUrl = (endpoint: string, params?: Record<string, string>): string => {
+  let url = `${API_BASE_URL}${endpoint}`;
+  
+  if (params && Object.keys(params).length > 0) {
     const queryString = new URLSearchParams(params).toString();
     url += `?${queryString}`;
   }

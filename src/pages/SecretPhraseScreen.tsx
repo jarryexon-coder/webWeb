@@ -98,7 +98,7 @@ const SecretPhraseScreen = () => {
     setError(null);
     
     try {
-      const apiBase = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
       const response = await fetch(`${apiBase}/api/secret/phrases`);
       const data = await response.json();
       

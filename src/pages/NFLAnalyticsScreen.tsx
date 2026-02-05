@@ -17,7 +17,7 @@ const NFLAnalyticsScreen: React.FC = () => {
     
     const fetchNFLStandings = async () => {
       try {
-        const apiUrl = process.env.VITE_API_URL || 'https://pleasing-determination-production.up.railway.app';
+        const apiUrl = process.env.VITE_API_URL || 'http://localhost:5001';
         console.log('Fetching from:', `${apiUrl}/api/nfl/standings`);
         
         const response = await fetch(`${apiUrl}/api/nfl/standings`);

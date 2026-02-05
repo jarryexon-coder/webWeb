@@ -193,7 +193,7 @@ const NewsDeskScreen = () => {
   // NEW: Fetch news from API
   const fetchNews = async () => {
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
       console.log(`🎯 Fetching news from: ${apiBaseUrl}/api/news`);
       
       const response = await fetch(`${apiBaseUrl}/api/news`, {

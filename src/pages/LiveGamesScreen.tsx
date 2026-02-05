@@ -78,7 +78,7 @@ const LiveGamesScreen = () => {
   useEffect(() => {
     console.log('=== LiveGamesScreen Debug ===');
     console.log('API Base URL:', import.meta.env.VITE_API_BASE);
-    console.log('Backend URL:', 'https://pleasing-determination-production.up.railway.app');
+    console.log('Backend URL:', 'http://localhost:5001');
     console.log('==========================');
   }, []);
 
@@ -153,7 +153,7 @@ const LiveGamesScreen = () => {
     setError(null);
 
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
       
       console.log(`🎯 Fetching from backend: ${apiBaseUrl}/api/games`);
       
@@ -1000,7 +1000,7 @@ const LiveGamesScreen = () => {
           🔄 Auto-refreshing every 30 seconds • Last updated: {new Date().toLocaleTimeString()}
         </Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>
-          Backend URL: {import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app'}
+          Backend URL: {import.meta.env.VITE_API_BASE || 'http://localhost:5001'}
         </Typography>
       </Paper>
       
