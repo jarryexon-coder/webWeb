@@ -1,1003 +1,767 @@
 import React, { useState, useEffect } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
+  Container,
   Grid,
   Card,
   CardContent,
-  Button,
-  Container,
-  Paper,
-  Chip,
-  TextField,
-  InputAdornment,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Avatar,
-  Badge,
-  Stack,
   CircularProgress,
   Alert,
-  useTheme,
-  Tabs,
-  Tab,
-  Fab,
-  Stepper,
-  Step,
-  StepLabel,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
+  Chip as MuiChip,
+  Button,
+  AlertTitle,
+  IconButton,
+  Snackbar,
+  LinearProgress,
+  Stack,
+  TextField,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Paper
 } from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  Search as SearchIcon,
-  EmojiEvents as TrophyIcon,
-  TrendingUp as TrendingUpIcon,
-  Analytics as AnalyticsIcon,
-  Warning as WarningIcon,
-  SportsBasketball as BasketballIcon,
-  SportsFootball as FootballIcon,
-  SportsBaseball as BaseballIcon,
-  SportsHockey as HockeyIcon,
-  SportsSoccer as SoccerIcon,
-  PlayArrow as PlayIcon,
-  Bookmark as BookmarkIcon,
-  Lightbulb as LightbulbIcon,
-  Security as ShieldIcon,
-  Refresh as RefreshIcon,
-  AttachMoney as MoneyIcon,
-  EmojiEvents as EventsIcon,
-  AutoAwesome as AutoAwesomeIcon,
-} from '@mui/icons-material';
-import { styled } from '@mui/material/styles';
+import { Refresh as RefreshIcon, SportsBasketball, SportsFootball, SportsBaseball } from '@mui/icons-material';
 
-// Styled Components
-const GradientPaper = styled(Paper)(({ theme }) => ({
-  background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
-  color: theme.palette.primary.contrastText,
-  borderRadius: theme.shape.borderRadius * 2,
-}));
+// Fix for Chip size prop
+const Chip = (props: any) => <MuiChip size="small" {...props} />;
 
-const StyledCard = styled(Card)(({ theme }) => ({
-  borderRadius: theme.shape.borderRadius * 2,
-  transition: 'transform 0.2s, box-shadow 0.2s',
-  '&:hover': {
-    transform: 'translateY(-4px)',
-    boxShadow: theme.shadows[8],
-  },
-}));
-
-// ConfidenceBadge with custom interface
-interface ConfidenceBadgeProps {
-  confidence: number;
-  label: string;
-  size?: 'small' | 'medium';
-  className?: string;
-}
-
-const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({ confidence, label, size = 'medium', className }) => {
-  const theme = useTheme();
-  
-  const getColor = () => {
-    if (confidence >= 75) return theme.palette.success.main;
-    if (confidence >= 65) return theme.palette.warning.main;
-    return theme.palette.error.main;
-  };
-  
-  return (
-    <Chip
-      label={label}
-      size={size}
-      sx={{
-        backgroundColor: getColor(),
-        color: 'white',
-        fontWeight: 'bold',
-      }}
-      className={className}
-    />
-  );
-};
-
-// Mock Data Types
-interface Winner {
-  player: string;
-  pick: string;
-  odds: string;
-}
-
-interface Selection {
-  id: string;
-  type: string;
+// Define the PlayerProp interface from File 1
+interface PlayerProp {
+  player_name: string;
+  prop_type: string;
+  line: number;
+  over_price: number | null;
+  under_price: number | null;
+  bookmaker: string;
+  game: string;
   sport: string;
-  title: string;
-  confidence: number;
-  winners: Winner[];
-  totalOdds: string;
-  analysis: string;
-  timestamp: string;
-  model: string;
-  modelAccuracy: string;
-  edgeScore: number;
-  bumpRisk: string;
-  payoutMultiplier: string;
-  requiresPremium: boolean;
+  last_update: string;
+  id?: string;
+  player?: string;
+  projection?: number;
+  actual?: number;
+  status?: string;
+  confidence?: string;
+  type?: string;
+  team?: string;
+  timestamp?: string;
+  odds?: number;
+  units?: number;
 }
 
-// Daily PrizePicks Generator Component
-interface DailyPrizePicksGeneratorProps {
-  onGenerate?: () => void;
-  isGenerating: boolean;
-  selectionsLeft: number;
-}
+const PrizePicksScreen: React.FC = () => {
+  // State management from File 1
+  const [playerProps, setPlayerProps] = useState<PlayerProp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sport, setSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLeague, setSelectedLeague] = useState('All');
+  const [filteredProps, setFilteredProps] = useState<PlayerProp[]>([]);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'info' | 'success' | 'warning' | 'error' });
+  
+  // Original states from File 2
+  const [analytics, setAnalytics] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeEndpoint, setActiveEndpoint] = useState<string>('');
 
-interface DailySelection {
-  id: number;
-  type: string;
-  sport: string;
-  title: string;
-  confidence: number;
-  winners: Array<{ name: string; odds: string; probability: string }>;
-  analysis: string;
-  totalOdds: string;
-  probability: string;
-  keyStat: string;
-  trend: string;
-  timestamp: string;
-  edgeScore: number;
-  bumpRisk: string;
-  payoutMultiplier: string;
-}
+  // API configuration
+  const API_BASE_URL = process.env.VITE_API_URL || 'https://pleasing-determination-production.up.railway.app';
 
-const DailyPrizePicksGenerator: React.FC<DailyPrizePicksGeneratorProps> = ({ 
-  onGenerate, 
-  isGenerating, 
-  selectionsLeft 
-}) => {
-  const [generatedToday, setGeneratedToday] = useState(false);
-  const [dailySelections, setDailySelections] = useState<DailySelection[]>([]);
-
-  const mockSelections: DailySelection[] = [
-    {
-      id: 1,
-      type: '3-Winner Parlay',
-      sport: 'NBA',
-      title: 'NBA Triple Threat',
-      confidence: 88,
-      winners: [
-        { name: 'Luka Dončić Over 32.5 Points', odds: '-145', probability: '72%' },
-        { name: 'Nikola Jokić Over 9.5 Assists', odds: '-120', probability: '68%' },
-        { name: 'Jayson Tatum Over 27.5 Points', odds: '-110', probability: '65%' }
-      ],
-      analysis: 'PrizePicks lines showing value vs sportsbook consensus across all three picks.',
-      totalOdds: '+400',
-      probability: '35%',
-      keyStat: 'Combined edge score: 8.5/10',
-      trend: 'NBA parlays hit 60% last 30 days',
-      timestamp: 'Today • 7:30 PM ET',
-      edgeScore: 8.5,
-      bumpRisk: 'Medium',
-      payoutMultiplier: '5x'
-    },
-  ];
-
-  const handleGenerate = () => {
-    setGeneratedToday(true);
-    setDailySelections(mockSelections);
-    onGenerate?.();
-  };
-
-  return (
-    <Paper sx={{ p: 3, mb: 3, bgcolor: 'grey.900', color: 'white', borderRadius: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Avatar sx={{ bgcolor: 'primary.main', mr: 2, position: 'relative' }}>
-            <TrophyIcon />
-            <Badge
-              badgeContent={selectionsLeft}
-              color="error"
-              sx={{
-                '& .MuiBadge-badge': {
-                  right: -3,
-                  top: -3,
-                },
-              }}
-            />
-          </Avatar>
-          <Box>
-            <Typography variant="h6" fontWeight="bold">
-              Daily PrizePicks Generator
-            </Typography>
-            <Typography variant="body2" color="grey.400">
-              3 winners per selection • 2 selections per day
-            </Typography>
-          </Box>
-        </Box>
+  // Fetch PrizePicks data using unified API endpoint
+  const fetchPrizePicksData = async () => {
+    setLoading(true);
+    setRefreshing(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/prizepicks/selections?sport=${sport}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setPlayerProps(data.data || data.selections || []);
+        setActiveEndpoint(`/api/prizepicks/selections?sport=${sport}`);
+        setError(null);
         
-        <Button
-          variant="contained"
-          onClick={handleGenerate}
-          disabled={generatedToday || isGenerating || selectionsLeft <= 0}
-          startIcon={isGenerating ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
+        console.log(`✅ Loaded ${data.count || data.data?.length || 0} player props for ${sport.toUpperCase()}`);
+        setSnackbar({
+          open: true,
+          message: `Successfully loaded ${data.count || data.data?.length || 0} ${sport.toUpperCase()} player props`,
+          severity: 'success'
+        });
+      } else {
+        throw new Error(data.message || 'Failed to load data');
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching PrizePicks data:', error);
+      
+      // Fallback to alternative endpoints (from File 2)
+      await tryAlternativeEndpoints();
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Alternative endpoints fallback (from File 2)
+  const tryAlternativeEndpoints = async () => {
+    console.log('🔍 Trying alternative endpoints...');
+    const endpointsToTry = [
+      { path: '/api/prizepicks/picks', name: 'Picks' },
+      { path: '/api/picks/prizepicks', name: 'Picks (alt)' },
+      { path: '/api/prize-picks', name: 'Prize-Picks' },
+      { path: '/api/prizepicks', name: 'Root' },
+    ];
+
+    for (const endpoint of endpointsToTry) {
+      try {
+        console.log(`🎯 Trying: ${endpoint.name} (${endpoint.path})`);
+        const response = await fetch(`${API_BASE_URL}${endpoint.path}?sport=${sport}`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Response from ${endpoint.name}:`, data);
+          
+          // Extract data from various possible structures
+          let extractedData: any[] = [];
+          const possibleProperties = ['data', 'picks', 'selections', 'items', 'results'];
+          
+          for (const prop of possibleProperties) {
+            if (Array.isArray(data[prop]) && data[prop].length > 0) {
+              extractedData = data[prop];
+              break;
+            }
+          }
+          
+          if (extractedData.length === 0 && Array.isArray(data)) {
+            extractedData = data;
+          }
+          
+          if (extractedData.length > 0) {
+            // Transform to PlayerProp format
+            const transformedData = extractedData.map((item: any) => ({
+              player_name: item.player_name || item.player || item.name || 'Unknown Player',
+              prop_type: item.prop_type || item.type || 'points',
+              line: item.line || item.projection || 0,
+              over_price: item.over_price || item.overOdds || null,
+              under_price: item.under_price || item.underOdds || null,
+              bookmaker: item.bookmaker || 'Unknown',
+              game: item.game || item.matchup || 'Unknown Game',
+              sport: item.sport || sport,
+              last_update: item.last_update || item.timestamp || new Date().toISOString(),
+              id: item.id || `pick-${Date.now()}-${Math.random()}`,
+            }));
+            
+            setPlayerProps(transformedData);
+            setActiveEndpoint(endpoint.path);
+            setError(null);
+            
+            setSnackbar({
+              open: true,
+              message: `Loaded ${transformedData.length} picks from ${endpoint.name}`,
+              severity: 'success'
+            });
+            
+            return; // Stop trying endpoints
+          }
+        }
+      } catch (error) {
+        console.log(`❌ ${endpoint.name} failed:`, error);
+      }
+    }
+    
+    // If all endpoints fail, use mock data
+    console.log('⚠️ All endpoints failed, using mock data');
+    setSnackbar({
+      open: true,
+      message: 'Using sample data - API endpoints unavailable',
+      severity: 'warning'
+    });
+    setActiveEndpoint('mock');
+  };
+
+  // Filter props based on search and league (from File 1)
+  useEffect(() => {
+    if (Array.isArray(playerProps)) {
+      let filtered = [...playerProps];
+      
+      // Filter by league
+      if (selectedLeague !== 'All') {
+        filtered = filtered.filter(prop => 
+          prop.sport.toLowerCase() === selectedLeague.toLowerCase()
+        );
+      }
+      
+      // Filter by search query
+      if (searchQuery.trim()) {
+        const lowerQuery = searchQuery.toLowerCase();
+        filtered = filtered.filter(prop =>
+          prop.player_name.toLowerCase().includes(lowerQuery) ||
+          prop.game.toLowerCase().includes(lowerQuery) ||
+          prop.prop_type.toLowerCase().includes(lowerQuery) ||
+          prop.bookmaker.toLowerCase().includes(lowerQuery)
+        );
+      }
+      
+      setFilteredProps(filtered);
+    }
+  }, [playerProps, selectedLeague, searchQuery]);
+
+  // Fetch analytics data (from File 2)
+  const fetchPrizePicksAnalytics = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/prizepicks/analytics`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch analytics: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('📈 PrizePicks Analytics response:', data);
+      
+      if (data.success && data.analytics) {
+        let analyticsData: any[] = [];
+        
+        if (Array.isArray(data.analytics)) {
+          analyticsData = data.analytics;
+        } else if (typeof data.analytics === 'object') {
+          if (data.analytics.bySport && Array.isArray(data.analytics.bySport)) {
+            analyticsData.push(...data.analytics.bySport);
+          }
+          if (data.analytics.topPerformers && Array.isArray(data.analytics.topPerformers)) {
+            analyticsData.push(...data.analytics.topPerformers);
+          }
+          if (data.analytics.byPickType && Array.isArray(data.analytics.byPickType)) {
+            analyticsData.push(...data.analytics.byPickType);
+          }
+        }
+        
+        console.log(`✅ Extracted ${analyticsData.length} analytics items`);
+        setAnalytics(analyticsData);
+      }
+    } catch (err: any) {
+      console.error('❌ Error fetching PrizePicks analytics:', err);
+    }
+  };
+
+  // Load data on mount
+  useEffect(() => {
+    console.log('🚀 PrizePicksScreen mounted, fetching data...');
+    const loadData = async () => {
+      await fetchPrizePicksData();
+      await fetchPrizePicksAnalytics();
+    };
+    loadData();
+    
+    // Auto-refresh every 2 minutes
+    const interval = setInterval(fetchPrizePicksData, 120000);
+    return () => clearInterval(interval);
+  }, [sport]);
+
+  // Handle sport change (from File 1)
+  const handleSportChange = (newSport: 'nba' | 'nfl' | 'mlb') => {
+    setSport(newSport);
+    setSnackbar({
+      open: true,
+      message: `Loading ${newSport.toUpperCase()} player props...`,
+      severity: 'info'
+    });
+  };
+
+  // Handle refresh
+  const handleRefresh = async () => {
+    console.log('🔄 Manual refresh triggered');
+    setRefreshing(true);
+    setSnackbar({
+      open: true,
+      message: 'Refreshing data...',
+      severity: 'info'
+    });
+    
+    await fetchPrizePicksData();
+    await fetchPrizePicksAnalytics();
+    
+    setSnackbar({
+      open: true,
+      message: 'Data refreshed successfully',
+      severity: 'success'
+    });
+  };
+
+  // Helper functions from File 1
+  const formatPropType = (type: string) => {
+    const typeMap: Record<string, string> = {
+      'player_points': 'Points',
+      'player_rebounds': 'Rebounds',
+      'player_assists': 'Assists',
+      'player_threes': '3-Pointers',
+      'points': 'Points',
+      'rebounds': 'Rebounds',
+      'assists': 'Assists',
+      'passing_yards': 'Passing Yards',
+      'rushing_yards': 'Rushing Yards',
+      'receiving_yards': 'Receiving Yards',
+      'strikeouts': 'Strikeouts',
+      'hits': 'Hits',
+      'home_runs': 'Home Runs'
+    };
+    return typeMap[type] || type.replace('player_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
+  const getSportColor = (sportType: string) => {
+    switch(sportType.toLowerCase()) {
+      case 'nba': return '#ef4444';
+      case 'nfl': return '#3b82f6';
+      case 'mlb': return '#f59e0b';
+      default: return '#8b5cf6';
+    }
+  };
+
+  const getBookmakerColor = (bookmaker: string) => {
+    const bookmakerColors: Record<string, string> = {
+      'draftkings': '#8b5cf6',
+      'fanduel': '#3b82f6',
+      'betmgm': '#ef4444',
+      'pointsbet': '#10b981',
+      'caesars': '#f59e0b',
+      'barstool': '#ec4899',
+      'bet365': '#059669',
+      'sugarhouse': '#8b5cf6',
+      'twinspires': '#3b82f6',
+      'wynnbet': '#ef4444',
+    };
+    
+    return bookmakerColors[bookmaker.toLowerCase()] || '#64748b';
+  };
+
+  const formatPrice = (price: number | null) => {
+    if (price === null || price === undefined) return 'N/A';
+    if (price > 0) return `+${price}`;
+    return price.toString();
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <Container maxWidth="lg">
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', flexDirection: 'column' }}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2, mt: 2 }}>Loading prize picks...</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Loading {sport.toUpperCase()} player props...
+          </Typography>
+        </Box>
+      </Container>
+    );
+  }
+
+  return (
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box>
+          <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold' }}>
+            PrizePicks Player Props
+          </Typography>
+          <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+            Live player props from various bookmakers
+            {activeEndpoint && (
+              <Chip 
+                label={`Source: ${activeEndpoint === 'mock' ? 'Sample Data' : activeEndpoint}`}
+                size="small"
+                color={activeEndpoint === 'mock' ? 'warning' : 'success'}
+                sx={{ ml: 2 }}
+              />
+            )}
+          </Typography>
+        </Box>
+        <Button 
+          variant="contained" 
+          onClick={handleRefresh} 
+          disabled={refreshing}
+          startIcon={<RefreshIcon />}
         >
-          {selectionsLeft <= 0 ? 'Limit Reached' :
-           generatedToday ? 'Generated Today' : 'Generate Selections'}
+          {refreshing ? 'Refreshing...' : 'Refresh'}
         </Button>
       </Box>
 
-      {selectionsLeft <= 0 && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Daily limit reached. Come back tomorrow for 2 more selections.
+      {/* Sport selector (from File 1) */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+        <Button
+          variant={sport === 'nba' ? 'contained' : 'outlined'}
+          onClick={() => handleSportChange('nba')}
+          startIcon={<SportsBasketball />}
+          sx={{
+            bgcolor: sport === 'nba' ? getSportColor('nba') : 'transparent',
+            borderColor: getSportColor('nba'),
+            '&:hover': {
+              bgcolor: sport === 'nba' ? getSportColor('nba') : `${getSportColor('nba')}20`,
+            }
+          }}
+        >
+          NBA
+        </Button>
+        <Button
+          variant={sport === 'nfl' ? 'contained' : 'outlined'}
+          onClick={() => handleSportChange('nfl')}
+          startIcon={<SportsFootball />}
+          sx={{
+            bgcolor: sport === 'nfl' ? getSportColor('nfl') : 'transparent',
+            borderColor: getSportColor('nfl'),
+            '&:hover': {
+              bgcolor: sport === 'nfl' ? getSportColor('nfl') : `${getSportColor('nfl')}20`,
+            }
+          }}
+        >
+          NFL
+        </Button>
+        <Button
+          variant={sport === 'mlb' ? 'contained' : 'outlined'}
+          onClick={() => handleSportChange('mlb')}
+          startIcon={<SportsBaseball />}
+          sx={{
+            bgcolor: sport === 'mlb' ? getSportColor('mlb') : 'transparent',
+            borderColor: getSportColor('mlb'),
+            '&:hover': {
+              bgcolor: sport === 'mlb' ? getSportColor('mlb') : `${getSportColor('mlb')}20`,
+            }
+          }}
+        >
+          MLB
+        </Button>
+      </Box>
+
+      {/* Search and Filter Controls (from File 1) */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+        <TextField
+          placeholder="Search players, games, or props..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          size="small"
+          sx={{ minWidth: 250 }}
+        />
+        
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>League</InputLabel>
+          <Select
+            value={selectedLeague}
+            onChange={(e) => setSelectedLeague(e.target.value)}
+            label="League"
+          >
+            <MenuItem value="All">All Leagues</MenuItem>
+            <MenuItem value="NBA">NBA</MenuItem>
+            <MenuItem value="NFL">NFL</MenuItem>
+            <MenuItem value="MLB">MLB</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
+
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <AlertTitle>Error Loading Data</AlertTitle>
+          {error}
         </Alert>
       )}
 
-      {dailySelections.length > 0 ? (
-        <Box>
-          {dailySelections.map((selection) => (
-            <Paper key={selection.id} sx={{ p: 2, mb: 2, bgcolor: 'grey.800' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <ConfidenceBadge 
-                    label={`${selection.confidence}%`} 
-                    confidence={selection.confidence} 
-                    size="small" 
-                  />
-                  <Chip label={selection.type} size="small" color="secondary" />
-                  <Chip 
-                    label={selection.sport} 
-                    size="small" 
-                    sx={{ 
-                      bgcolor: selection.sport === 'NBA' ? 'error.main' : 
-                              selection.sport === 'NFL' ? 'success.main' : 'warning.main',
-                      color: 'white'
-                    }}
-                  />
-                </Box>
-                <Typography variant="caption" color="grey.400">
-                  {selection.timestamp}
-                </Typography>
-              </Box>
-
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                {selection.title}
-              </Typography>
-
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" color="primary" gutterBottom>
-                  🎯 3-Winner Combo:
-                </Typography>
-                <List dense>
-                  {selection.winners.map((winner, index) => (
-                    <ListItem key={index} sx={{ py: 0.5 }}>
-                      <ListItemAvatar>
-                        <Avatar sx={{ bgcolor: 'primary.main', width: 24, height: 24, fontSize: 12 }}>
-                          {index + 1}
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={winner.name}
-                        secondary={`${winner.odds} (${winner.probability} prob)`}
-                        primaryTypographyProps={{ color: 'white', fontSize: '0.875rem' }}
-                        secondaryTypographyProps={{ color: 'grey.400', fontSize: '0.75rem' }}
+      {/* Player Props Grid (from File 1) */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#3a0ca3', mb: 3 }}>
+          🎯 Player Props ({filteredProps.length})
+        </Typography>
+        
+        {filteredProps.length === 0 ? (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            <Typography variant="body1">
+              {searchQuery.trim() 
+                ? `No props found matching "${searchQuery}"`
+                : `No player props available for ${sport.toUpperCase()} right now. Try refreshing or check back closer to game time.`
+              }
+            </Typography>
+          </Alert>
+        ) : (
+          <Grid container spacing={3}>
+            {filteredProps.slice(0, 50).map((prop, index) => (
+              <Grid item xs={12} sm={6} md={4} key={prop.id || index}>
+                <Card sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  transition: 'transform 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: 6,
+                  }
+                }}>
+                  <CardContent>
+                    {/* Header */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 1 }}>
+                      <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', flex: 1 }}>
+                        {prop.player_name}
+                      </Typography>
+                      <Chip 
+                        label={prop.bookmaker}
+                        size="small"
+                        sx={{ 
+                          bgcolor: getBookmakerColor(prop.bookmaker),
+                          color: 'white',
+                          fontWeight: 'bold'
+                        }}
                       />
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={4}>
-                  <Paper sx={{ p: 1, textAlign: 'center', bgcolor: 'grey.700' }}>
-                    <Typography variant="caption" color="grey.400">Total Odds</Typography>
-                    <Typography variant="h6" color="success.main" fontWeight="bold">
-                      {selection.totalOdds}
+                    </Box>
+                    
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      {prop.game}
                     </Typography>
-                  </Paper>
-                </Grid>
-                <Grid item xs={4}>
-                  <Paper sx={{ p: 1, textAlign: 'center', bgcolor: 'grey.700' }}>
-                    <Typography variant="caption" color="grey.400">Payout</Typography>
-                    <Typography variant="h6" color="warning.main" fontWeight="bold">
-                      {selection.payoutMultiplier}
-                    </Typography>
-                  </Paper>
-                </Grid>
-                <Grid item xs={4}>
-                  <Paper sx={{ p: 1, textAlign: 'center', bgcolor: 'grey.700' }}>
-                    <Typography variant="caption" color="grey.400">Edge Score</Typography>
-                    <Typography variant="h6" color="primary.main" fontWeight="bold">
-                      {selection.edgeScore}/10
-                    </Typography>
-                  </Paper>
-                </Grid>
+                    
+                    {/* Prop Type */}
+                    <Box sx={{ mb: 2 }}>
+                      <Chip 
+                        label={formatPropType(prop.prop_type)}
+                        size="small"
+                        sx={{ 
+                          bgcolor: getSportColor(prop.sport) + '20',
+                          color: getSportColor(prop.sport),
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    </Box>
+                    
+                    {/* Line Display */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Line:
+                      </Typography>
+                      <Typography variant="h4" sx={{ color: getSportColor(prop.sport), fontWeight: 'bold' }}>
+                        {prop.line}
+                      </Typography>
+                    </Box>
+                    
+                    {/* Odds Display */}
+                    <Box sx={{ 
+                      display: 'flex',
+                      borderRadius: 1,
+                      overflow: 'hidden',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      mb: 2
+                    }}>
+                      <Box sx={{ 
+                        flex: 1, 
+                        textAlign: 'center', 
+                        p: 1,
+                        bgcolor: '#10b981',
+                        color: 'white'
+                      }}>
+                        <Typography variant="caption" display="block">
+                          Over
+                        </Typography>
+                        <Typography variant="body1" fontWeight="bold">
+                          {formatPrice(prop.over_price)}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ 
+                        flex: 1, 
+                        textAlign: 'center', 
+                        p: 1,
+                        bgcolor: '#ef4444',
+                        color: 'white'
+                      }}>
+                        <Typography variant="caption" display="block">
+                          Under
+                        </Typography>
+                        <Typography variant="body1" fontWeight="bold">
+                          {formatPrice(prop.under_price)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                    
+                    {/* Footer */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+                      <Chip 
+                        label={prop.sport.toUpperCase()}
+                        size="small"
+                        sx={{ 
+                          bgcolor: getSportColor(prop.sport) + '20',
+                          color: getSportColor(prop.sport),
+                        }}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        Updated: {new Date(prop.last_update).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
               </Grid>
+            ))}
+          </Grid>
+        )}
+      </Box>
 
-              <Typography variant="body2" color="grey.300" sx={{ mb: 2, fontStyle: 'italic' }}>
-                {selection.analysis}
-              </Typography>
+      {/* Analytics Section (from File 2) */}
+      {analytics.length > 0 && (
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#3a0ca3', mb: 3 }}>
+            📊 Analytics ({analytics.length} items)
+          </Typography>
 
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Chip
-                  icon={selection.bumpRisk === 'High' ? <WarningIcon /> : <ShieldIcon />}
-                  label={`Bump Risk: ${selection.bumpRisk}`}
-                  size="small"
-                  color={selection.bumpRisk === 'High' ? 'error' : 
-                         selection.bumpRisk === 'Medium' ? 'warning' : 'success'}
-                />
-                <Chip
-                  icon={<TrendingUpIcon />}
-                  label={selection.trend}
-                  size="small"
-                  sx={{ bgcolor: 'success.light', color: 'success.contrastText' }}
-                />
-              </Box>
-            </Paper>
-          ))}
-        </Box>
-      ) : (
-        <Box sx={{ textAlign: 'center', py: 4 }}>
-          <Avatar sx={{ bgcolor: 'grey.800', width: 80, height: 80, mb: 2, mx: 'auto', position: 'relative' }}>
-            <TrophyIcon sx={{ fontSize: 40, color: 'grey.500' }} />
-            <Badge
-              badgeContent="3"
-              color="primary"
-              sx={{
-                position: 'absolute',
-                top: -10,
-                right: -10,
-                '& .MuiBadge-badge': {
-                  fontSize: 12,
-                  height: 24,
-                  minWidth: 24,
-                },
-              }}
-            />
-          </Avatar>
-          <Typography variant="h6" color="grey.400" gutterBottom>
-            No PrizePicks generated yet
-          </Typography>
-          <Typography variant="body2" color="grey.500">
-            Each selection contains 3 winners. Generate {selectionsLeft} more selection(s) today.
-          </Typography>
+          <Grid container spacing={3} sx={{ mt: 2 }}>
+            {analytics.slice(0, 6).map((item, index) => (
+              <Grid item xs={12} sm={6} md={4} key={index}>
+                <Card sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  transition: 'transform 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4,
+                  }
+                }}>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold' }}>
+                      {item.sport || item.player || item.type || 'Analytics Item'}
+                    </Typography>
+                    
+                    {item.winRate && (
+                      <Box sx={{ mb: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Win Rate
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={parseFloat(item.winRate) || 0} 
+                            sx={{ flex: 1, mr: 1, height: 6 }}
+                          />
+                          <Typography variant="body2" fontWeight="bold">
+                            {item.winRate}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    )}
+                    
+                    {item.accuracy && (
+                      <Typography variant="body2" color="text.secondary">
+                        Accuracy: <strong>{(item.accuracy * 100).toFixed(1)}%</strong>
+                      </Typography>
+                    )}
+                    
+                    {item.picks && (
+                      <Typography variant="body2" color="text.secondary">
+                        Total Picks: <strong>{item.picks}</strong>
+                      </Typography>
+                    )}
+                    
+                    {item.roi && (
+                      <Typography variant="body2" color="success.main" sx={{ mt: 1, fontWeight: 'bold' }}>
+                        ROI: <strong>{item.roi}</strong>
+                      </Typography>
+                    )}
+                    
+                    {item.category && (
+                      <Chip 
+                        label={item.category}
+                        size="small"
+                        sx={{ mt: 2 }}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
         </Box>
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, pt: 2, borderTop: 1, borderColor: 'grey.800' }}>
-        <AnalyticsIcon sx={{ fontSize: 16, color: 'primary.main', mr: 1 }} />
-        <Typography variant="caption" color="grey.500">
-          • 3 winners per selection • 2 selections daily • Line discrepancy analysis
-        </Typography>
-      </Box>
-    </Paper>
-  );
-};
-
-// Mock Data
-const mockSelections: Selection[] = [
-  {
-    id: '1',
-    type: '3-Winner Parlay',
-    sport: 'NBA',
-    title: 'NBA Star Power Trio',
-    confidence: 88,
-    winners: [
-      { player: 'Luka Dončić', pick: 'Over 32.5 Points', odds: '-145' },
-      { player: 'Nikola Jokić', pick: 'Over 9.5 Assists', odds: '-120' },
-      { player: 'Jayson Tatum', pick: 'Over 27.5 Points', odds: '-110' }
-    ],
-    totalOdds: '+400',
-    analysis: 'Three MVP candidates with favorable matchups. PrizePicks lines undervalued vs sportsbook consensus.',
-    timestamp: 'Today, 7:30 PM ET',
-    model: 'Line Discrepancy Model',
-    modelAccuracy: '82.4%',
-    edgeScore: 8.2,
-    bumpRisk: 'Medium',
-    payoutMultiplier: '5x',
-    requiresPremium: false,
-  },
-  {
-    id: '2',
-    type: '3-Winner Flex Play',
-    sport: 'NFL',
-    title: 'NFL Sunday Special',
-    confidence: 85,
-    winners: [
-      { player: 'Christian McCaffrey', pick: 'Over 115.5 Yds', odds: '-155' },
-      { player: 'Josh Allen', pick: 'Over 2.5 TDs', odds: '+120' },
-      { player: 'Tyreek Hill', pick: 'Over 99.5 Rec Yds', odds: '-130' }
-    ],
-    totalOdds: '+600',
-    analysis: 'High-value NFL player props with low correlation for optimal parlay construction.',
-    timestamp: 'Tomorrow, 1:00 PM ET',
-    model: 'Matchup Analysis',
-    modelAccuracy: '78.2%',
-    edgeScore: 7.8,
-    bumpRisk: 'Low',
-    payoutMultiplier: '7x',
-    requiresPremium: true,
-  },
-];
-
-const selectionQueries = [
-  "Generate NBA 3-winner parlays",
-  "Best NFL trios this week",
-  "High edge PrizePicks with 3 winners",
-  "Generate PrizePicks parlays with +EV",
-  "Today's 3-winner line discrepancies",
-];
-
-const sports = [
-  { id: 'All', name: 'All Sports', icon: <TrophyIcon />, color: 'primary' as const },
-  { id: 'NBA', name: 'NBA', icon: <BasketballIcon />, color: 'error' as const },
-  { id: 'NFL', name: 'NFL', icon: <FootballIcon />, color: 'success' as const },
-  { id: 'MLB', name: 'MLB', icon: <BaseballIcon />, color: 'warning' as const },
-  { id: 'NHL', name: 'NHL', icon: <HockeyIcon />, color: 'info' as const },
-  { id: 'Soccer', name: 'Soccer', icon: <SoccerIcon />, color: 'success' as const },
-];
-
-const timeframes = ['Today', 'Tomorrow', 'Week', 'All Upcoming'];
-
-// Main Component
-const PrizePicksScreen: React.FC = () => {
-  const theme = useTheme();
-  const navigate = useNavigate();
-  
-  const [loading, setLoading] = useState(false);
-  const [selectedSport, setSelectedSport] = useState('All');
-  const [selectedTimeframe, setSelectedTimeframe] = useState('Today');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showSimulationModal, setShowSimulationModal] = useState(false);
-  const [simulating, setSimulating] = useState(false);
-  const [generatingSelections, setGeneratingSelections] = useState(false);
-  const [dailySelectionsLeft, setDailySelectionsLeft] = useState(2);
-  const [todaySelections, setTodaySelections] = useState<Selection[]>([]);
-
-  useEffect(() => {
-    // Load initial data
-    setTodaySelections(mockSelections);
-  }, []);
-
-  const handleGenerateSelections = () => {
-    if (dailySelectionsLeft <= 0) {
-      return;
-    }
-    
-    setGeneratingSelections(true);
-    setTimeout(() => {
-      setGeneratingSelections(false);
-      setDailySelectionsLeft(prev => prev - 1);
-    }, 2000);
-  };
-
-  const simulateSelection = (selectionId: string) => {
-    setSimulating(true);
-    setShowSimulationModal(true);
-    
-    setTimeout(() => {
-      setSimulating(false);
-    }, 3000);
-  };
-
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-  };
-
-  const renderSelectionCard = (selection: Selection) => {
-    const getBumpRiskColor = (risk: string) => {
-      switch (risk) {
-        case 'High': return 'error';
-        case 'Medium': return 'warning';
-        case 'Low': return 'success';
-        default: return 'default';
-      }
-    };
-
-    const getSportIcon = (sport: string) => {
-      switch (sport) {
-        case 'NBA': return <BasketballIcon />;
-        case 'NFL': return <FootballIcon />;
-        case 'MLB': return <BaseballIcon />;
-        case 'NHL': return <HockeyIcon />;
-        default: return <TrophyIcon />;
-      }
-    };
-
-    return (
-      <StyledCard sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Avatar sx={{ bgcolor: 'primary.light', color: 'primary.main' }}>
-                {getSportIcon(selection.sport)}
-              </Avatar>
-              <Box>
-                <Typography variant="h6" fontWeight="bold">
-                  {selection.title}
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
-                  <ConfidenceBadge 
-                    label={`${selection.confidence}%`} 
-                    confidence={selection.confidence}
-                    size="small"
-                  />
-                  <Chip 
-                    label={selection.type} 
-                    size="small" 
-                    color="secondary"
-                    icon={<EventsIcon />}
-                  />
+      {/* Stats Footer (combined from File 1 and 2) */}
+      {filteredProps.length > 0 && (
+        <Paper sx={{ mt: 4, p: 3, bgcolor: 'background.paper', borderRadius: 2 }}>
+          <Stack direction="row" spacing={3} justifyContent="space-between" alignItems="center" flexWrap="wrap">
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Current Sport
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ 
+                  width: 24, 
+                  height: 24, 
+                  borderRadius: '50%', 
+                  bgcolor: getSportColor(sport),
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  fontSize: '12px'
+                }}>
+                  {sport === 'nba' ? '🏀' : sport === 'nfl' ? '🏈' : '⚾'}
                 </Box>
+                <Typography variant="body1" fontWeight="bold">
+                  {sport.toUpperCase()}
+                </Typography>
               </Box>
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip 
-                label={selection.payoutMultiplier}
-                size="small"
-                color="warning"
-                icon={<MoneyIcon />}
-              />
-            </Box>
-          </Box>
-
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle2" color="primary" gutterBottom>
-              🎯 3-Winner Combo:
-            </Typography>
-            <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell><Typography variant="caption" fontWeight="bold">Player</Typography></TableCell>
-                    <TableCell><Typography variant="caption" fontWeight="bold">Pick</Typography></TableCell>
-                    <TableCell align="right"><Typography variant="caption" fontWeight="bold">Odds</Typography></TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {selection.winners.map((winner, index) => (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {winner.player}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" color="text.secondary">
-                          {winner.pick}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Typography 
-                          variant="body2" 
-                          fontWeight="bold"
-                          color={winner.odds.startsWith('+') ? 'success.main' : 'error.main'}
-                        >
-                          {winner.odds}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-
-          <Grid container spacing={2} sx={{ mb: 3 }}>
-            <Grid item xs={4}>
-              <Paper sx={{ p: 1.5, textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">Total Odds</Typography>
-                <Typography 
-                  variant="h5" 
-                  fontWeight="bold"
-                  color={selection.totalOdds.startsWith('+') ? 'success.main' : 'error.main'}
-                >
-                  {selection.totalOdds}
-                </Typography>
-              </Paper>
-            </Grid>
-            <Grid item xs={4}>
-              <Paper sx={{ p: 1.5, textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">Edge Score</Typography>
-                <Typography variant="h5" fontWeight="bold" color="primary.main">
-                  {selection.edgeScore}/10
-                </Typography>
-              </Paper>
-            </Grid>
-            <Grid item xs={4}>
-              <Paper sx={{ p: 1.5, textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">Bump Risk</Typography>
-                <Chip 
-                  label={selection.bumpRisk}
-                  size="small"
-                  color={getBumpRiskColor(selection.bumpRisk)}
-                  sx={{ mt: 0.5 }}
-                />
-              </Paper>
-            </Grid>
-          </Grid>
-
-          <Paper sx={{ p: 2, bgcolor: 'grey.50', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-              <LightbulbIcon sx={{ color: 'primary.main', mr: 1, mt: 0.5 }} />
+            
+            <Box sx={{ textAlign: 'center' }}>
               <Typography variant="body2" color="text.secondary">
-                {selection.analysis}
+                Displayed Props
               </Typography>
-            </Box>
-          </Paper>
-
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Chip
-                icon={<AnalyticsIcon />}
-                label={`${selection.model} • ${selection.modelAccuracy}`}
-                size="small"
-                variant="outlined"
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
-                {selection.timestamp}
+              <Typography variant="h4" fontWeight="bold" color="primary">
+                {filteredProps.length}
               </Typography>
             </Box>
             
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<PlayIcon />}
-                onClick={() => simulateSelection(selection.id)}
-              >
-                Simulate
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<BookmarkIcon />}
-                onClick={() => {
-                  if (selection.requiresPremium) {
-                    // Show premium modal
-                  } else {
-                    // Track selection
-                  }
-                }}
-              >
-                Track
-              </Button>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                Bookmakers
+              </Typography>
+              <Typography variant="body1" fontWeight="bold">
+                {Array.from(new Set(filteredProps.map(p => p.bookmaker))).length}
+              </Typography>
             </Box>
-          </Box>
-        </CardContent>
-      </StyledCard>
-    );
-  };
-
-  const filteredSelections = mockSelections.filter(selection => {
-    if (selectedSport !== 'All' && selection.sport !== selectedSport) return false;
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      return (
-        selection.title.toLowerCase().includes(query) ||
-        selection.sport.toLowerCase().includes(query) ||
-        selection.winners.some(w => 
-          w.player.toLowerCase().includes(query) ||
-          w.pick.toLowerCase().includes(query)
-        )
-      );
-    }
-    return true;
-  });
-
-  return (
-    <Container maxWidth="lg">
-      {/* Header */}
-      <Box sx={{ mb: 4, mt: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Button
-            component={RouterLink}
-            to="/"
-            startIcon={<ArrowBackIcon />}
-          >
-            Back
-          </Button>
+            
+            <Box sx={{ textAlign: 'right' }}>
+              <Typography variant="body2" color="text.secondary">
+                Last Updated
+              </Typography>
+              <Typography variant="body1" fontWeight="bold">
+                {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+              </Typography>
+            </Box>
+          </Stack>
           
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TextField
-              placeholder="Search PrizePicks..."
-              size="small"
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-              sx={{ width: 300 }}
-            />
-            <Button
-              startIcon={<RefreshIcon />}
-              onClick={() => {
-                setSelectedSport('All');
-                setSearchQuery('');
-              }}
-              variant="outlined"
-            >
-              Reset
-            </Button>
+          <Box sx={{ mt: 2, textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary">
+              {activeEndpoint === 'mock' 
+                ? 'Note: Using sample data. Real picks will load when API endpoints return data.'
+                : `Data loaded from ${activeEndpoint}. Auto-refreshes every 2 minutes.`}
+            </Typography>
           </Box>
-        </Box>
-
-        <GradientPaper sx={{ p: 4, textAlign: 'center', position: 'relative' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
-            <Avatar sx={{ bgcolor: 'white', color: 'primary.main', mr: 2, width: 60, height: 60 }}>
-              <TrophyIcon sx={{ fontSize: 32 }} />
-            </Avatar>
-            <Badge
-              badgeContent="3"
-              color="error"
-              sx={{
-                '& .MuiBadge-badge': {
-                  fontSize: 14,
-                  height: 28,
-                  minWidth: 28,
-                },
-              }}
-            >
-              <Box>
-                <Typography variant="h3" fontWeight="bold" sx={{ color: 'white' }}>
-                  PrizePicks Hub
-                </Typography>
-                <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.9)' }}>
-                  3 winners per selection • 2 selections daily
-                </Typography>
-              </Box>
-            </Badge>
-          </Box>
-        </GradientPaper>
-      </Box>
-
-      {/* Daily Generator */}
-      <DailyPrizePicksGenerator 
-        onGenerate={handleGenerateSelections}
-        isGenerating={generatingSelections}
-        selectionsLeft={dailySelectionsLeft}
-      />
-
-      {/* Daily Stats */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={4}>
-          <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h4" fontWeight="bold" color="primary" gutterBottom>
-              {dailySelectionsLeft}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Selections Left
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={4}>
-          <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h4" fontWeight="bold" color="success.main" gutterBottom>
-              3
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Winners per Selection
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={4}>
-          <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h4" fontWeight="bold" color="warning.main" gutterBottom>
-              {todaySelections.length * 3}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Total Winners Today
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
-
-      {/* Timeframe Selector */}
-      <Paper sx={{ p: 1, mb: 3 }}>
-        <Tabs
-          value={selectedTimeframe}
-          onChange={(e, newValue) => setSelectedTimeframe(newValue)}
-          variant="scrollable"
-          scrollButtons="auto"
-        >
-          {timeframes.map((timeframe) => (
-            <Tab key={timeframe} label={timeframe} value={timeframe} />
-          ))}
-        </Tabs>
-      </Paper>
-
-      {/* Sport Filter */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-          Filter by Sport
-        </Typography>
-        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-          {sports.map((sport) => (
-            <Chip
-              key={sport.id}
-              icon={sport.icon}
-              label={sport.name}
-              onClick={() => setSelectedSport(sport.id)}
-              color={selectedSport === sport.id ? sport.color : 'default'}
-              variant={selectedSport === sport.id ? 'filled' : 'outlined'}
-            />
-          ))}
-        </Stack>
-      </Paper>
-
-      {/* Search Results Info */}
-      {searchQuery && (
-        <Alert 
-          severity="info" 
-          action={
-            <Button color="inherit" size="small" onClick={() => setSearchQuery('')}>
-              Clear
-            </Button>
-          }
-          sx={{ mb: 3 }}
-        >
-          {filteredSelections.length} of {mockSelections.length} picks match "{searchQuery}"
-        </Alert>
+        </Paper>
       )}
 
-      {/* Quick Search Queries */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-          Quick Search
-        </Typography>
-        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-          {selectionQueries.map((query, index) => (
-            <Chip
-              key={index}
-              label={query}
-              onClick={() => handleSearch(query)}
-              variant="outlined"
-              size="small"
-            />
-          ))}
-        </Stack>
-      </Paper>
-
-      {/* Selections Grid */}
-      <Box sx={{ mb: 6 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Box>
-            <Typography variant="h4" fontWeight="bold">
-              🎯 Curated 3-Winner Selections
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              Each pick contains 3 winners for maximum value
-            </Typography>
-          </Box>
-          <Chip
-            label={`${filteredSelections.length} picks • ${selectedTimeframe}`}
-            color="primary"
-            variant="outlined"
-          />
-        </Box>
-
-        {filteredSelections.length > 0 ? (
-          filteredSelections.map(selection => (
-            <Box key={selection.id}>
-              {renderSelectionCard(selection)}
-            </Box>
-          ))
-        ) : (
-          <Paper sx={{ p: 8, textAlign: 'center' }}>
-            <Avatar sx={{ bgcolor: 'grey.100', color: 'grey.500', width: 80, height: 80, mb: 2, mx: 'auto' }}>
-              <TrophyIcon sx={{ fontSize: 40 }} />
-            </Avatar>
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No PrizePicks found
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {searchQuery ? 'Try a different search or filter' : 'Generate selections or check back later'}
-            </Typography>
-          </Paper>
-        )}
-      </Box>
-
-      {/* Simulation Modal */}
-      <Dialog
-        open={showSimulationModal}
-        onClose={() => !simulating && setShowSimulationModal(false)}
-        maxWidth="sm"
-        fullWidth
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
-        <DialogTitle>
-          {simulating ? 'Generating PrizePicks...' : 'PrizePicks Generated!'}
-        </DialogTitle>
-        <DialogContent>
-          {simulating ? (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <CircularProgress size={60} thickness={4} sx={{ mb: 3 }} />
-              <Typography variant="h6" gutterBottom>
-                Analyzing 3-winner combinations
-              </Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Calculating edge and optimizing selections
-              </Typography>
-              
-              <Stepper activeStep={2} sx={{ mt: 4 }}>
-                <Step>
-                  <StepLabel>Loading Data</StepLabel>
-                </Step>
-                <Step>
-                  <StepLabel>Analyzing Lines</StepLabel>
-                </Step>
-                <Step>
-                  <StepLabel>Generating Winners</StepLabel>
-                </Step>
-              </Stepper>
-            </Box>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Avatar sx={{ 
-                bgcolor: 'success.main', 
-                width: 100, 
-                height: 100, 
-                mb: 3,
-                mx: 'auto',
-                position: 'relative'
-              }}>
-                <TrophyIcon sx={{ fontSize: 48 }} />
-                <Badge
-                  badgeContent="3"
-                  color="error"
-                  sx={{
-                    position: 'absolute',
-                    top: -10,
-                    right: -10,
-                    '& .MuiBadge-badge': {
-                      fontSize: 14,
-                      height: 30,
-                      minWidth: 30,
-                    },
-                  }}
-                />
-              </Avatar>
-              <Typography variant="h5" fontWeight="bold" gutterBottom>
-                3-Winner PrizePicks Generated!
-              </Typography>
-              <Typography variant="body1" color="text.secondary" gutterBottom>
-                {dailySelectionsLeft} selection(s) left today • 3 winners per selection
-              </Typography>
-            </Box>
-          )}
-        </DialogContent>
-        {!simulating && (
-          <DialogActions>
-            <Button onClick={() => setShowSimulationModal(false)}>
-              Close
-            </Button>
-            <Button variant="contained" onClick={() => setShowSimulationModal(false)}>
-              View 3-Winner Picks
-            </Button>
-          </DialogActions>
-        )}
-      </Dialog>
-
-      {/* Floating Action Button */}
-      <Fab
-        color="primary"
-        sx={{ position: 'fixed', bottom: 16, right: 16 }}
-        onClick={handleGenerateSelections}
-        disabled={generatingSelections || dailySelectionsLeft <= 0}
-      >
-        {generatingSelections ? <CircularProgress size={24} color="inherit" /> : <AutoAwesomeIcon />}
-      </Fab>
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

@@ -1,0 +1,92 @@
+--- a/src/pages/AdvancedAnalyticsScreen.tsx
++++ b/src/pages/AdvancedAnalyticsScreen.tsx
+@@ -1,4 +1,17 @@
+ import React, { useState, useEffect } from 'react';
++
++// Add these interfaces after imports
++interface AnalyticsMetric {
++  value?: number;
++  percentile?: number;
++  player?: string;
++  team?: string;
++  length?: number;
++  [key: string]: any;
++}
++interface AnalyticsItem {
++  title?: string;
++  description?: string;
++  metrics?: AnalyticsMetric[];
++  [key: string]: any;
++}
+ 
+ const AdvancedAnalyticsScreen = () => {
+@@ -130,7 +143,7 @@
+   const [searchQuery, setSearchQuery] = useState('');
+   const [selectedCategory, setSelectedCategory] = useState('team-stats');
+   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+-  const [apiAnalytics, setApiAnalytics] = useState([]);
++  const [apiAnalytics, setApiAnalytics] = useState<AnalyticsItem[]>([]);
+   const [analyticsData, setAnalyticsData] = useState(MOCK_ANALYTICS);
+   const [loading, setLoading] = useState(false);
+   const [refreshing, setRefreshing] = useState(false);
+@@ -1346,7 +1359,7 @@
+         <Box sx={{ textAlign: 'center', py: 4 }}>
+           <Newspaper sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+           <Typography variant="h6" gutterBottom>
+-            🔍 Debug: Using {analyticsData?.rawAnalytics ? 'REAL API DATA via hooks' : 'MOCK DATA'} •
++            🔍 Debug: Using {apiAnalytics?.length ? 'REAL API DATA via hooks' : 'MOCK DATA'} •
+             Showing {filteredAnalytics.length} of {analyticsData.length} analytics
+           </Typography>
+ EOF
+
+# Apply the patch
+patch -p1 < fix_analytics.patch
+
+# Create a patch for SportsWireScreen
+cat > fix_sportswire.patch << 'EOF'
+--- a/src/pages/SportsWireScreen.tsx
++++ b/src/pages/SportsWireScreen.tsx
+@@ -1,4 +1,20 @@
+ import React, { useState, useEffect } from 'react';
++
++// Add this interface after imports
++interface PlayerProp {
++  id: string | number;
++  playerName: string;
++  team: string;
++  propType: string;
++  odds: string;
++  impliedProbability: number;
++  confidence: number;
++  sport: string;
++  line?: number;
++  bookmaker?: string;
++  game?: string;
++  [key: string]: any;
++}
+ 
+ const SportsWireScreen = () => {
+@@ -36,8 +52,8 @@
+   const [trendingFilter, setTrendingFilter] = useState('all');
+   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+   const [loading, setLoading] = useState(false);
+-  const [articles, setArticles] = useState(MOCK_ARTICLES);
+-  const [filteredArticles, setFilteredArticles] = useState(MOCK_ARTICLES);
++  const [articles, setArticles] = useState<PlayerProp[]>(MOCK_ARTICLES);
++  const [filteredArticles, setFilteredArticles] = useState<PlayerProp[]>(MOCK_ARTICLES);
+   const [bookmarked, setBookmarked] = useState<number[]>([]);
+   const [refreshing, setRefreshing] = useState(false);
+   const [trendingStories, setTrendingStories] = useState(MOCK_TRENDING_STORIES);
+@@ -222,6 +238,13 @@
+ });
+ 
+ import NewReleasesIcon from '@mui/icons-material/NewReleases';
++// Add missing icon imports
++import {
++  SportsBasketball,
++  SportsFootball,
++  SportsBaseball,
++  SportsHockey,
++  ShowChart
++} from '@mui/icons-material';
+ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';

@@ -47,6 +47,11 @@ import {
   People,
   SwapHoriz,
   School,
+  SportsBasketball,
+  SportsFootball,
+  SportsBaseball,
+  SportsHockey,
+  ShowChart,
   Business,
   BarChart,
   Notifications,
@@ -54,9 +59,26 @@ import {
   AutoAwesome as SparklesIcon,
   Remove,
   TrendingDown,
-  Timer
+  Timer,
+  LocalFireDepartment,
+  Bolt
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+
+// At the top of the file, add:
+import { useSportsWire } from '../hooks/useSportsData';
+
+// Fix for __DEV__ error - define it if not defined
+declare global {
+  var __DEV__: boolean;
+}
+
+// Initialize __DEV__ if it doesn't exist
+if (typeof __DEV__ === 'undefined') {
+  // Set to true for development, false for production
+  // You can also check the environment
+  globalThis.__DEV__ = process.env.NODE_ENV === 'development';
+}
 
 const SPORT_COLORS = {
   NBA: '#ef4444',
@@ -76,656 +98,587 @@ const CATEGORY_COLORS = {
   'beat-writers': '#3b82f6'
 };
 
-// MOCK_ARTICLES for fallback
-const MOCK_ARTICLES = Array.from({ length: 12 }, (_, i) => {
-  const categories = ['analytics', 'injuries', 'trades', 'rosters', 'draft'];
-  const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+// MOCK_PLAYER_PROPS for fallback
+const MOCK_PLAYER_PROPS: PlayerProp[] = Array.from({ length: 12 }, (_, i) => {
+  const sports = ['NBA', 'NFL', 'MLB', 'NHL'];
+  const statTypes = ['Points', 'Rebounds', 'Assists', 'Yards', 'Touchdowns', 'Home Runs'];
+  const randomSport = sports[Math.floor(Math.random() * sports.length)];
+  const randomStat = statTypes[Math.floor(Math.random() * statTypes.length)];
   
   return {
     id: i + 1,
-    title: `Sports News Article ${i + 1}: Breaking Update on Major Event`,
-    category: randomCategory,
-    excerpt: 'This is a detailed excerpt about the latest developments in sports analytics and insights from beat writers...',
+    playerName: `Player ${i + 1}`,
+    team: ['Lakers', 'Warriors', 'Chiefs', 'Yankees', 'Bruins'][Math.floor(Math.random() * 5)],
+    sport: randomSport,
+    propType: randomStat,
+    line: Math.random() > 0.5 ? 'Over ' + (Math.floor(Math.random() * 30) + 10) : 'Under ' + (Math.floor(Math.random() * 30) + 10),
+    odds: Math.random() > 0.5 ? '+150' : '-120',
+    impliedProbability: Math.floor(Math.random() * 40) + 50,
+    matchup: 'Home vs. Away',
     time: `${Math.floor(Math.random() * 24)}h ago`,
-    views: `${Math.floor(Math.random() * 20) + 5}K`,
-    writer: ['Sarah Johnson', 'Mike Smith', 'Alex Rodriguez'][Math.floor(Math.random() * 3)],
+    confidence: Math.floor(Math.random() * 40) + 60,
     isBookmarked: Math.random() > 0.5,
-    sentiment: ['positive', 'neutral', 'negative'][Math.floor(Math.random() * 3)],
-    engagement: Math.floor(Math.random() * 30) + 70,
-    readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
-    aiScore: Math.floor(Math.random() * 40) + 60,
-    metrics: {
-      socialShares: Math.floor(Math.random() * 1000),
-      comments: Math.floor(Math.random() * 500),
-      saves: Math.floor(Math.random() * 200)
-    }
+    aiInsights: [
+      'Trending in the right direction',
+      'Matchup favors this prop',
+      'Historical performance strong'
+    ]
   };
 });
 
-const MOCK_TRENDING_STORIES = [
+const MOCK_TRENDING_PROPS: TrendingProp[] = [
   {
     id: 1,
-    title: 'Advanced Metrics: Which Teams Are Over/Underperforming?',
-    category: 'analytics',
-    time: '1h ago',
-    views: '18.2K',
-    trending: true,
-    emoji: '📊',
-    type: 'ANALYSIS',
-    writer: 'Sarah Johnson',
+    playerName: 'LeBron James',
+    team: 'Lakers',
     sport: 'NBA',
-    sentiment: 'positive',
-    engagement: 92,
-    readingTime: '4 min',
-    aiInsights: ['High statistical significance', '95% confidence interval', '5 key metrics analyzed']
+    propType: 'Points',
+    line: 'Over 25.5',
+    odds: '+110',
+    impliedProbability: 65,
+    matchup: 'LAL @ GSW',
+    time: '1h ago',
+    confidence: 85,
+    trending: true,
+    emoji: '🏀',
+    type: 'HOT'
   },
   {
     id: 2,
-    title: 'Injury Report: Key Players Sidelined This Week',
-    category: 'injuries',
-    time: '2h ago',
-    views: '24.5K',
-    trending: true,
-    emoji: '🏥',
-    type: 'BREAKING',
-    writer: 'Team Doctors',
+    playerName: 'Patrick Mahomes',
+    team: 'Chiefs',
     sport: 'NFL',
-    sentiment: 'negative',
-    engagement: 88,
-    readingTime: '3 min',
-    aiInsights: ['Affects 3 team lineups', 'Average recovery: 14 days', 'Injury correlation: 0.87']
+    propType: 'Passing Yards',
+    line: 'Over 285.5',
+    odds: '-130',
+    impliedProbability: 72,
+    matchup: 'KC @ BUF',
+    time: '2h ago',
+    confidence: 78,
+    trending: true,
+    emoji: '🏈',
+    type: 'VALUE'
   },
   {
     id: 3,
-    title: 'Trade Rumors: Latest from League Insiders',
-    category: 'trades',
+    playerName: 'Connor McDavid',
+    team: 'Oilers',
+    sport: 'NHL',
+    propType: 'Points',
+    line: 'Over 1.5',
+    odds: '+150',
+    impliedProbability: 58,
+    matchup: 'EDM @ COL',
     time: '4h ago',
-    views: '15.7K',
+    confidence: 82,
     trending: true,
-    emoji: '📝',
-    type: 'RUMOR',
-    writer: 'Multiple Sources',
-    sport: 'NBA',
-    sentiment: 'neutral',
-    engagement: 76,
-    readingTime: '5 min',
-    aiInsights: ['Trade probability: 65%', 'Salary cap impact: $12M', 'Team value change: +8%']
+    emoji: '🏒',
+    type: 'TRENDING'
   }
 ];
 
+// Define types for better TypeScript support
+interface PlayerProp {
+  id: string | number;
+  playerName: string;
+  team: string;
+  sport: string;
+  propType: string;
+  line: string;
+  odds: string;
+  impliedProbability: number;
+  matchup: string;
+  time: string;
+  confidence: number;
+  isBookmarked: boolean;
+  aiInsights?: string[];
+}
+
+interface TrendingProp {
+  id: string | number;
+  playerName: string;
+  team: string;
+  sport: string;
+  propType: string;
+  line: string;
+  odds: string;
+  impliedProbability: number;
+  matchup: string;
+  time: string;
+  confidence: number;
+  trending: boolean;
+  emoji?: string;
+  type?: string;
+  aiInsights?: string[];
+}
+
+// Inside your component, replace fetch logic with:
 const SportsWireScreen = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   
-  const [selectedCategory, setSelectedCategory] = useState('beat-writers');
+  const { data: playerProps, loading, error } = useSportsWire();
+  
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [trendingFilter, setTrendingFilter] = useState('all');
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
-  const [articles, setArticles] = useState(MOCK_ARTICLES);
-  const [filteredArticles, setFilteredArticles] = useState(MOCK_ARTICLES);
+  const [filteredProps, setFilteredProps] = useState<PlayerProp[]>([]);
   const [bookmarked, setBookmarked] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [trendingStories, setTrendingStories] = useState(MOCK_TRENDING_STORIES);
+  const [trendingProps, setTrendingProps] = useState<TrendingProp[]>(MOCK_TRENDING_PROPS);
   
   const categories = [
-    { id: 'beat-writers', name: 'Beat Writers', icon: <NewReleasesIcon />, color: '#3b82f6' },
-    { id: 'injuries', name: 'Injury News', icon: <MedicalServices />, color: '#ef4444' },
-    { id: 'rosters', name: 'Rosters', icon: <People />, color: '#8b5cf6' },
-    { id: 'analytics', name: 'Analytics', icon: <Analytics />, color: '#10b981' },
-    { id: 'trades', name: 'Trades', icon: <SwapHoriz />, color: '#f59e0b' },
-    { id: 'draft', name: 'Draft', icon: <School />, color: '#ec4899' },
-    { id: 'free-agency', name: 'Free Agency', icon: <Business />, color: '#6366f1' },
-    { id: 'advanced-stats', name: 'Advanced Stats', icon: <BarChart />, color: '#14b8a6' },
-  ];
+    { id: 'all', name: 'All Sports', icon: <LocalFireDepartment />, color: '#ef4444' },
+    { id: 'NBA', name: 'NBA', icon: <SportsBasketball />, color: '#ef4444' },
+    { id: 'NFL', name: 'NFL', icon: <SportsFootball />, color: '#3b82f6' },
+    { id: 'MLB', name: 'MLB', icon: <SportsBaseball />, color: '#10b981' },
+    { id: 'NHL', name: 'NHL', icon: <SportsHockey />, color: '#1e40af' },
+    { id: 'value', name: 'Value Bets', icon: <ShowChart />, color: '#10b981' },
+    { id: 'live', name: 'Live Now', icon: <Bolt />, color: '#f59e0b' }
+  ];  
 
   const trendingFilters = [
     { id: 'all', name: 'All' },
-    { id: 'analytics', name: 'Analytics' },
-    { id: 'injuries', name: 'Injuries' },
-    { id: 'trades', name: 'Trades' },
-    { id: 'breaking', name: 'Breaking' },
-    { id: 'high-engagement', name: 'High Engagement' },
+    { id: 'NBA', name: 'NBA' },
+    { id: 'NFL', name: 'NFL' },
+    { id: 'MLB', name: 'MLB' },
+    { id: 'NHL', name: 'NHL' },
+    { id: 'high-confidence', name: 'High Confidence' },
   ];
 
   const [analyticsMetrics] = useState({
-    totalArticles: 128,
+    totalProps: 128,
     trendingScore: 78,
-    engagementRate: 65,
-    avgReadingTime: 4,
-    sentimentScore: 68,
-    hotTopics: [
-      { category: 'analytics', count: 42 },
-      { category: 'injuries', count: 28 },
-      { category: 'trades', count: 19 }
+    hitRate: 65,
+    avgConfidence: 68,
+    valueScore: 72,
+    hotSports: [
+      { sport: 'NBA', count: 42 },
+      { sport: 'NFL', count: 28 },
+      { sport: 'MLB', count: 19 }
     ]
   });
 
-  // NEW: Fetch news from API
-  const fetchNews = async () => {
-    try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
-      console.log(`🎯 Fetching sports wire news from: ${apiBaseUrl}/api/news`);
-      
-      const response = await fetch(`${apiBaseUrl}/api/news`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const result = await response.json();
-      console.log('✅ Sports wire news received:', result);
-      
-      if (result && result.success && Array.isArray(result.news)) {
-        console.log(`✅ Using REAL sports wire news: ${result.news.length} articles`);
-        
-        // Convert API news to our article format
-        const apiArticles = result.news.map((article: any, index: number) => ({
-          id: article.id || `api-${index}`,
-          title: article.title || 'Sports News Update',
-          category: article?.category || 'analytics',
-          excerpt: article.description || article.content || 'Latest sports news and analysis...',
-          time: `${Math.floor(Math.random() * 24)}h ago`,
-          views: `${Math.floor(Math.random() * 20) + 5}K`,
-          writer: article.author || article.writer || 'Sports Reporter',
-          isBookmarked: false,
-          sentiment: undefined,
-          engagement: Math.floor(Math.random() * 30) + 70,
-          readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
-          aiScore: Math.floor(Math.random() * 40) + 60,
-          metrics: {
-            socialShares: Math.floor(Math.random() * 1000),
-            comments: Math.floor(Math.random() * 500),
-            saves: Math.floor(Math.random() * 200)
-          }
-        }));
-        
-        setArticles(apiArticles);
-        setFilteredArticles(apiArticles);
-        
-        // Update trending stories if API provides them
-        if (result.trending && Array.isArray(result.trending)) {
-          const apiTrendingStories = result.trending.map((story: any, index: number) => ({
-            id: story.id || `trending-${index}`,
-            title: story.title || 'Trending Story',
-            category: story?.category || 'analytics',
-            time: '1h ago',
-            views: `${Math.floor(Math.random() * 20) + 5}K`,
-            trending: true,
-            emoji: undefined,
-            type: undefined,
-            writer: story.author || 'Sports Analyst',
-            sport: story.sport || 'NBA',
-            sentiment: undefined,
-            engagement: Math.floor(Math.random() * 30) + 70,
-            readingTime: `${Math.floor(Math.random() * 8) + 2} min`,
-            aiInsights: story.insights || ['AI analysis available', 'Data-driven insights']
-          }));
-          setTrendingStories(apiTrendingStories);
-        }
-        
-      } else {
-        throw new Error('Invalid sports wire data structure');
-      }
-      
-    } catch (error) {
-      console.error('❌ Failed to fetch sports wire news, using mock data:', error);
-      // Fallback to mock
-      setArticles(MOCK_ARTICLES);
-      setFilteredArticles(MOCK_ARTICLES);
-      setTrendingStories(MOCK_TRENDING_STORIES);
-    }
-  };
-
-  // Helper function to map API categories to our categories
-  const mapCategory = (category: string): string => {
-    if (!category) return 'analytics';
-    
-    const categoryMap: Record<string, string> = {
-      'analytics': 'analytics',
-      'injury': 'injuries',
-      'injuries': 'injuries',
-      'trade': 'trades',
-      'trades': 'trades',
-      'roster': 'rosters',
-      'rosters': 'rosters',
-      'draft': 'draft',
-      'free agency': 'free-agency',
-      'free-agency': 'free-agency',
-      'stats': 'advanced-stats',
-      'advanced-stats': 'advanced-stats',
-      'news': 'beat-writers',
-      'beat-writers': 'beat-writers'
-    };
-    
-    return categoryMap[category.toLowerCase()] || 'analytics';
-  };
-
-  // Helper function to format time
-  const formatTime = (dateString?: string): string => {
-    if (!dateString) return `${Math.floor(Math.random() * 24)}h ago`;
-    
-    try {
-      const date = new Date(dateString);
-      const now = new Date();
-      const diffHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-      
-      if (diffHours < 1) return 'Just now';
-      if (diffHours < 24) return `${diffHours}h ago`;
-      
-      const diffDays = Math.floor(diffHours / 24);
-      return `${diffDays}d ago`;
-    } catch {
-      return `${Math.floor(Math.random() * 24)}h ago`;
-    }
-  };
-
-  // Helper function to get sentiment
-  const getSentiment = (sentiment?: string): string => {
-    if (!sentiment) return ['positive', 'neutral', 'negative'][Math.floor(Math.random() * 3)];
-    
-    const sentimentMap: Record<string, string> = {
-      'positive': 'positive',
-      'negative': 'negative',
-      'neutral': 'neutral',
-      'up': 'positive',
-      'down': 'negative'
-    };
-    
-    return sentimentMap[sentiment.toLowerCase()] || 'neutral';
-  };
-
-  // Helper function to get emoji for category
-  const getEmoji = (category: string): string => {
-    const emojiMap: Record<string, string> = {
-      'analytics': '📊',
-      'injuries': '🏥',
-      'trades': '📝',
-      'rosters': '👥',
-      'draft': '🎓',
-      'free-agency': '💰',
-      'advanced-stats': '📈',
-      'beat-writers': '📰'
-    };
-    
-    return emojiMap[category] || '📰';
-  };
-
-  // Helper function to get type for trending stories
-  const getType = (category: string): string => {
-    const typeMap: Record<string, string> = {
-      'analytics': 'ANALYSIS',
-      'injuries': 'BREAKING',
-      'trades': 'RUMOR',
-      'rosters': 'UPDATE',
-      'draft': 'INSIGHT',
-      'free-agency': 'REPORT',
-      'advanced-stats': 'ANALYSIS',
-      'beat-writers': 'NEWS'
-    };
-    
-    return typeMap[category] || 'NEWS';
-  };
-
-  // Fetch all data including news from API
-  const fetchAllData = async (isRefresh = false) => {
-    try {
-      if (isRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      
-      await fetchNews();
-      
-    } catch (error) {
-      console.error('Error fetching sports wire data:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  // Initialize data fetching
+  // Filter props when category or search changes
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    if (!playerProps || playerProps.length === 0) {
+      setFilteredProps(MOCK_PLAYER_PROPS);
+      return;
+    }
 
-  // Filter articles when category or search changes
-  useEffect(() => {
-    let filtered = articles;
+    // Cast playerProps to PlayerProp[] to help TypeScript
+    let filtered = [...playerProps] as PlayerProp[];
     
     // Filter by category
-    if (selectedCategory !== 'beat-writers') {
-      filtered = filtered.filter(article => article.category === selectedCategory);
+    if (selectedCategory !== 'all') {
+      if (selectedCategory === 'value') {
+        filtered = filtered.filter(prop => {
+          const oddsValue = parseInt(prop.odds);
+          return oddsValue > 0 || prop.impliedProbability > 60;
+        });
+      } else if (selectedCategory === 'high-confidence') {
+        filtered = filtered.filter(prop => prop.confidence > 80);
+      } else {
+        filtered = filtered.filter(prop => prop.sport === selectedCategory);
+      }
     }
     
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(article => 
-        article.title.toLowerCase().includes(query) ||
-        article.excerpt.toLowerCase().includes(query) ||
-        article.writer.toLowerCase().includes(query)
+      filtered = filtered.filter(prop => 
+        prop.playerName.toLowerCase().includes(query) ||
+        prop.team.toLowerCase().includes(query) ||
+        prop.propType.toLowerCase().includes(query)
       );
     }
     
-    // Filter trending stories if needed
-    if (trendingFilter !== 'all') {
-      // For trending filter, we could add additional filtering logic
-      // This is a placeholder for future implementation
-    }
+    setFilteredProps(filtered);
+  }, [selectedCategory, searchQuery, playerProps]);
+
+  const getOddsColor = (odds: string) => {
+    if (odds.startsWith('+')) return '#10b981'; // Positive odds = green
+    if (odds.startsWith('-')) return '#ef4444'; // Negative odds = red
+    return '#6b7280';
+  };
+
+  const getConfidenceColor = (confidence: number) => {
+    if (confidence >= 80) return '#10b981';
+    if (confidence >= 60) return '#f59e0b';
+    return '#ef4444';
+  };
+
+  const getEmoji = (sport: string): string => {
+    const emojiMap: Record<string, string> = {
+      'NBA': '🏀',
+      'NFL': '🏈',
+      'MLB': '⚾',
+      'NHL': '🏒',
+      'SOCCER': '⚽',
+      'TENNIS': '🎾'
+    };
     
-    setFilteredArticles(filtered);
-  }, [selectedCategory, searchQuery, trendingFilter, articles]);
-
-  const getSentimentIcon = (sentiment: string) => {
-    switch(sentiment) {
-      case 'positive': return <TrendingUp sx={{ fontSize: 12 }} />;
-      case 'negative': return <TrendingDown sx={{ fontSize: 12 }} />;
-      default: return <Remove sx={{ fontSize: 12 }} />;
-    }
+    return emojiMap[sport] || '🎯';
   };
 
-  const getSentimentColor = (sentiment: string) => {
-    switch(sentiment) {
-      case 'positive': return '#10b981';
-      case 'negative': return '#ef4444';
-      case 'neutral': return '#6b7280';
-      default: return '#6b7280';
-    }
-  };
-
-  const handleBookmark = (articleId: number) => {
-    if (bookmarked.includes(articleId)) {
-      setBookmarked(bookmarked.filter(id => id !== articleId));
+  const handleBookmark = (propId: string | number) => {
+    // Convert to number for comparison
+    const numId = typeof propId === 'string' ? parseInt(propId) : propId;
+    
+    if (bookmarked.includes(numId)) {
+      setBookmarked(bookmarked.filter(id => id !== numId));
     } else {
-      setBookmarked([...bookmarked, articleId]);
+      setBookmarked([...bookmarked, numId]);
     }
   };
 
-  const handleShare = (article: any) => {
+  const handleShare = (prop: PlayerProp) => {
     if (navigator.share) {
       navigator.share({
-        title: article.title,
-        text: article.excerpt,
+        title: `${prop.playerName} ${prop.propType} Prop`,
+        text: `${prop.playerName} ${prop.line} ${prop.odds}`,
         url: window.location.href,
+      }).catch((err) => {
+        if (__DEV__) {
+          console.error('Error sharing:', err);
+        }
+        navigator.clipboard.writeText(`${prop.playerName} ${prop.propType}: ${prop.line} ${prop.odds}`)
+          .then(() => {
+            alert('Prop copied to clipboard!');
+          })
+          .catch(() => {
+            alert('Prop information available for sharing');
+          });
       });
     } else {
-      navigator.clipboard.writeText(`${article.title}\n\n${article.excerpt}`);
-      alert('Article link copied to clipboard!');
+      navigator.clipboard.writeText(`${prop.playerName} ${prop.propType}: ${prop.line} ${prop.odds}`)
+        .then(() => {
+          alert('Prop copied to clipboard!');
+        })
+        .catch(() => {
+          alert('Prop information available for sharing');
+        });
     }
   };
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchAllData(true);
+    // Force refresh by triggering a re-fetch
+    setTimeout(() => setRefreshing(false), 1000);
   };
 
-  const renderTrendingCard = (story: any) => (
-    <Card sx={{ 
-      width: 300, 
-      mr: 2, 
-      mb: 2,
-      display: 'inline-flex',
-      flexDirection: 'column'
-    }}>
-      <Box sx={{ 
-        position: 'relative',
-        height: 120,
-        bgcolor: (CATEGORY_COLORS as any)[story.category] || theme.palette.primary.main,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
+  const renderTrendingCard = (prop: TrendingProp) => {
+    const oddsColor = getOddsColor(prop.odds);
+    const confidenceColor = getConfidenceColor(prop.confidence);
+    const sportColor = (SPORT_COLORS as Record<string, string>)[prop.sport] || theme.palette.primary.main;
+    
+    return (
+      <Card key={prop.id} sx={{ 
+        width: 300, 
+        mr: 2, 
+        mb: 2,
+        display: 'inline-flex',
+        flexDirection: 'column'
       }}>
-        <Typography variant="h2" sx={{ fontSize: 48 }}>
-          {story.emoji}
-        </Typography>
-        <Chip 
-          label={story.type}
-          size="small"
-          sx={{ 
-            position: 'absolute',
-            top: 10,
-            right: 10,
-            bgcolor: 'rgba(0,0,0,0.7)',
-            color: 'white',
-            fontSize: '0.7rem'
-          }}
-        />
-        <Chip 
-          icon={getSentimentIcon(story.sentiment)}
-          label={story.sentiment.toUpperCase()}
-          size="small"
-          sx={{ 
-            position: 'absolute',
-            top: 10,
-            left: 10,
-            bgcolor: getSentimentColor(story.sentiment),
-            color: 'white',
-            fontSize: '0.6rem'
-          }}
-        />
-      </Box>
-      
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-          <Person sx={{ fontSize: 12, color: 'text.secondary' }} />
-          <Typography variant="caption" color="text.secondary">
-            {story.writer}
+        <Box sx={{ 
+          position: 'relative',
+          height: 120,
+          bgcolor: sportColor,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <Typography variant="h2" sx={{ fontSize: 48 }}>
+            {prop.emoji || getEmoji(prop.sport)}
           </Typography>
+          {prop.type && (
+            <Chip 
+              label={prop.type}
+              size="small"
+              sx={{ 
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                bgcolor: 'rgba(0,0,0,0.7)',
+                color: 'white',
+                fontSize: '0.7rem'
+              }}
+            />
+          )}
           <Chip 
-            label={story.sport}
-            size="small"
-            sx={{ 
-              height: 20,
-              fontSize: '0.6rem',
-              bgcolor: `${(SPORT_COLORS as any)[story.sport]}20`,
-              color: (SPORT_COLORS as any)[story.sport]
-            }}
-          />
+              label={`${prop.confidence}%`}
+              size="small"
+              sx={{ 
+                position: 'absolute',
+                top: 10,
+                left: 10,
+                bgcolor: confidenceColor,
+                color: 'white',
+                fontSize: '0.6rem'
+              }}
+            />
         </Box>
         
-        <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ height: 40 }}>
-          {story.title}
-        </Typography>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Visibility sx={{ fontSize: 12, color: 'text.secondary' }} />
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
+            <Person sx={{ fontSize: 12, color: 'text.secondary' }} />
             <Typography variant="caption" color="text.secondary">
-              {story.views}
+              {prop.playerName}
             </Typography>
+            <Chip 
+              label={prop.sport}
+              size="small"
+              sx={{ 
+                height: 20,
+                fontSize: '0.6rem',
+                bgcolor: `${sportColor}20`,
+                color: sportColor
+              }}
+            />
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Timer sx={{ fontSize: 12, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              {story.readingTime}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <TrendingUp sx={{ fontSize: 12, color: '#10b981' }} />
-            <Typography variant="caption" color="#10b981">
-              {story.engagement}%
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Chip 
-            label={categories.find(c => c.id === story.category)?.name}
-            size="small"
-            sx={{ 
-              bgcolor: `${(CATEGORY_COLORS as any)[story.category]}20`,
-              color: (CATEGORY_COLORS as any)[story.category]
-            }}
-          />
-          <Typography variant="caption" color="text.secondary">
-            {story.time}
+          
+          <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+            {prop.propType}: {prop.line}
           </Typography>
-        </Box>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-around', borderTop: 1, borderColor: 'divider', pt: 1 }}>
-          <IconButton size="small" onClick={() => handleShare(story)}>
-            <Share sx={{ fontSize: 16 }} />
-          </IconButton>
-          <IconButton size="small" onClick={() => alert(story.aiInsights?.join('\n') || 'No AI insights available')}>
-            <AutoAwesomeIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
-          </IconButton>
-          <IconButton size="small">
-            <BookmarkBorder sx={{ fontSize: 16 }} />
-          </IconButton>
-        </Box>
-      </CardContent>
-    </Card>
-  );
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Typography variant="caption" color="text.secondary">
+                {prop.team}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Typography variant="caption" fontWeight="bold" color={oddsColor}>
+                {prop.odds}
+              </Typography>
+            </Box>
+          </Box>
+          
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+            {prop.matchup}
+          </Typography>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              {prop.time}
+            </Typography>
+            <Chip 
+              label={`${prop.impliedProbability}%`}
+              size="small"
+              sx={{ 
+                bgcolor: '#f0f9ff',
+                color: '#3b82f6',
+                fontSize: '0.7rem'
+              }}
+            />
+          </Box>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-around', borderTop: 1, borderColor: 'divider', pt: 1 }}>
+            <IconButton size="small" onClick={() => handleShare(prop as any)}>
+              <Share sx={{ fontSize: 16 }} />
+            </IconButton>
+            <IconButton size="small" onClick={() => alert(prop.aiInsights?.join('\n') || 'No AI insights available')}>
+              <AutoAwesomeIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
+            </IconButton>
+            <IconButton size="small">
+              <BookmarkBorder sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  };
 
-  const renderArticleCard = (article: any) => (
-    <Card key={article.id} sx={{ mb: 3 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Chip 
-            label={categories.find(c => c.id === article.category)?.name}
-            size="small"
-            sx={{ 
-              bgcolor: `${(CATEGORY_COLORS as any)[article.category]}20`,
-              color: (CATEGORY_COLORS as any)[article.category],
-              fontWeight: 'bold'
-            }}
-          />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Box sx={{ 
-              width: 8, 
-              height: 8, 
-              borderRadius: '50%', 
-              bgcolor: getSentimentColor(article.sentiment) 
-            }} />
-            <Typography variant="caption" color="text.secondary">
-              {article.time}
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Typography variant="h6" fontWeight="bold" gutterBottom>
-          {article.title}
-        </Typography>
-        
-        <Typography variant="body2" color="text.secondary" paragraph sx={{ mb: 2 }}>
-          {article.excerpt}
-        </Typography>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Person sx={{ fontSize: 14, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              By {article.writer}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Visibility sx={{ fontSize: 14, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              {article.views}
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Divider sx={{ my: 2 }} />
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 2 }}>
-          <Box sx={{ textAlign: 'center' }}>
-            <Box sx={{ position: 'relative', width: 60, height: 60, mx: 'auto', mb: 1 }}>
-              <CircularProgress 
-                variant="determinate" 
-                value={article.engagement} 
-                size={60}
-                sx={{ color: '#3b82f6' }}
+  const renderPropCard = (prop: PlayerProp) => {
+    const oddsColor = getOddsColor(prop.odds);
+    const confidenceColor = getConfidenceColor(prop.confidence);
+    const sportColor = (SPORT_COLORS as Record<string, string>)[prop.sport] || theme.palette.primary.main;
+    const isBookmarked = bookmarked.includes(typeof prop.id === 'string' ? parseInt(prop.id) : prop.id);
+    
+    return (
+      <Card key={prop.id} sx={{ mb: 3 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                label={prop.sport}
+                size="small"
+                sx={{ 
+                  bgcolor: `${sportColor}20`,
+                  color: sportColor,
+                  fontWeight: 'bold'
+                }}
               />
-              <Box sx={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)'
-              }}>
-                <Typography variant="caption" fontWeight="bold">
-                  {article.engagement}%
-                </Typography>
-              </Box>
+              <Chip 
+                label={prop.propType}
+                size="small"
+                sx={{ 
+                  bgcolor: '#f8fafc',
+                  color: '#64748b'
+                }}
+              />
             </Box>
-            <Typography variant="caption" color="text.secondary">Engagement</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {prop.time}
+              </Typography>
+            </Box>
           </Box>
           
-          <Box sx={{ textAlign: 'center' }}>
-            <Box sx={{ position: 'relative', width: 60, height: 60, mx: 'auto', mb: 1 }}>
-              <CircularProgress 
-                variant="determinate" 
-                value={article.aiScore} 
-                size={60}
-                sx={{ color: '#10b981' }}
-              />
-              <Box sx={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)'
-              }}>
-                <Typography variant="caption" fontWeight="bold">
-                  {article.aiScore}
-                </Typography>
-              </Box>
-            </Box>
-            <Typography variant="caption" color="text.secondary">AI Score</Typography>
-          </Box>
-          
-          <Box sx={{ textAlign: 'center' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 60, mb: 1 }}>
-              <Timer sx={{ color: '#8b5cf6', mr: 1 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Avatar sx={{ bgcolor: sportColor, mr: 2, width: 40, height: 40 }}>
+              {prop.playerName.charAt(0)}
+            </Avatar>
+            <Box>
               <Typography variant="h6" fontWeight="bold">
-                {article.readingTime}
+                {prop.playerName}
               </Typography>
-            </Box>
-            <Typography variant="caption" color="text.secondary">Read Time</Typography>
-          </Box>
-        </Box>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Share sx={{ fontSize: 14, color: '#3b82f6' }} />
-              <Typography variant="caption" color="text.secondary">
-                {article.metrics.socialShares}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <ChatBubble sx={{ fontSize: 14, color: '#10b981' }} />
-              <Typography variant="caption" color="text.secondary">
-                {article.metrics.comments}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <BookmarkBorder sx={{ fontSize: 14, color: '#f59e0b' }} />
-              <Typography variant="caption" color="text.secondary">
-                {article.metrics.saves}
+              <Typography variant="body2" color="text.secondary">
+                {prop.team} • {prop.matchup}
               </Typography>
             </Box>
           </Box>
           
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <IconButton size="small" onClick={() => handleShare(article)}>
-              <Share sx={{ fontSize: 18 }} />
-            </IconButton>
-            <IconButton size="small" onClick={() => handleBookmark(article.id)}>
-              {bookmarked.includes(article.id) ? (
-                <Bookmark sx={{ fontSize: 18, color: '#3b82f6' }} />
-              ) : (
-                <BookmarkBorder sx={{ fontSize: 18 }} />
-              )}
-            </IconButton>
+          <Box sx={{ bgcolor: '#f8fafc', p: 2, borderRadius: 1, mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Prop Line
+                </Typography>
+                <Typography variant="h5" fontWeight="bold">
+                  {prop.line}
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: 'right' }}>
+                <Typography variant="body2" color="text.secondary">
+                  Odds
+                </Typography>
+                <Typography variant="h5" fontWeight="bold" color={oddsColor}>
+                  {prop.odds}
+                </Typography>
+              </Box>
+            </Box>
           </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
+          
+          <Divider sx={{ my: 2 }} />
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 2 }}>
+            <Box sx={{ textAlign: 'center' }}>
+              <Box sx={{ position: 'relative', width: 60, height: 60, mx: 'auto', mb: 1 }}>
+                <CircularProgress 
+                  variant="determinate" 
+                  value={prop.confidence} 
+                  size={60}
+                  sx={{ color: confidenceColor }}
+                />
+                <Box sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)'
+                }}>
+                  <Typography variant="caption" fontWeight="bold">
+                    {prop.confidence}%
+                  </Typography>
+                </Box>
+              </Box>
+              <Typography variant="caption" color="text.secondary">Confidence</Typography>
+            </Box>
+            
+            <Box sx={{ textAlign: 'center' }}>
+              <Box sx={{ position: 'relative', width: 60, height: 60, mx: 'auto', mb: 1 }}>
+                <CircularProgress 
+                  variant="determinate" 
+                  value={prop.impliedProbability} 
+                  size={60}
+                  sx={{ color: '#8b5cf6' }}
+                />
+                <Box sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)'
+                }}>
+                  <Typography variant="caption" fontWeight="bold">
+                    {prop.impliedProbability}%
+                  </Typography>
+                </Box>
+              </Box>
+              <Typography variant="caption" color="text.secondary">Implied Prob</Typography>
+            </Box>
+            
+            <Box sx={{ textAlign: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 60, mb: 1 }}>
+                <Box sx={{ 
+                  width: 24, 
+                  height: 24, 
+                  borderRadius: '50%', 
+                  bgcolor: sportColor,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mr: 1
+                }}>
+                  <Typography variant="caption" sx={{ color: 'white' }}>
+                    {getEmoji(prop.sport)}
+                  </Typography>
+                </Box>
+                <Typography variant="body2" fontWeight="bold">
+                  {prop.sport}
+                </Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary">Sport</Typography>
+            </Box>
+          </Box>
+          
+          {prop.aiInsights && prop.aiInsights.length > 0 && (
+            <Box sx={{ bgcolor: '#f0f9ff', p: 2, borderRadius: 1, mb: 2 }}>
+              <Typography variant="caption" fontWeight="bold" color="#3b82f6" gutterBottom>
+                AI Insights
+              </Typography>
+              {prop.aiInsights.map((insight, idx) => (
+                <Box key={idx} sx={{ display: 'flex', alignItems: 'flex-start', mb: 0.5 }}>
+                  <AutoAwesomeIcon sx={{ fontSize: 12, color: '#8b5cf6', mt: 0.5, mr: 1 }} />
+                  <Typography variant="caption" color="#1e40af">
+                    {insight}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button 
+                variant="contained" 
+                size="small"
+                sx={{ 
+                  bgcolor: oddsColor,
+                  '&:hover': { bgcolor: oddsColor, opacity: 0.9 }
+                }}
+              >
+                Track Prop
+              </Button>
+            </Box>
+            
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <IconButton size="small" onClick={() => handleShare(prop)}>
+                <Share sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>
+                {isBookmarked ? (
+                  <Bookmark sx={{ fontSize: 18, color: '#3b82f6' }} />
+                ) : (
+                  <BookmarkBorder sx={{ fontSize: 18 }} />
+                )}
+              </IconButton>
+            </Box>
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  };
 
   const AnalyticsDashboard = () => (
     <Dialog 
@@ -735,22 +688,22 @@ const SportsWireScreen = () => {
       fullWidth
     >
       <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
-        SportsHub Analytics Dashboard
+        SportsWire Analytics Dashboard
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
         <Typography variant="h6" gutterBottom>
-          📊 Performance Metrics
+          📊 Prop Performance Metrics
         </Typography>
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {articles.length}
+                {playerProps?.length || 0}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Total Articles</Typography>
+              <Typography variant="caption" color="text.secondary">Total Props</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={Math.min(articles.length, 100)} 
+                value={Math.min(playerProps?.length || 0, 100)} 
                 sx={{ mt: 1 }}
               />
             </Paper>
@@ -758,12 +711,12 @@ const SportsWireScreen = () => {
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.trendingScore}%
+                {analyticsMetrics.hitRate}%
               </Typography>
-              <Typography variant="caption" color="text.secondary">Trending Score</Typography>
+              <Typography variant="caption" color="text.secondary">Hit Rate</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={analyticsMetrics.trendingScore} 
+                value={analyticsMetrics.hitRate} 
                 sx={{ mt: 1, bgcolor: '#10b98120', '& .MuiLinearProgress-bar': { bgcolor: '#10b981' } }}
               />
             </Paper>
@@ -771,12 +724,12 @@ const SportsWireScreen = () => {
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.engagementRate}%
+                {analyticsMetrics.avgConfidence}%
               </Typography>
-              <Typography variant="caption" color="text.secondary">Engagement Rate</Typography>
+              <Typography variant="caption" color="text.secondary">Avg Confidence</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={analyticsMetrics.engagementRate} 
+                value={analyticsMetrics.avgConfidence} 
                 sx={{ mt: 1, bgcolor: '#8b5cf620', '& .MuiLinearProgress-bar': { bgcolor: '#8b5cf6' } }}
               />
             </Paper>
@@ -784,12 +737,12 @@ const SportsWireScreen = () => {
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.sentimentScore}%
+                {analyticsMetrics.valueScore}%
               </Typography>
-              <Typography variant="caption" color="text.secondary">Positive Sentiment</Typography>
+              <Typography variant="caption" color="text.secondary">Value Score</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={analyticsMetrics.sentimentScore} 
+                value={analyticsMetrics.valueScore} 
                 sx={{ mt: 1, bgcolor: '#f59e0b20', '& .MuiLinearProgress-bar': { bgcolor: '#f59e0b' } }}
               />
             </Paper>
@@ -797,57 +750,43 @@ const SportsWireScreen = () => {
         </Grid>
         
         <Typography variant="h6" gutterBottom>
-          🔥 Hot Topics
+          🔥 Hot Sports
         </Typography>
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          {analyticsMetrics.hotTopics.map((topic, index) => (
-            <Grid item xs={12} key={index}>
-              <Paper sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2" fontWeight="bold">
-                    {categories.find(c => c.id === topic.category)?.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {topic.count} articles
-                  </Typography>
-                </Box>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={(topic.count / analyticsMetrics.totalArticles) * 100}
-                  sx={{ 
-                    height: 8,
-                    borderRadius: 4,
-                    bgcolor: `${(CATEGORY_COLORS as any)[topic.category]}20`,
-                    '& .MuiLinearProgress-bar': { 
-                      bgcolor: (CATEGORY_COLORS as any)[topic.category] || theme.palette.primary.main 
-                    }
-                  }}
-                />
-              </Paper>
-            </Grid>
-          ))}
+          {analyticsMetrics.hotSports.map((sport, index) => {
+            const sportColor = (SPORT_COLORS as Record<string, string>)[sport.sport] || theme.palette.primary.main;
+            
+            return (
+              <Grid item xs={12} key={index}>
+                <Paper sx={{ p: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: sportColor }} />
+                      <Typography variant="body2" fontWeight="bold">
+                        {sport.sport}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      {sport.count} props
+                    </Typography>
+                  </Box>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={(sport.count / analyticsMetrics.totalProps) * 100}
+                    sx={{ 
+                      height: 8,
+                      borderRadius: 4,
+                      bgcolor: `${sportColor}20`,
+                      '& .MuiLinearProgress-bar': { 
+                        bgcolor: sportColor
+                      }
+                    }}
+                  />
+                </Paper>
+              </Grid>
+            );
+          })}
         </Grid>
-        
-        <Typography variant="h6" gutterBottom>
-          🎯 Sentiment Analysis
-        </Typography>
-        <Paper sx={{ p: 2 }}>
-          <Box sx={{ position: 'relative', height: 20, bgcolor: 'grey.100', borderRadius: 10, mb: 1 }}>
-            <Box sx={{ 
-              position: 'absolute',
-              left: 0,
-              height: '100%',
-              width: `${analyticsMetrics.sentimentScore}%`,
-              bgcolor: '#10b981',
-              borderRadius: 10
-            }} />
-          </Box>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Typography variant="caption" color="text.secondary">Negative</Typography>
-            <Typography variant="caption" color="text.secondary">Neutral</Typography>
-            <Typography variant="caption" color="text.secondary">Positive</Typography>
-          </Box>
-        </Paper>
       </DialogContent>
       <DialogActions>
         <Button onClick={() => setShowAnalyticsModal(false)}>Close Dashboard</Button>
@@ -855,6 +794,10 @@ const SportsWireScreen = () => {
     </Dialog>
   );
 
+  if (loading) return <div>Loading player props...</div>;
+  if (error) return <div>Error: {error}</div>;
+  
+  // Use playerProps directly in your rendering
   return (
     <Container maxWidth="lg">
       {/* Header */}
@@ -871,10 +814,10 @@ const SportsWireScreen = () => {
             </IconButton>
             <Box sx={{ flex: 1 }}>
               <Typography variant="h4" fontWeight="bold">
-                SportsHub
+                SportsWire ({playerProps?.length || 0} props)
               </Typography>
               <Typography variant="body1">
-                Beat writers, analytics & roster insights
+                Player props, odds & analytics insights
               </Typography>
             </Box>
             <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white' }}>
@@ -894,33 +837,33 @@ const SportsWireScreen = () => {
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
                 }}
               >
-                Advanced Analytics
+                Prop Analytics
               </Button>
             </Grid>
             <Grid item xs={12} sm={4}>
               <Button 
                 fullWidth
-                startIcon={<Person />}
+                startIcon={<TrendingUp />}
                 sx={{ 
                   justifyContent: 'flex-start',
                   color: 'white',
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
                 }}
               >
-                Beat Writer Reports
+                Trending Props
               </Button>
             </Grid>
             <Grid item xs={12} sm={4}>
               <Button 
                 fullWidth
-                startIcon={<AccessTime />}
+                startIcon={<AutoAwesomeIcon />}
                 sx={{ 
                   justifyContent: 'flex-start',
                   color: 'white',
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
                 }}
               >
-                Real-time Updates
+                AI Insights
               </Button>
             </Grid>
           </Grid>
@@ -936,7 +879,7 @@ const SportsWireScreen = () => {
           <TextField
             fullWidth
             variant="outlined"
-            placeholder="Search articles, teams, players..."
+            placeholder="Search players, teams, props..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             InputProps={{
@@ -988,10 +931,10 @@ const SportsWireScreen = () => {
         </Tabs>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="body2" fontWeight="bold">
-            {categories.find(c => c.id === selectedCategory)?.name} • {filteredArticles.length} articles
+            {categories.find(c => c.id === selectedCategory)?.name} • {filteredProps.length} props
           </Typography>
           <Badge 
-            badgeContent={articles.length} 
+            badgeContent={playerProps?.length || 0} 
             color="error"
             sx={{ cursor: 'pointer' }}
           >
@@ -1005,10 +948,10 @@ const SportsWireScreen = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Box>
             <Typography variant="h6" fontWeight="bold">
-              📈 Trending Analysis
+              📈 Trending Props
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Most discussed stories with AI insights
+              Most discussed props with AI insights
             </Typography>
           </Box>
           <Button 
@@ -1036,19 +979,19 @@ const SportsWireScreen = () => {
         
         {/* Trending Cards */}
         <Box sx={{ overflow: 'auto', whiteSpace: 'nowrap', pb: 1 }}>
-          {trendingStories.map(renderTrendingCard)}
+          {trendingProps.map(renderTrendingCard)}
         </Box>
       </Paper>
 
-      {/* Latest Articles */}
+      {/* Player Props */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Box>
             <Typography variant="h6" fontWeight="bold">
-              📰 Latest {categories.find(c => c.id === selectedCategory)?.name}
+              🎯 Player Props
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {articles.length} articles • {analyticsMetrics.engagementRate}% avg engagement
+              {filteredProps.length} props • {analyticsMetrics.hitRate}% hit rate
             </Typography>
           </Box>
           <Chip 
@@ -1062,18 +1005,18 @@ const SportsWireScreen = () => {
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
-            <Typography sx={{ ml: 2 }}>Loading sports wire articles...</Typography>
+            <Typography sx={{ ml: 2 }}>Loading player props...</Typography>
           </Box>
-        ) : filteredArticles.length > 0 ? (
-          filteredArticles.map(renderArticleCard)
+        ) : filteredProps.length > 0 ? (
+          filteredProps.map(renderPropCard)
         ) : (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Newspaper sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
-              No articles found
+              No props found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {searchQuery ? 'Try a different search term' : 'Check back soon for new articles'}
+              {searchQuery ? 'Try a different search term' : 'Check back soon for new props'}
             </Typography>
             {searchQuery && (
               <Button onClick={() => setSearchQuery('')}>
@@ -1083,10 +1026,10 @@ const SportsWireScreen = () => {
           </Box>
         )}
         
-        {!loading && filteredArticles.length > 0 && (
+        {!loading && filteredProps.length > 0 && (
           <Box sx={{ textAlign: 'center', py: 3 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Showing {filteredArticles.length} of {articles.length} articles
+              Showing {filteredProps.length} of {playerProps?.length || 0} props
             </Typography>
             <Button 
               startIcon={<Analytics />}

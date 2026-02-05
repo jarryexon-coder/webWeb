@@ -1,65 +1,37 @@
-// src/components/GlobalErrorBoundary.jsx
-import React from 'react';
+import React, { Component, ErrorInfo, ReactNode } from 'react';
 
-class GlobalErrorBoundary extends React.Component {
-  constructor(props) {
+interface Props {
+  children: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class GlobalErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
     super(props);
     this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error, errorInfo) {
-    console.error('🔥 GLOBAL REACT ERROR:', error);
-    console.error('Component stack:', errorInfo.componentStack);
-    
-    // Log to backend if available
-    if (window.fetch) {
-      fetch('/api/logs/error', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'ReactError',
-          message: error.message,
-          stack: error.stack,
-          componentStack: errorInfo.componentStack,
-          url: window.location.href,
-          timestamp: new Date().toISOString()
-        })
-      }).catch(() => {}); // Silently fail
-    }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    console.error('Error caught by boundary:', error, errorInfo);
   }
 
-  render() {
+  render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div style={{
-          padding: '40px',
-          textAlign: 'center',
-          fontFamily: 'system-ui, sans-serif'
-        }}>
+        <div style={{ padding: '20px', textAlign: 'center' }}>
           <h1>⚠️ Something went wrong</h1>
-          <p style={{ color: '#666', marginBottom: '20px' }}>
-            {this.state.error?.message || 'Unknown error'}
-          </p>
-          <button
-            onClick={() => window.location.reload()}
-            style={{
-              padding: '10px 20px',
-              background: '#0070f3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
+          <p>{this.state.error?.message || 'Unknown error'}</p>
+          <button onClick={() => window.location.reload()}>
             Reload Page
           </button>
-          <div style={{ marginTop: '20px', fontSize: '12px', color: '#999' }}>
-            Check browser console for details
-          </div>
         </div>
       );
     }

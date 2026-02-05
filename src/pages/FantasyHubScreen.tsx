@@ -56,7 +56,8 @@ import {
   Slider,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  AlertTitle
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -139,6 +140,22 @@ interface DraftResult {
   results: any;
 }
 
+// ADD INTERFACE FOR FANTASY TEAM FROM API
+interface FantasyTeam {
+  id: string;
+  name: string;
+  owner: string;
+  sport: string;
+  league: string;
+  record: string;
+  points: number;
+  rank: number;
+  players: string[];
+  waiverPosition: number;
+  movesThisWeek: number;
+  lastUpdated: string;
+}
+
 const FantasyHubScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -151,6 +168,10 @@ const FantasyHubScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // ADD STATE FOR FANTASY TEAMS FROM API (from File 2)
+  const [fantasyTeams, setFantasyTeams] = useState<FantasyTeam[]>([]);
+  const [teamsError, setTeamsError] = useState<string | null>(null);
   
   // Platform and budget
   const [activePlatform, setActivePlatform] = useState<Platform>({
@@ -211,9 +232,66 @@ const FantasyHubScreen = () => {
     { value: 'MLB', label: 'MLB', icon: <BaseballIcon /> }
   ];
 
+  // ADD FETCH FUNCTION FOR FANTASY TEAMS (from File 2)
+  const fetchFantasyTeams = async () => {
+    console.log('🔍 Fetching fantasy teams...');
+    setLoading(true);
+    setTeamsError(null);
+    
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const response = await fetch(`${apiBase}/api/fantasy/teams`);
+      const data = await response.json();
+      
+      console.log('✅ Fantasy teams response:', data);
+      
+      if (data.success && data.teams) {
+        console.log(`✅ Using REAL fantasy teams: ${data.teams.length} teams`);
+        
+        // Transform API data (from File 2)
+        const transformedTeams = data.teams.map((team: any) => ({
+          id: team.id,
+          name: team.name,
+          owner: team.owner,
+          sport: team.sport || 'NBA',
+          league: team.league,
+          record: team.record,
+          points: team.points,
+          rank: team.rank,
+          players: team.players || [],
+          waiverPosition: team.waiverPosition,
+          movesThisWeek: team.movesThisWeek,
+          lastUpdated: team.lastUpdated || new Date().toISOString()
+        }));
+        
+        setFantasyTeams(transformedTeams);
+        
+        // Store for debugging (from File 2)
+        window._fantasyHubDebug = {
+          rawApiResponse: data,
+          transformedTeams,
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        throw new Error(data.message || 'Failed to load fantasy teams');
+      }
+    } catch (error: any) {
+      console.error('❌ Fantasy teams error:', error);
+      setTeamsError(error.message);
+      // Fallback to empty array if API fails
+      setFantasyTeams([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     logScreenView('FantasyHubScreen');
     initializeData();
+    
+    // ADD FETCH FOR FANTASY TEAMS (from File 2)
+    fetchFantasyTeams();
     
     // Check for initial search params
     const params = new URLSearchParams(location.search);
@@ -586,6 +664,8 @@ const FantasyHubScreen = () => {
     setSearchInput('');
     try {
       await initializeData();
+      // ADD REFRESH FOR FANTASY TEAMS (from File 2)
+      await fetchFantasyTeams();
       setSnackbar({ open: true, message: 'Data refreshed successfully', severity: 'success' });
     } catch (error) {
       setSnackbar({ open: true, message: 'Failed to refresh data', severity: 'error' });
@@ -593,6 +673,118 @@ const FantasyHubScreen = () => {
       setRefreshing(false);
     }
   };
+
+  // ADD LOADING STATE (from File 2 pattern)
+  if (loading) {
+    return (
+      <Container>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2 }}>Loading fantasy teams...</Typography>
+        </Box>
+      </Container>
+    );
+  }
+
+  // ADD ERROR STATE (from File 2 pattern)
+  if (teamsError) {
+    return (
+      <Container>
+        <Alert 
+          severity="error" 
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={fetchFantasyTeams}>
+              RETRY
+            </Button>
+          }
+        >
+          <AlertTitle>Error Loading Fantasy Teams</AlertTitle>
+          {teamsError}
+        </Alert>
+      </Container>
+    );
+  }
+
+  // ADD RENDER FUNCTION FOR FANTASY TEAMS SECTION (from File 2)
+  const renderFantasyTeamsSection = () => (
+    <Paper sx={{ p: 3, mb: 4 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+        <Typography variant="h5" fontWeight="bold">
+          Your Fantasy Teams
+        </Typography>
+        <IconButton onClick={fetchFantasyTeams} disabled={refreshing}>
+          <RefreshIcon />
+        </IconButton>
+      </Box>
+
+      {fantasyTeams.length === 0 ? (
+        <Typography color="text.secondary" align="center" py={4}>
+          No fantasy teams available
+        </Typography>
+      ) : (
+        <Grid container spacing={3}>
+          {fantasyTeams.map((team) => (
+            <Grid item xs={12} md={6} key={team.id}>
+              <Card>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Avatar sx={{ 
+                      bgcolor: team.sport === 'NBA' ? '#ef4444' : 
+                               team.sport === 'NFL' ? '#3b82f6' : 
+                               team.sport === 'NHL' ? '#0ea5e9' : '#8b5cf6', 
+                      mr: 2 
+                    }}>
+                      {team.sport === 'NBA' && <BasketballIcon />}
+                      {team.sport === 'NFL' && <FootballIcon />}
+                      {team.sport === 'NHL' && <HockeyIcon />}
+                      {team.sport === 'MLB' && <BaseballIcon />}
+                    </Avatar>
+                    <Box>
+                      <Typography variant="h6">{team.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {team.owner} • {team.league}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                    <Chip label={`Rank #${team.rank}`} color="primary" />
+                    <Chip label={`${team.points} pts`} variant="outlined" />
+                  </Box>
+                  
+                  <Typography variant="body2" gutterBottom>
+                    Record: {team.record}
+                  </Typography>
+                  
+                  {team.players && team.players.length > 0 && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Top Players: {team.players.slice(0, 3).join(', ')}
+                      </Typography>
+                    </Box>
+                  )}
+                  
+                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Last updated: {new Date(team.lastUpdated).toLocaleDateString()}
+                    </Typography>
+                    <Button 
+                      size="small" 
+                      variant="outlined"
+                      onClick={() => navigate(`/team/${team.id}`)}
+                    >
+                      View Details
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+    </Paper>
+  );
 
   const renderHeader = () => (
     <Box sx={{
@@ -1369,20 +1561,14 @@ const FantasyHubScreen = () => {
     </Dialog>
   );
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-        <Typography sx={{ ml: 2 }}>Building your fantasy team...</Typography>
-      </Box>
-    );
-  }
-
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
       {renderHeader()}
       
       <Container maxWidth="lg">
+        {/* ADD FANTASY TEAMS SECTION AT THE TOP */}
+        {renderFantasyTeamsSection()}
+        
         {renderPlatformSelector()}
         {renderBudgetDisplay()}
         {renderAIPrompts()}

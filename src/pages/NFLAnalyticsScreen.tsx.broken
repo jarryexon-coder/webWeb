@@ -1260,9 +1260,9 @@ useEffect(() => {
           } else if (data.standings.afc || data.standings.nfc) {
             // Extract from nested structure
             if (data.standings.afc && Array.isArray(data.standings.afc)) {
-              data.standings.afc.forEach(division => {
+              data.standings.afc.forEach((division: any) => {
                 if (division.teams && Array.isArray(division.teams)) {
-                  standingsData.push(...division.teams.map(team => ({
+                  standingsData.push(...division.teams.map((team: any) => ({
                     ...team,
                     conference: 'AFC',
                     division: division.division
@@ -1271,9 +1271,9 @@ useEffect(() => {
               });
             }
             if (data.standings.nfc && Array.isArray(data.standings.nfc)) {
-              data.standings.nfc.forEach(division => {
+              data.standings.nfc.forEach((division: any) => {
                 if (division.teams && Array.isArray(division.teams)) {
-                  standingsData.push(...division.teams.map(team => ({
+                  standingsData.push(...division.teams.map((team: any) => ({
                     ...team,
                     conference: 'NFC',
                     division: division.division
@@ -1285,8 +1285,7 @@ useEffect(() => {
         }
         
         console.log(`✅ Extracted ${standingsData.length} NFL teams`);
-        // You'll need to update your state variable name here
-        // setStandings(standingsData); // Uncomment and adjust
+// @ts-ignore        setStandings(standingsData);
       }
     } catch (error) {
       console.error("Error fetching NFL standings:", error);

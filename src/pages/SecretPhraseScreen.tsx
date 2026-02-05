@@ -1,149 +1,212 @@
 // src/pages/SecretPhraseScreen.tsx
-import * as React from 'react';
-import { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Box,
+  Container,
   Typography,
-  Grid,
+  Box,
   Card,
   CardContent,
-  Button,
-  Container,
-  Paper,
-  Chip,
-  IconButton,
-  TextField,
-  InputAdornment,
-  LinearProgress,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Divider,
-  Avatar,
-  Tooltip,
-  Badge,
-  Fade,
-  Collapse,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  CardActions,
-  Stack,
+  Chip,
+  List,
+  ListItem,
+  ListItemText,
   CircularProgress,
   Alert,
+  AlertTitle,
+  Grid,
+  Paper,
+  Button,
+  IconButton,
+  TextField,
+  InputAdornment,
+  Divider,
+  Avatar,
+  CardActions,
   alpha,
-  useTheme,
-  Tabs,
-  Tab,
-  Fab,
-  Drawer,
-  Menu,
-  MenuItem,
-  ListItemAvatar,
-  Breadcrumbs,
-  Link as MuiLink,
-  Pagination,
-  Rating,
-  Switch,
-  FormControlLabel,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent,
+  useTheme
 } from '@mui/material';
-
-// Timeline components from @mui/lab
-import Timeline from '@mui/lab/Timeline';
-import TimelineItem from '@mui/lab/TimelineItem';
-import TimelineSeparator from '@mui/lab/TimelineSeparator';
-import TimelineDot from '@mui/lab/TimelineDot';
-import TimelineConnector from '@mui/lab/TimelineConnector';
-import TimelineContent from '@mui/lab/TimelineContent';
-import TimelineOppositeContent from '@mui/lab/TimelineOppositeContent';
-
+import { Link as RouterLink } from 'react-router-dom';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
-  Diamond as DiamondIcon,
-  Analytics as AnalyticsIcon,
-  TrendingUp as TrendingUpIcon,
-  FlashOn as FlashIcon,
-  Book as BookIcon,
-  AutoAwesome as SparklesIcon,
-  History as HistoryIcon,
-  Key as KeyIcon,
-  RocketLaunch as RocketIcon,
-  CopyAll as CopyIcon,
+  Psychology as PsychologyIcon,
   Lightbulb as LightbulbIcon,
-  Security as ShieldIcon,
+  CopyAll as CopyIcon,
+  Key as KeyIcon,
+  Refresh as RefreshIcon,
+  AutoAwesome as SparklesIcon,
   CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
-  Info as InfoIcon,
   Close as CloseIcon,
-  ExpandMore as ExpandMoreIcon,
-  SportsBasketball as BasketballIcon,
-  SportsFootball as FootballIcon,
-  SportsHockey as HockeyIcon,
-  SportsBaseball as BaseballIcon,
-  FilterList as FilterIcon,
-  Refresh as RefreshIcon,
-  AccessTime as TimeIcon,
-  Star as StarIcon,
-  Lock as LockIcon,
-  PlayArrow as PlayIcon,
-  MoreVert as MoreVertIcon,
-  Share as ShareIcon,
-  Favorite as FavoriteIcon,
-  CalendarToday as CalendarIcon,
-  Person as PersonIcon,
-  Group as GroupIcon,
-  EmojiEvents as TrophyIcon,
-  MonetizationOn as MoneyIcon,
-  LocalFireDepartment as FireIcon,
+  Book as BookIcon,
+  Lock as LockIcon
 } from '@mui/icons-material';
-import { Link as RouterLink } from 'react-router-dom';
 
-const SecretPhraseScreen: React.FC = () => {
-  const [secretPhrase, setSecretPhrase] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [activeStep, setActiveStep] = useState<number>(0);
+// Mock data for fallback
+const MOCK_PHRASES = [
+  {
+    id: '1',
+    category: 'Betting Terminology',
+    phrases: [
+      { term: 'Sharp Money', definition: 'Money from professional bettors', example: 'When sharp money comes in on the underdog, the line often moves' },
+      { term: 'Square', definition: 'Recreational or casual bettor', example: 'Squares often bet on favorites and popular teams' },
+      { term: 'Juice/Vig', definition: 'Commission charged by the sportsbook', example: '-110 means you bet $110 to win $100' },
+      { term: 'Steam Move', definition: 'Rapid line movement from heavy betting', example: 'The line moved from -3 to -5 due to steam' },
+      { term: 'Middle', definition: 'Betting both sides to win regardless', example: 'Betting +3.5 and -2.5 creates a middle opportunity' }
+    ]
+  },
+  {
+    id: '2',
+    category: 'NBA Analytics',
+    phrases: [
+      { term: 'PACE', definition: 'Possessions per 48 minutes', example: 'Teams with high PACE tend to score more points' },
+      { term: 'TS%', definition: 'True Shooting Percentage', example: 'Accounts for 2PT, 3PT, and FT efficiency' },
+      { term: 'PER', definition: 'Player Efficiency Rating', example: 'Single-number measure of player productivity' },
+      { term: 'VORP', definition: 'Value Over Replacement Player', example: 'Measures total contribution vs replacement-level player' },
+      { term: 'BPM', definition: 'Box Plus/Minus', example: 'Box score estimate of points contributed per 100 possessions' }
+    ]
+  },
+  {
+    id: '3',
+    category: 'Bankroll Management',
+    phrases: [
+      { term: 'Unit', definition: 'Standard betting amount', example: '1 unit = 1% of total bankroll' },
+      { term: 'Kelly Criterion', definition: 'Optimal bet sizing formula', example: 'Calculates bet size based on edge and odds' },
+      { term: 'Risk of Ruin', definition: 'Probability of losing entire bankroll', example: 'Proper bet sizing reduces risk of ruin' },
+      { term: 'Stop Loss', definition: 'Maximum daily/weekly loss limit', example: 'Set a 5-unit stop loss to prevent chasing' },
+      { term: 'Win Rate', definition: 'Percentage of bets won', example: '55% win rate with -110 odds is profitable' }
+    ]
+  }
+];
+
+const SecretPhraseScreen = () => {
   const theme = useTheme();
+  const [phrases, setPhrases] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredPhrases, setFilteredPhrases] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
-  const handleGeneratePhrase = useCallback(() => {
-    setIsLoading(true);
-    // Generate secret phrase logic
-    setTimeout(() => {
-      const phrases = [
-        'basketball-trophy-champion-2024-nba-winner',
-        'secure-key-phrase-recovery-2024-sports',
-        'champion-passphrase-victory-sports-nba'
-      ];
-      setSecretPhrase(phrases[Math.floor(Math.random() * phrases.length)]);
-      setIsLoading(false);
-    }, 1000);
+  const fetchSecretPhrases = async () => {
+    console.log('🔍 Fetching secret phrases...');
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const response = await fetch(`${apiBase}/api/secret/phrases`);
+      const data = await response.json();
+      
+      console.log('✅ Secret phrases response:', data);
+      
+      if (data.success && data.phrases) {
+        console.log(`✅ Using REAL secret phrases: ${data.phrases.length} categories`);
+        
+        // The API returns categories with nested phrases
+        const transformed = data.phrases.map((category: any) => ({
+          id: category.id,
+          category: category.category,
+          phrases: category.phrases || []
+        }));
+        
+        setPhrases(transformed);
+        setFilteredPhrases(transformed);
+        
+        window._secretPhrasesDebug = {
+          rawApiResponse: data,
+          transformedPhrases: transformed,
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        throw new Error(data.message || 'Failed to load secret phrases');
+      }
+    } catch (error: any) {
+      console.error('❌ Secret phrases error:', error);
+      setError(error.message);
+      // Fallback to mock data
+      setPhrases(MOCK_PHRASES);
+      setFilteredPhrases(MOCK_PHRASES);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSecretPhrases();
   }, []);
 
-  const handleNextStep = () => {
-    setActiveStep((prevStep) => prevStep + 1);
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setFilteredPhrases(phrases);
+      return;
+    }
+
+    const lowerQuery = query.toLowerCase().trim();
+    const filtered = phrases.map(category => {
+      const filteredPhrases = category.phrases.filter((phrase: any) => 
+        phrase.term.toLowerCase().includes(lowerQuery) ||
+        phrase.definition.toLowerCase().includes(lowerQuery)
+      );
+      
+      if (filteredPhrases.length > 0) {
+        return {
+          ...category,
+          phrases: filteredPhrases
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    setFilteredPhrases(filtered);
   };
 
-  const handleBackStep = () => {
-    setActiveStep((prevStep) => prevStep - 1);
+  const getCategories = () => {
+    const categories = ['All', ...phrases.map(cat => cat.category)];
+    return Array.from(new Set(categories));
   };
 
-  const steps = [
-    'Generate Secret Phrase',
-    'Backup Securely',
-    'Verification',
-  ];
+  const handleCategorySelect = (category: string) => {
+    setSelectedCategory(category);
+    if (category === 'All') {
+      setFilteredPhrases(phrases);
+    } else {
+      const filtered = phrases.filter(cat => cat.category === category);
+      setFilteredPhrases(filtered);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Container>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2 }}>Loading secret phrases...</Typography>
+        </Box>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container>
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <AlertTitle>Error Loading Secret Phrases</AlertTitle>
+          {error}
+          <Button onClick={fetchSecretPhrases} sx={{ mt: 1 }}>Retry</Button>
+        </Alert>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="lg">
+      {/* Header */}
       <Box sx={{ mt: 4, mb: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
           <Button
@@ -154,364 +217,192 @@ const SecretPhraseScreen: React.FC = () => {
           >
             Back
           </Button>
-          <Typography variant="h4" component="h1" fontWeight="bold">
-            🔐 Secret Phrase Management
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <PsychologyIcon fontSize="large" />
+            <Typography variant="h4" fontWeight="bold">
+              Secret Phrases & Terminology
+            </Typography>
+          </Box>
           <Box />
         </Box>
 
-        {/* Stepper */}
-        <Paper sx={{ p: 3, mb: 4 }}>
-          <Stepper activeStep={activeStep} alternativeLabel>
-            {steps.map((label) => (
-              <Step key={label}>
-                <StepLabel>{label}</StepLabel>
-              </Step>
-            ))}
-          </Stepper>
-          
-          {activeStep === 0 && (
-            <Box sx={{ mt: 4, textAlign: 'center' }}>
-              <Avatar sx={{ 
-                bgcolor: 'primary.main', 
-                width: 100, 
-                height: 100, 
-                mb: 3,
-                mx: 'auto'
-              }}>
-                <KeyIcon sx={{ fontSize: 48 }} />
-              </Avatar>
-              <Typography variant="h5" gutterBottom>
-                Generate Your Secret Recovery Phrase
-              </Typography>
-              <Typography variant="body1" color="text.secondary" gutterBottom>
-                This phrase is the master key to your account. Keep it safe and secure.
-              </Typography>
-              
-              <Button
-                variant="contained"
-                size="large"
-                onClick={handleGeneratePhrase}
-                disabled={isLoading}
-                startIcon={isLoading ? <CircularProgress size={24} /> : <SparklesIcon />}
-                sx={{ mt: 3, mb: 3 }}
-              >
-                {isLoading ? 'Generating...' : 'Generate Secret Phrase'}
-              </Button>
-              
-              {secretPhrase && (
-                <Fade in={!!secretPhrase}>
-                  <Paper sx={{ p: 3, bgcolor: 'grey.50', mt: 3 }}>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Your Secret Phrase:
-                    </Typography>
-                    <Paper 
-                      sx={{ 
-                        p: 2, 
-                        bgcolor: 'grey.900', 
-                        color: 'white',
-                        fontFamily: 'monospace',
-                        fontSize: '0.9rem',
-                        wordBreak: 'break-all'
-                      }}
-                    >
-                      {secretPhrase}
-                    </Paper>
-                    <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-                      <Button
-                        startIcon={<CopyIcon />}
-                        onClick={() => navigator.clipboard.writeText(secretPhrase)}
-                        variant="outlined"
-                        size="small"
-                      >
-                        Copy
-                      </Button>
-                      <Button
-                        startIcon={<ShieldIcon />}
-                        onClick={handleNextStep}
-                        variant="contained"
-                        size="small"
-                      >
-                        I've Saved It Securely
-                      </Button>
-                    </Box>
-                  </Paper>
-                </Fade>
-              )}
-            </Box>
-          )}
-          
-          {activeStep === 1 && (
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h5" gutterBottom align="center">
-                🔒 Backup Your Phrase Securely
-              </Typography>
-              <Grid container spacing={3} sx={{ mt: 2 }}>
-                <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <WarningIcon color="error" sx={{ mr: 1 }} />
-                        <Typography variant="h6">
-                          Do NOT
-                        </Typography>
-                      </Box>
-                      <List dense>
-                        <ListItem>
-                          <ListItemIcon>
-                            <CloseIcon color="error" />
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary="Take screenshots"
-                            secondary="Can be hacked or lost"
-                          />
-                        </ListItem>
-                        <ListItem>
-                          <ListItemIcon>
-                            <CloseIcon color="error" />
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary="Store digitally"
-                            secondary="Not in email, cloud, or notes"
-                          />
-                        </ListItem>
-                        <ListItem>
-                          <ListItemIcon>
-                            <CloseIcon color="error" />
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary="Share with anyone"
-                            secondary="Never give out your phrase"
-                          />
-                        </ListItem>
-                      </List>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <CheckCircleIcon color="success" sx={{ mr: 1 }} />
-                        <Typography variant="h6">
-                          DO
-                        </Typography>
-                      </Box>
-                      <List dense>
-                        <ListItem>
-                          <ListItemIcon>
-                            <BookIcon color="success" />
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary="Write it down"
-                            secondary="Use pen and paper"
-                          />
-                        </ListItem>
-                        <ListItem>
-                          <ListItemIcon>
-                            <LockIcon color="success" />
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary="Store physically"
-                            secondary="Safe deposit box or fireproof safe"
-                          />
-                        </ListItem>
-                        <ListItem>
-                          <ListItemIcon>
-                            <CopyIcon color="success" />
-                          </ListItemIcon>
-                          <ListItemText 
-                            primary="Make multiple copies"
-                            secondary="Store in different secure locations"
-                          />
-                        </ListItem>
-                      </List>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-              
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-                <Button
-                  variant="outlined"
-                  onClick={handleBackStep}
-                  sx={{ mr: 2 }}
-                >
-                  Back
-                </Button>
-                <Button
-                  variant="contained"
-                  onClick={handleNextStep}
-                >
-                  I've Backed It Up Securely
-                </Button>
-              </Box>
-            </Box>
-          )}
-          
-          {activeStep === 2 && (
-            <Box sx={{ mt: 4, textAlign: 'center' }}>
-              <Avatar sx={{ 
-                bgcolor: 'success.main', 
-                width: 100, 
-                height: 100, 
-                mb: 3,
-                mx: 'auto'
-              }}>
-                <CheckCircleIcon sx={{ fontSize: 48 }} />
-              </Avatar>
-              <Typography variant="h5" gutterBottom>
-                ✅ Verification Complete!
-              </Typography>
-              <Typography variant="body1" color="text.secondary" gutterBottom>
-                Your secret phrase has been generated and should be stored securely.
-              </Typography>
-              
-              <Alert severity="success" sx={{ mt: 3, mb: 3 }}>
-                <Typography variant="body1">
-                  Remember: Your secret phrase is the ONLY way to recover your account.
-                  If you lose it, your account cannot be recovered.
-                </Typography>
-              </Alert>
-              
-              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 4 }}>
-                <Button
-                  variant="outlined"
-                  onClick={handleBackStep}
-                >
-                  Back
-                </Button>
-                <Button
-                  variant="contained"
-                  component={RouterLink}
-                  to="/"
-                >
-                  Return to Dashboard
-                </Button>
-              </Box>
-            </Box>
-          )}
-        </Paper>
-
-        {/* Timeline View */}
-        <Paper sx={{ p: 3, mb: 4 }}>
-          <Typography variant="h5" gutterBottom align="center">
-            Recovery Process Timeline
-          </Typography>
-          <Timeline position="alternate">
-            <TimelineItem>
-              <TimelineOppositeContent color="text.secondary">
-                Step 1
-              </TimelineOppositeContent>
-              <TimelineSeparator>
-                <TimelineDot color="primary">
-                  <KeyIcon />
-                </TimelineDot>
-                <TimelineConnector />
-              </TimelineSeparator>
-              <TimelineContent>
-                <Typography variant="h6">Generate Phrase</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Create a unique secret recovery phrase
-                </Typography>
-              </TimelineContent>
-            </TimelineItem>
-            <TimelineItem>
-              <TimelineOppositeContent color="text.secondary">
-                Step 2
-              </TimelineOppositeContent>
-              <TimelineSeparator>
-                <TimelineDot color="primary">
-                  <CopyIcon />
-                </TimelineDot>
-                <TimelineConnector />
-              </TimelineSeparator>
-              <TimelineContent>
-                <Typography variant="h6">Backup Securely</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Write down and store in multiple secure locations
-                </Typography>
-              </TimelineContent>
-            </TimelineItem>
-            <TimelineItem>
-              <TimelineOppositeContent color="text.secondary">
-                Step 3
-              </TimelineOppositeContent>
-              <TimelineSeparator>
-                <TimelineDot color="primary">
-                  <CheckCircleIcon />
-                </TimelineDot>
-              </TimelineSeparator>
-              <TimelineContent>
-                <Typography variant="h6">Verification</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Confirm you've saved it correctly
-                </Typography>
-              </TimelineContent>
-            </TimelineItem>
-          </Timeline>
-        </Paper>
-
-        {/* Security Tips Grid */}
-        <Typography variant="h5" gutterBottom>
-          Security Best Practices
+        <Typography variant="body1" color="text.secondary" align="center" sx={{ mb: 4 }}>
+          Insider terminology used by professional bettors and analysts
         </Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <Avatar sx={{ bgcolor: 'error.light', mr: 2 }}>
-                    <ShieldIcon />
-                  </Avatar>
-                  <Typography variant="h6">
-                    Never Share
-                  </Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  Your secret phrase is like a password. Never share it with anyone, 
-                  including customer support or "official" representatives.
-                </Typography>
-              </CardContent>
-            </Card>
+
+        {/* Search and Filter Section */}
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={8}>
+              <TextField
+                fullWidth
+                placeholder="Search terms or definitions..."
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Button
+                fullWidth
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={fetchSecretPhrases}
+              >
+                Refresh Terms
+              </Button>
+            </Grid>
           </Grid>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <Avatar sx={{ bgcolor: 'warning.light', mr: 2 }}>
-                    <LockIcon />
-                  </Avatar>
-                  <Typography variant="h6">
-                    Offline Storage
-                  </Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  Store your phrase offline. Avoid digital storage like email, 
-                  cloud services, or password managers that can be compromised.
+          
+          {/* Category Filters */}
+          {phrases.length > 0 && (
+            <Box sx={{ mt: 3, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {getCategories().map((category) => (
+                <Chip
+                  key={category}
+                  label={category}
+                  onClick={() => handleCategorySelect(category)}
+                  color={selectedCategory === category ? 'primary' : 'default'}
+                  variant={selectedCategory === category ? 'filled' : 'outlined'}
+                />
+              ))}
+            </Box>
+          )}
+        </Paper>
+
+        {/* Secret Phrases Content */}
+        {filteredPhrases.length === 0 ? (
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <PsychologyIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+            {searchQuery ? (
+              <>
+                <Typography variant="h6" gutterBottom>
+                  No terms found
                 </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <Avatar sx={{ bgcolor: 'success.light', mr: 2 }}>
-                    <CopyIcon />
-                  </Avatar>
-                  <Typography variant="h6">
-                    Multiple Copies
-                  </Typography>
-                </Box>
                 <Typography variant="body2" color="text.secondary">
-                  Create multiple physical copies stored in different secure 
-                  locations to protect against loss from fire, flood, or theft.
+                  Try a different search or filter
                 </Typography>
-              </CardContent>
-            </Card>
+              </>
+            ) : (
+              <>
+                <Typography variant="h6" gutterBottom>
+                  No secret phrases available
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Check back for new terminology updates
+                </Typography>
+              </>
+            )}
+          </Paper>
+        ) : (
+          <Box>
+            {filteredPhrases.map((category) => (
+              <Accordion key={category.id} sx={{ mb: 3 }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                    <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                      {category.category}
+                    </Typography>
+                    <Chip 
+                      label={`${category.phrases.length} terms`}
+                      size="small"
+                    />
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={3}>
+                    {category.phrases.map((phrase: any, index: number) => (
+                      <Grid item xs={12} sm={6} md={4} key={index}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                              <Avatar sx={{ bgcolor: alpha('#8b5cf6', 0.1), color: '#8b5cf6', mr: 2 }}>
+                                <LightbulbIcon />
+                              </Avatar>
+                              <Typography variant="h6" fontWeight="bold">
+                                {phrase.term}
+                              </Typography>
+                            </Box>
+                            
+                            <Typography variant="body2" color="text.secondary" paragraph>
+                              {phrase.definition}
+                            </Typography>
+                            
+                            {phrase.example && (
+                              <>
+                                <Divider sx={{ my: 1 }} />
+                                <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                  Example: {phrase.example}
+                                </Typography>
+                              </>
+                            )}
+                          </CardContent>
+                          <CardActions sx={{ p: 2, pt: 0 }}>
+                            <Button
+                              size="small"
+                              startIcon={<CopyIcon />}
+                              onClick={() => navigator.clipboard.writeText(phrase.term)}
+                            >
+                              Copy Term
+                            </Button>
+                          </CardActions>
+                        </Card>
+                      </Grid>
+                    ))}
+                  </Grid>
+                </AccordionDetails>
+              </Accordion>
+            ))}
+          </Box>
+        )}
+
+        {/* Stats Card */}
+        {phrases.length > 0 && (
+          <Grid container spacing={3} sx={{ mb: 4, mt: 4 }}>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="primary" gutterBottom>
+                    {phrases.length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Categories
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="secondary" gutterBottom>
+                    {phrases.reduce((total, cat) => total + cat.phrases.length, 0)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Total Terms
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="success.main" gutterBottom>
+                    📚
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Expert Knowledge
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
-        </Grid>
+        )}
       </Box>
     </Container>
   );
