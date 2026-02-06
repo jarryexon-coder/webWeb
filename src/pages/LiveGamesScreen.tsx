@@ -49,6 +49,9 @@ import {
   Cancel as CancelIcon
 } from '@mui/icons-material';
 
+// ADD THIS IMPORT
+import { useOddsGames } from '../hooks/useBackendAPI';
+
 interface Game {
   id: string;
   sport: string;
@@ -78,18 +81,15 @@ const LiveGamesScreen = () => {
   useEffect(() => {
     console.log('=== LiveGamesScreen Debug ===');
     console.log('API Base URL:', import.meta.env.VITE_API_BASE);
-    console.log('Backend URL:', 'http://localhost:5001');
+    console.log('Backend URL:', 'https://pleasing-determination-production.up.railway.app');
     console.log('==========================');
   }, []);
 
   // Main states
   const [selectedSport, setSelectedSport] = useState('all');
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
-  const [allGames, setAllGames] = useState<Game[]>([]);
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [gameDialogOpen, setGameDialogOpen] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -110,14 +110,20 @@ const LiveGamesScreen = () => {
     { id: 1, sport: 'all', time: 'Just now', text: 'Loading live games...' },
   ]);
 
-  // Sports data
+  // Sports data - Map frontend sport IDs to API sport keys
   const sports = [
-    { id: 'all', name: 'All Sports', icon: <WhatshotIcon />, color: '#8b5cf6' },
-    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444' },
-    { id: 'NFL', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6' },
-    { id: 'NHL', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af' },
-    { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981' }
+    { id: 'all', name: 'All Sports', icon: <WhatshotIcon />, color: '#8b5cf6', apiKey: '' },
+    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444', apiKey: 'basketball_nba' },
+    { id: 'NFL', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6', apiKey: 'americanfootball_nfl' },
+    { id: 'NHL', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af', apiKey: 'icehockey_nhl' },
+    { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981', apiKey: 'baseball_mlb' }
   ];
+
+  // Get API sport key for selected sport
+  const getApiSportKey = () => {
+    const sportObj = sports.find(s => s.id === selectedSport);
+    return sportObj?.apiKey || 'basketball_nba'; // Default to NBA
+  };
 
   // Mock games data as fallback
   const mockGamesData: Game[] = [
@@ -146,190 +152,159 @@ const LiveGamesScreen = () => {
     }
   ];
 
-  // Replace your entire fetchGames function with this:
-  const loadLiveGames = useCallback(async (isRefresh = false, searchText = '') => {
-    if (!isRefresh) setLoading(true);
-    setRefreshing(isRefresh);
-    setError(null);
+  // ===== USE ODDS GAMES HOOK =====
+  const {
+    data: gamesData,
+    isLoading,
+    error: hookError,
+    refetch,
+    isRefetching
+  } = useOddsGames(
+    getApiSportKey(),
+    'us',
+    'h2h,spreads,totals',
+    {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      refetchOnWindowFocus: true,
+      refetchInterval: autoRefresh ? 30 * 1000 : false, // 30 seconds if autoRefresh enabled
+      retry: 2,
+      retryDelay: 1000
+    }
+  );
+
+  // Transform API data to our format
+  const transformApiData = useCallback((apiData: any): Game[] => {
+    console.log('🔄 Transforming API data:', apiData);
+    
+    if (!apiData || !apiData.games) {
+      return mockGamesData; // Fallback to mock data
+    }
 
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
-      
-      console.log(`🎯 Fetching from backend: ${apiBaseUrl}/api/games`);
-      
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/games`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-        }
-
-        const result = await response.json();
-        console.log('✅ Backend response received:', result);
-        
-        // CRITICAL: Check if response has valid games array
-        if (result && result.success === true && Array.isArray(result.games)) {
-          console.log(`✅ Using REAL backend data: ${result.games.length} games`);
-          
-          // Transform backend data to match our frontend format
-          const games = result.games.map((game: any) => ({
-            id: game.id || Math.random().toString(),
-            sport: game.sport || 'NBA',
-            awayTeam: game.awayTeam || 'Away Team',
-            homeTeam: game.homeTeam || 'Home Team',
-            awayScore: game.awayScore || 0,
-            homeScore: game.homeScore || 0,
-            period: game.period || '1st',
-            timeRemaining: game.timeRemaining || '12:00',
-            status: game.status || 'live',
-            quarter: game.quarter || game.period || '1st',
-            channel: game.channel || 'TBD',
-            lastPlay: game.lastPlay || 'Game starting soon',
-            awayColor: game.awayColor || '#1d428a',
-            homeColor: game.homeColor || '#552583',
-            awayRecord: game.awayRecord || '0-0',
-            homeRecord: game.homeRecord || '0-0',
-            arena: game.arena || game.venue || 'Unknown Arena',
-            attendance: game.attendance || '0',
-            gameClock: game.gameClock || game.timeRemaining,
-            broadcast: game.broadcast || { network: game.channel || 'TBD', stream: 'League Pass' },
-            bettingLine: game.bettingLine || { spread: 'EVEN', total: '200.5' }
-          }));
-          
-          // Apply sport filter
-          let filtered = games;
-          if (selectedSport !== 'all') {
-            filtered = games.filter((game: any) => game.sport === selectedSport);
-          }
-          
-          // Apply search filter
-          if (searchText) {
-            const searchLower = searchText.toLowerCase();
-            filtered = filtered.filter((game: any) => 
-              game.awayTeam.toLowerCase().includes(searchLower) ||
-              game.homeTeam.toLowerCase().includes(searchLower) ||
-              (game.arena || '').toLowerCase().includes(searchLower) ||
-              (game.channel || '').toLowerCase().includes(searchLower)
-            );
-          }
-          
-          // Set all states with real data
-          setFilteredGames(filtered);
-          setAllGames(games);
-          
-          // Calculate stats
-          const liveGamesCount = filtered.filter((game: any) => game.status === 'live').length;
-          const finalGamesCount = filtered.filter((game: any) => game.status === 'final').length;
-          const totalPoints = filtered.reduce((sum: number, game: any) => sum + game.awayScore + game.homeScore, 0);
-          const averageScore = filtered.length > 0 ? 
-            Math.round(totalPoints / filtered.length) : 0;
-          
-          setGameStats({
-            liveCount: liveGamesCount,
-            finalCount: finalGamesCount,
-            totalGames: filtered.length,
-            totalPoints,
-            averageScore
-          });
-
-          // Update live updates
-          if (filtered.length > 0) {
-            const newUpdates = [
-              { id: 1, sport: 'all', time: 'Just now', text: `Loaded ${filtered.length} ${selectedSport === 'all' ? 'games' : selectedSport + ' games'}` },
-              { id: 2, sport: 'all', time: '1 min ago', text: `${liveGamesCount} games currently live` },
-              { id: 3, sport: 'all', time: '2 min ago', text: 'Real-time updates enabled' }
-            ];
-            setLiveUpdates(newUpdates);
-          }
-          
-          setSuccess(`✅ Loaded ${games.length} live games from backend`);
-          return; // EXIT EARLY - don't run any mock data code
-          
-        } else {
-          console.warn('⚠️ Backend returned invalid structure:', result);
-          throw new Error('Invalid response structure from backend');
-        }
-        
-      } catch (fetchError) {
-        console.error('❌ Backend fetch failed, using mock data:', fetchError);
-        throw new Error('Backend fetch failed');
-      }
-
+      return apiData.games.map((game: any, index: number) => ({
+        id: game.id || game.game_id || `game-${Date.now()}-${index}`,
+        sport: game.sport || 'NBA',
+        awayTeam: game.away_team || game.awayTeam || 'Away Team',
+        homeTeam: game.home_team || game.homeTeam || 'Home Team',
+        awayScore: game.away_score || game.awayScore || 0,
+        homeScore: game.home_score || game.homeScore || 0,
+        period: game.period || game.quarter || '1st',
+        timeRemaining: game.time_remaining || game.timeRemaining || '12:00',
+        status: game.status || 'scheduled',
+        quarter: game.quarter || game.period || '1st',
+        channel: game.channel || game.broadcast?.network || 'TBD',
+        lastPlay: game.last_play || game.lastPlay || 'Game starting soon',
+        awayColor: game.away_color || game.awayColor || '#1d428a',
+        homeColor: game.home_color || game.homeColor || '#552583',
+        awayRecord: game.away_record || game.awayRecord || '0-0',
+        homeRecord: game.home_record || game.homeRecord || '0-0',
+        arena: game.arena || game.venue || game.location || 'Unknown Arena',
+        attendance: game.attendance || '0',
+        gameClock: game.game_clock || game.gameClock || game.time_remaining,
+        broadcast: game.broadcast || { network: game.channel || 'TBD', stream: 'League Pass' },
+        bettingLine: game.betting_line || game.bettingLine || { spread: 'EVEN', total: '200.5' }
+      }));
     } catch (error) {
-      console.error('❌ Error in loadLiveGames:', error);
-      setError('Backend temporarily unavailable. Showing demo data.');
-      
-      // ONLY use mock data if the fetch completely fails
-      let filtered = mockGamesData;
-      
-      // Apply sport filter to mock data
-      if (selectedSport !== 'all') {
-        filtered = mockGamesData.filter(game => game.sport === selectedSport);
-      }
-      
-      // Apply search filter to mock data
-      if (searchQuery) {
-        const searchLower = searchQuery.toLowerCase();
-        filtered = filtered.filter(game => 
-          game.awayTeam.toLowerCase().includes(searchLower) ||
-          game.homeTeam.toLowerCase().includes(searchLower) ||
-          (game.arena || '').toLowerCase().includes(searchLower) ||
-          (game.channel || '').toLowerCase().includes(searchLower)
-        );
-      }
-      
-      setFilteredGames(filtered);
-      setAllGames(mockGamesData);
-      
-      // Calculate stats for mock data
-      const liveGamesCount = filtered.filter(game => game.status === 'live').length;
-      const finalGamesCount = filtered.filter(game => game.status === 'final').length;
-      const totalPoints = filtered.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
-      const averageScore = filtered.length > 0 ? Math.round(totalPoints / filtered.length) : 0;
-      
-      setGameStats({
-        liveCount: liveGamesCount,
-        finalCount: finalGamesCount,
-        totalGames: filtered.length,
-        totalPoints,
-        averageScore
-      });
-      
-      // Update live updates for mock data
+      console.error('Error transforming API data:', error);
+      return mockGamesData;
+    }
+  }, []);
+
+  // Process and filter games
+  const processGames = useCallback((games: Game[]) => {
+    console.log('🔍 Processing games:', games.length);
+    
+    let filtered = [...games];
+    
+    // Apply sport filter
+    if (selectedSport !== 'all') {
+      filtered = filtered.filter(game => game.sport === selectedSport);
+    }
+    
+    // Apply search filter
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase();
+      filtered = filtered.filter(game => 
+        game.awayTeam.toLowerCase().includes(searchLower) ||
+        game.homeTeam.toLowerCase().includes(searchLower) ||
+        (game.arena || '').toLowerCase().includes(searchLower) ||
+        (game.channel || '').toLowerCase().includes(searchLower)
+      );
+    }
+    
+    setFilteredGames(filtered);
+    
+    // Calculate stats
+    const liveGamesCount = filtered.filter(game => game.status === 'live').length;
+    const finalGamesCount = filtered.filter(game => game.status === 'final').length;
+    const totalPoints = filtered.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
+    const averageScore = filtered.length > 0 ? 
+      Math.round(totalPoints / filtered.length) : 0;
+    
+    setGameStats({
+      liveCount: liveGamesCount,
+      finalCount: finalGamesCount,
+      totalGames: filtered.length,
+      totalPoints,
+      averageScore
+    });
+
+    // Update live updates
+    if (filtered.length > 0) {
       const newUpdates = [
-        { id: 1, sport: 'all', time: 'Just now', text: 'Using demo data. Backend connection failed.' },
-        { id: 2, sport: 'all', time: '1 min ago', text: `${liveGamesCount} demo games currently live` },
-        { id: 3, sport: 'all', time: '2 min ago', text: 'Real-time updates disabled in demo mode' }
+        { 
+          id: 1, 
+          sport: 'all', 
+          time: 'Just now', 
+          text: `Loaded ${filtered.length} ${selectedSport === 'all' ? 'games' : selectedSport + ' games'} from ${gamesData?.source || 'API'}`
+        },
+        { 
+          id: 2, 
+          sport: 'all', 
+          time: '1 min ago', 
+          text: `${liveGamesCount} games currently live` 
+        },
+        { 
+          id: 3, 
+          sport: 'all', 
+          time: '2 min ago', 
+          text: 'Real-time updates enabled' 
+        }
       ];
       setLiveUpdates(newUpdates);
-      
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
-  }, [selectedSport, searchQuery]);
+  }, [selectedSport, searchQuery, gamesData?.source]);
 
+  // Process data when API data changes
   useEffect(() => {
-    loadLiveGames(false, searchQuery);
-    
-    // Auto-refresh setup
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        loadLiveGames(true, searchQuery);
-      }, 30000); // 30 seconds
+    if (gamesData) {
+      console.log('📊 Games data received:', gamesData);
       
-      return () => clearInterval(interval);
+      // Show success message
+      setSuccess(`✅ Loaded ${gamesData.games?.length || 0} games from ${gamesData.source || 'API'}`);
+      setError(null);
+      
+      // Transform and process data
+      const transformedGames = transformApiData(gamesData);
+      processGames(transformedGames);
+      
+    } else if (hookError) {
+      console.error('❌ Hook error:', hookError);
+      setError(`Failed to load games: ${hookError.message || 'Unknown error'}`);
+      setSuccess(null);
+      
+      // Use mock data on error
+      processGames(mockGamesData);
     }
-  }, [loadLiveGames, searchQuery, autoRefresh]);
+  }, [gamesData, hookError, transformApiData, processGames]);
 
+  // Handle manual refresh
   const handleRefresh = () => {
-    setRefreshing(true);
-    loadLiveGames(true, searchQuery);
+    refetch();
+    setLiveUpdates(prev => [
+      { id: Date.now(), sport: 'all', time: 'Just now', text: 'Manually refreshing games...' },
+      ...prev.slice(0, 2)
+    ]);
   };
 
   const handleSearchSubmit = () => {
@@ -344,6 +319,13 @@ const LiveGamesScreen = () => {
     setSelectedSport(sportId);
     setSearchQuery('');
     setSearchInput('');
+    
+    // Update live updates
+    const sportName = sports.find(s => s.id === sportId)?.name || sportId;
+    setLiveUpdates(prev => [
+      { id: Date.now(), sport: 'all', time: 'Just now', text: `Filtered to ${sportName} games` },
+      ...prev.slice(0, 2)
+    ]);
   };
 
   const handleGameSelect = (game: Game) => {
@@ -380,6 +362,9 @@ const LiveGamesScreen = () => {
               <Typography variant="h5" sx={{ opacity: 0.9 }}>
                 Real-time sports action and scores
               </Typography>
+              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                Source: {gamesData?.source ? `${gamesData.source} API` : 'Demo Data'}
+              </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <FormControlLabel
@@ -396,11 +381,11 @@ const LiveGamesScreen = () => {
               <Button
                 startIcon={<RefreshIcon />}
                 onClick={handleRefresh}
-                disabled={refreshing}
+                disabled={isLoading || isRefetching}
                 variant="contained"
                 size="small"
               >
-                {refreshing ? 'Refreshing...' : 'Refresh'}
+                {isRefetching ? 'Refreshing...' : 'Refresh'}
               </Button>
             </Box>
           </Box>
@@ -443,7 +428,12 @@ const LiveGamesScreen = () => {
       </Typography>
       <Grid container spacing={2}>
         {sports.map((sport) => {
-          const count = allGames.filter(g => sport.id === 'all' || g.sport === sport.id).length;
+          // Calculate count based on transformed games
+          const gamesFromApi = gamesData ? transformApiData(gamesData) : mockGamesData;
+          const count = sport.id === 'all' 
+            ? gamesFromApi.length 
+            : gamesFromApi.filter(g => g.sport === sport.id).length;
+            
           return (
             <Grid item key={sport.id}>
               <Card
@@ -533,7 +523,7 @@ const LiveGamesScreen = () => {
                 <CheckCircleIcon sx={{ fontSize: 32 }} />
               </Box>
               <Typography variant="h4">{gameStats.finalCount}</Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="text-secondary">
                 Completed
               </Typography>
             </CardContent>
@@ -707,11 +697,11 @@ const LiveGamesScreen = () => {
         <Button
           startIcon={<RefreshIcon />}
           onClick={handleRefresh}
-          disabled={refreshing}
+          disabled={isLoading || isRefetching}
           variant="outlined"
           size="small"
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          {isRefetching ? 'Refreshing...' : 'Refresh'}
         </Button>
       </Box>
       
@@ -895,13 +885,16 @@ const LiveGamesScreen = () => {
     </Dialog>
   );
 
-  if (loading && !refreshing) {
+  if (isLoading && !isRefetching) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh', flexDirection: 'column', gap: 3 }}>
           <CircularProgress size={60} />
           <Typography variant="h6">
-            Loading live games from backend...
+            Loading live games...
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Using: {getApiSportKey()}
           </Typography>
         </Box>
       </Container>
@@ -943,7 +936,7 @@ const LiveGamesScreen = () => {
           <Typography variant="h5">
             {selectedSport === 'all' ? 'All Sports' : selectedSport} Games
             <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
-              Source: {import.meta.env.VITE_API_BASE ? 'Backend API' : 'Demo Data'}
+              Source: {gamesData?.source ? `${gamesData.source} API` : 'Demo Data'}
             </Typography>
           </Typography>
           <Chip
@@ -978,9 +971,9 @@ const LiveGamesScreen = () => {
               variant="contained"
               startIcon={<RefreshIcon />}
               onClick={handleRefresh}
-              disabled={refreshing}
+              disabled={isLoading || isRefetching}
             >
-              {refreshing ? 'Refreshing...' : 'Refresh Games'}
+              {isRefetching ? 'Refreshing...' : 'Refresh Games'}
             </Button>
           </Box>
         )}
@@ -997,10 +990,16 @@ const LiveGamesScreen = () => {
           </Typography>
         </Box>
         <Typography variant="body2">
-          🔄 Auto-refreshing every 30 seconds • Last updated: {new Date().toLocaleTimeString()}
+          {autoRefresh ? '🔄 Auto-refreshing every 30 seconds' : '⏸️ Auto-refresh disabled'} • Last updated: {new Date().toLocaleTimeString()}
         </Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>
-          Backend URL: {import.meta.env.VITE_API_BASE || 'http://localhost:5001'}
+          Backend URL: {import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app'}
+        </Typography>
+        <Typography variant="body2">
+          Current Sport API Key: {getApiSportKey()}
+        </Typography>
+        <Typography variant="body2">
+          Data Source: {gamesData?.source || 'Demo Data'}
         </Typography>
       </Paper>
       

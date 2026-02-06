@@ -87,6 +87,9 @@ import {
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 
+// Import React Query hook
+import { useFantasyPlayers } from '../hooks/useBackendAPI';
+
 // Mock data for players (fallback)
 const mockPlayers = {
   NFL: [
@@ -334,22 +337,22 @@ const mockPlayers = {
 };
 
 const sportsData = [
-  { id: 'NFL', name: 'NFL', icon: <FootballIcon />, color: '#dc2626' },
-  { id: 'NBA', name: 'NBA', icon: <BasketballIcon />, color: '#2563eb' },
-  { id: 'NHL', name: 'NHL', icon: <HockeyIcon />, color: '#0891b2' },
-  { id: 'MLB', name: 'MLB', icon: <BaseballIcon />, color: '#ca8a04' },
+  { id: 'nba', name: 'NBA', icon: <BasketballIcon />, color: '#2563eb' },
+  { id: 'nfl', name: 'NFL', icon: <FootballIcon />, color: '#dc2626' },
+  { id: 'nhl', name: 'NHL', icon: <HockeyIcon />, color: '#0891b2' },
+  { id: 'mlb', name: 'MLB', icon: <BaseballIcon />, color: '#ca8a04' },
 ];
 
 const positionFilters = {
-  NFL: ['All Positions', 'QB', 'RB', 'WR', 'TE', 'DEF'],
-  NBA: ['All Positions', 'PG', 'SG', 'SF', 'PF', 'C'],
-  NHL: ['All Positions', 'LW', 'C', 'RW', 'D', 'G'],
-  MLB: ['All Positions', 'P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF']
+  nfl: ['All Positions', 'QB', 'RB', 'WR', 'TE', 'DEF'],
+  nba: ['All Positions', 'PG', 'SG', 'SF', 'PF', 'C'],
+  nhl: ['All Positions', 'LW', 'C', 'RW', 'D', 'G'],
+  mlb: ['All Positions', 'P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF']
 };
 
 const teamFilters = {
-  NFL: ['All Teams', 'Chiefs', '49ers', 'Bills', 'Vikings', 'Eagles', 'Cowboys', 'Dolphins', 'Ravens'],
-  NBA: ['All Teams', 'Lakers', 'Warriors', 'Bucks', 'Mavericks', 'Celtics', 'Nuggets', 'Suns', 'Heat']
+  nfl: ['All Teams', 'Chiefs', '49ers', 'Bills', 'Vikings', 'Eagles', 'Cowboys', 'Dolphins', 'Ravens'],
+  nba: ['All Teams', 'Lakers', 'Warriors', 'Bucks', 'Mavericks', 'Celtics', 'Nuggets', 'Suns', 'Heat']
 };
 
 // Analytics Component
@@ -591,9 +594,20 @@ const PlayerStatsScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedSport, setSelectedSport] = useState('NFL');
+  // Use React Query hook instead of manual fetch
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
+  
+  const { 
+    data: playersData, 
+    isLoading, 
+    error, 
+    refetch,
+    isRefetching 
+  } = useFantasyPlayers(selectedSport);
+  
+  // Extract players from hook response
+  const playersFromApi = playersData?.players || [];
+  
   const [selectedPosition, setSelectedPosition] = useState('All Positions');
   const [selectedTeam, setSelectedTeam] = useState('All Teams');
   const [searchInput, setSearchInput] = useState('');
@@ -603,66 +617,46 @@ const PlayerStatsScreen = () => {
   const [advancedMetrics, setAdvancedMetrics] = useState<any>({});
   
   const [searchHistory, setSearchHistory] = useState<string[]>(['Patrick Mahomes', 'Quarterbacks', 'Top receivers']);
-  const [analyticsEvents, setAnalyticsEvents] = useState<any[]>([]);
   
-  // NEW STATE: Store players from API
-  const [players, setPlayers] = useState<any[]>([]);
-  const [filteredPlayers, setFilteredPlayers] = useState<any[]>([]);
-
-  // NEW FUNCTION: Fetch player stats from API
-  const fetchPlayerStats = async () => {
-    try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
-      console.log(`🎯 Fetching players from: ${apiBaseUrl}/api/players`);
-      
-      const response = await fetch(`${apiBaseUrl}/api/players`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+  // Transform API data to match expected format or use fallback
+  const players = React.useMemo(() => {
+    if (playersFromApi && playersFromApi.length > 0) {
+      console.log(`✅ Using REAL player data: ${playersFromApi.length} players`);
+      // Transform API data to match our component's expected format
+      return playersFromApi.map((player: any, index: number) => {
+        // Convert API player format to our component format
+        const sportUpper = selectedSport.toUpperCase();
+        const mockSportData = mockPlayers[sportUpper as keyof typeof mockPlayers] || [];
+        const mockPlayer = mockSportData[index] || mockSportData[0] || mockPlayers.NBA[0];
+        
+        // Merge API data with mock structure for missing fields
+        return {
+          id: player.id || player.player_id || index,
+          name: player.name || player.player_name || mockPlayer.name,
+          team: player.team || player.team_name || mockPlayer.team,
+          position: player.position || mockPlayer.position,
+          number: player.number || mockPlayer.number,
+          age: player.age || mockPlayer.age,
+          height: player.height || mockPlayer.height,
+          weight: player.weight || mockPlayer.weight,
+          salary: player.salary || mockPlayer.salary,
+          contract: player.contract || mockPlayer.contract,
+          trend: player.trend || mockPlayer.trend,
+          isPremium: player.is_premium || mockPlayer.isPremium,
+          stats: player.stats || mockPlayer.stats,
+          highlights: player.highlights || mockPlayer.highlights
+        };
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-      }
-      
-      const result = await response.json();
-      console.log('✅ Player data received:', result);
-      
-      if (result && result.success && Array.isArray(result.players)) {
-        console.log(`✅ Using REAL player data: ${result.players.length} players`);
-        // Filter by sport if needed
-        const filtered = result.players.filter((p: any) => p.sport === selectedSport);
-        setPlayers(filtered);
-        setFilteredPlayers(filtered);
-      } else {
-        throw new Error('Invalid player data structure');
-      }
-      
-    } catch (error) {
-      console.error('❌ Failed to fetch player stats, using mock data:', error);
-      // Fallback to mock
-      const players = mockPlayers[selectedSport as keyof typeof mockPlayers] || [];
-      setPlayers(players);
-      setFilteredPlayers(players);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    } else {
+      console.log('⚠️ Using mock player data');
+      const sportUpper = selectedSport.toUpperCase();
+      return mockPlayers[sportUpper as keyof typeof mockPlayers] || mockPlayers.NBA;
     }
-  };
+  }, [playersFromApi, selectedSport]);
 
-  // NEW FUNCTION: Handle refresh
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchPlayerStats();
-  };
-
-  // NEW: Fetch data on component mount and when selectedSport changes
-  useEffect(() => {
-    fetchPlayerStats();
-  }, [selectedSport]);
-
-  // NEW: Filter players based on filters and search
-  useEffect(() => {
-    const filtered = players.filter(player => {
+  // Filter players based on filters and search
+  const filteredPlayers = React.useMemo(() => {
+    return players.filter(player => {
       // Filter by position
       if (selectedPosition !== 'All Positions' && player.position !== selectedPosition) {
         return false;
@@ -685,8 +679,6 @@ const PlayerStatsScreen = () => {
       
       return true;
     });
-    
-    setFilteredPlayers(filtered);
   }, [players, selectedPosition, selectedTeam, searchInput]);
 
   const calculateAdvancedMetrics = (player: any) => {
@@ -702,7 +694,9 @@ const PlayerStatsScreen = () => {
     let vorp = 0;
     let efficiency = 0;
 
-    if (selectedSport === 'NBA') {
+    const sportUpper = selectedSport.toUpperCase();
+    
+    if (sportUpper === 'NBA') {
       // Player Efficiency Rating (PER)
       per = ((stats.points || 0) * 1.0 +
              (stats.rebounds || 0) * 0.8 +
@@ -719,7 +713,7 @@ const PlayerStatsScreen = () => {
       winShares = per * 0.2;
       vorp = (per - 15) * 0.5;
       usageRate = 25 + (per - 15) * 2;
-    } else if (selectedSport === 'NFL') {
+    } else if (sportUpper === 'NFL') {
       // NFL metrics
       if (player.position === 'QB') {
         per = ((stats.passingYards || 0) * 0.04 +
@@ -770,8 +764,19 @@ const PlayerStatsScreen = () => {
     }
   };
 
+  const handleRefresh = () => {
+    refetch();
+  };
+
   const clearSearchHistory = () => {
     setSearchHistory([]);
+  };
+
+  const handleSportChange = (sportId: string) => {
+    setSelectedSport(sportId as 'nba' | 'nfl' | 'mlb' | 'nhl');
+    // Reset filters when sport changes
+    setSelectedPosition('All Positions');
+    setSelectedTeam('All Teams');
   };
 
   const renderPlayerCard = (player: any) => {
@@ -1088,7 +1093,7 @@ const PlayerStatsScreen = () => {
     );
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
         <CircularProgress />
@@ -1128,6 +1133,26 @@ const PlayerStatsScreen = () => {
         </Box>
       </Box>
 
+      {/* Error State */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <Typography variant="body1" fontWeight="bold">
+            Failed to load player data
+          </Typography>
+          <Typography variant="body2">
+            {error instanceof Error ? error.message : 'Unknown error'}
+          </Typography>
+          <Button 
+            variant="outlined" 
+            size="small" 
+            onClick={handleRefresh}
+            sx={{ mt: 1 }}
+          >
+            Try Again
+          </Button>
+        </Alert>
+      )}
+
       {/* Sport Selector */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight="bold" mb={1}>
@@ -1139,7 +1164,7 @@ const PlayerStatsScreen = () => {
               key={sport.id}
               icon={sport.icon}
               label={sport.name}
-              onClick={() => setSelectedSport(sport.id)}
+              onClick={() => handleSportChange(sport.id)}
               color={selectedSport === sport.id ? 'primary' : 'default'}
               variant={selectedSport === sport.id ? 'filled' : 'outlined'}
               sx={{
@@ -1159,7 +1184,7 @@ const PlayerStatsScreen = () => {
         <Box display="flex" gap={1}>
           <TextField
             fullWidth
-            placeholder={`Search ${selectedSport} players, teams, stats...`}
+            placeholder={`Search ${selectedSport.toUpperCase()} players, teams, stats...`}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -1320,7 +1345,7 @@ const PlayerStatsScreen = () => {
       </Paper>
 
       {/* Loading/Refreshing Indicator */}
-      {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+      {(isLoading || isRefetching) && <LinearProgress sx={{ mb: 2 }} />}
 
       {/* Players Section */}
       <Box mb={4}>
@@ -1334,7 +1359,7 @@ const PlayerStatsScreen = () => {
               color="primary"
               size="small"
             />
-            <IconButton onClick={handleRefresh} disabled={refreshing}>
+            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching}>
               <RefreshIcon />
             </IconButton>
           </Box>
@@ -1354,6 +1379,11 @@ const PlayerStatsScreen = () => {
             <Typography variant="body2" color="text.secondary">
               Try adjusting your search or filters
             </Typography>
+            {error && (
+              <Button onClick={handleRefresh} sx={{ mt: 2 }} variant="outlined">
+                Retry Loading
+              </Button>
+            )}
           </Paper>
         )}
 

@@ -26,7 +26,11 @@ import {
   Badge,
   Tooltip,
   CircularProgress,
-  alpha
+  alpha,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import {
   ArrowBack,
@@ -59,9 +63,16 @@ import {
   Whatshot,
   Bolt,
   Psychology,
-  TrendingUp as TrendingUpIcon
+  TrendingUp as TrendingUpIcon,
+  Newspaper as NewspaperIcon,
+  Error as ErrorIcon,
+  Update as UpdateIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { format } from 'date-fns';
+
+// Import React Query hook
+import { useAnalytics } from '../hooks/useBackendAPI';
 
 // Mock Data
 const MOCK_DATA = {
@@ -183,78 +194,91 @@ const MatchAnalyticsScreen = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
+  // Use React Query hook
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nfl');
+  
+  const { 
+    data: analyticsData, 
+    isLoading, 
+    error, 
+    refetch,
+    isRefetching 
+  } = useAnalytics(selectedSport);
+  
+  // Extract games from hook response
+  const gamesFromApi = analyticsData?.games || [];
+  
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGame, setSelectedGame] = useState(MOCK_DATA.nfl.games[0]);
+  const [selectedGame, setSelectedGame] = useState<any>(null);
   const [showPrompts, setShowPrompts] = useState(true);
   const [showAIModal, setShowAIModal] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
   const [activeTab, setActiveTab] = useState('conditions');
-  const [refreshing, setRefreshing] = useState(false);
   const [filteredGames, setFilteredGames] = useState<any[]>([]);
-  const [selectedSport, setSelectedSport] = useState<'NFL' | 'NBA'>('NFL');
-  const [games, setGames] = useState<any[]>(MOCK_DATA.nfl.games);
-  const [analytics, setAnalytics] = useState<any>(null);
-
-  // Combine all games
-  const allGames = [
-    ...MOCK_DATA.nfl.games,
-    ...MOCK_DATA.nba.games,
-  ];
-
-  // Add this fetch function near your existing useEffect
-  const fetchAnalyticsData = async () => {
-    try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
-      const sport = selectedSport.toLowerCase(); // 'nba' or 'nfl'
-      
-      console.log(`🎯 Fetching ${sport} analytics from: ${apiBaseUrl}/api/${sport}/analytics`);
-      
-      const response = await fetch(`${apiBaseUrl}/api/${sport}/analytics`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+  
+  // Transform API data to match expected format or use fallback
+  const games = React.useMemo(() => {
+    if (gamesFromApi && gamesFromApi.length > 0) {
+      console.log(`✅ Using REAL analytics data: ${gamesFromApi.length} games`);
+      // Transform API data to match our component's expected format
+      return gamesFromApi.map((game: any, index: number) => {
+        const sportUpper = selectedSport.toUpperCase();
+        const mockSportData = MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || [];
+        const mockGame = mockSportData[index] || mockSportData[0] || MOCK_DATA.nfl.games[0];
+        
+        // Merge API data with mock structure for missing fields
+        return {
+          id: game.id || game.game_id || index,
+          homeTeam: game.homeTeam || mockGame.homeTeam,
+          awayTeam: game.awayTeam || mockGame.awayTeam,
+          homeScore: game.homeScore || mockGame.homeScore,
+          awayScore: game.awayScore || mockGame.awayScore,
+          status: game.status || mockGame.status,
+          sport: game.sport || sportUpper,
+          date: game.date || mockGame.date,
+          time: game.time || mockGame.time,
+          venue: game.venue || mockGame.venue,
+          weather: game.weather || mockGame.weather,
+          odds: game.odds || mockGame.odds,
+          broadcast: game.broadcast || mockGame.broadcast,
+          attendance: game.attendance || mockGame.attendance,
+          quarter: game.quarter || mockGame.quarter
+        };
       });
-      
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const result = await response.json();
-      
-      if (result.success && !result.documentation) {
-        console.log(`✅ Using REAL ${sport} analytics data`);
-        // Update based on your data structure
-        if (result.games) {
-          setGames(result.games);
-          if (result.games.length > 0) {
-            setSelectedGame(result.games[0]);
-          }
-        }
-        if (result.analytics) setAnalytics(result.analytics);
-      } else {
-        console.warn(`⚠️ ${sport} analytics endpoint returns documentation`);
-        throw new Error('Endpoint returns documentation');
-      }
-      
-    } catch (error) {
-      console.error(`❌ Failed to fetch ${selectedSport} analytics, using mock:`, error);
-      // Use your existing MOCK_DATA
-      const mockData = MOCK_DATA[selectedSport.toLowerCase() as keyof typeof MOCK_DATA];
-      setGames(mockData.games);
-      setSelectedGame(mockData.games[0]);
+    } else {
+      console.log('⚠️ Using mock analytics data');
+      return MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || MOCK_DATA.nfl.games;
     }
-  };
+  }, [gamesFromApi, selectedSport]);
 
-  // Call this in your useEffect for selectedSport
+  // Set initial selected game
   useEffect(() => {
-    fetchAnalyticsData();
-  }, [selectedSport]);
+    if (games.length > 0 && !selectedGame) {
+      setSelectedGame(games[0]);
+    }
+  }, [games]);
 
-  // Handle search
-  const handleSearchSubmit = (query = null) => {
+  // Filter games based on search
+  useEffect(() => {
+    if (searchInput.trim()) {
+      const results = games.filter(game => 
+        game.homeTeam.name.toLowerCase().includes(searchInput.toLowerCase()) ||
+        game.awayTeam.name.toLowerCase().includes(searchInput.toLowerCase()) ||
+        game.sport.toLowerCase().includes(searchInput.toLowerCase())
+      );
+      setFilteredGames(results);
+    } else {
+      setFilteredGames([]);
+    }
+  }, [searchInput, games]);
+
+  const handleSearchSubmit = (query: string | null = null) => {
     const searchText = query || searchInput.trim();
     if (searchText) {
       setSearchQuery(searchText);
-      const results = allGames.filter(game => 
+      const results = games.filter(game => 
         game.homeTeam.name.toLowerCase().includes(searchText.toLowerCase()) ||
         game.awayTeam.name.toLowerCase().includes(searchText.toLowerCase()) ||
         game.sport.toLowerCase().includes(searchText.toLowerCase())
@@ -271,15 +295,9 @@ const MatchAnalyticsScreen = () => {
     }
   };
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await fetchAnalyticsData();
-      setRefreshing(false);
-    } catch (error) {
-      setRefreshing(false);
-    }
-  }, [selectedSport]);
+  const handleRefresh = () => {
+    refetch();
+  };
 
   const handleSelectGame = (game: any) => {
     setSelectedGame(game);
@@ -287,9 +305,16 @@ const MatchAnalyticsScreen = () => {
     setSearchInput('');
     setFilteredGames([]);
     // Update selected sport based on the selected game
-    if (game.sport === 'NFL' || game.sport === 'NBA') {
-      setSelectedSport(game.sport);
+    const sport = game.sport.toLowerCase();
+    if (sport === 'nba' || sport === 'nfl' || sport === 'mlb') {
+      setSelectedSport(sport);
     }
+  };
+
+  const handleSportChange = (sportId: string) => {
+    setSelectedSport(sportId as 'nba' | 'nfl' | 'mlb');
+    // Reset selected game when sport changes
+    setSelectedGame(null);
   };
 
   const generateAIAnalysis = async (promptType: string) => {
@@ -298,7 +323,7 @@ const MatchAnalyticsScreen = () => {
     
     setTimeout(() => {
       const responses = {
-        weather: `**Weather Impact Analysis**\n\n**Game:** ${selectedGame.homeTeam.name} vs ${selectedGame.awayTeam.name}\n**Weather:** ${selectedGame.weather}\n\n**Impact Analysis:**\n• Temperature: 42°F - Optimal for defensive play\n• Wind: 12 mph NW - Slight impact on passing\n• Field: Natural grass - Home team advantage`,
+        weather: `**Weather Impact Analysis**\n\n**Game:** ${selectedGame?.homeTeam?.name || 'Home'} vs ${selectedGame?.awayTeam?.name || 'Away'}\n**Weather:** ${selectedGame?.weather || 'Clear'}\n\n**Impact Analysis:**\n• Temperature: 42°F - Optimal for defensive play\n• Wind: 12 mph NW - Slight impact on passing\n• Field: Natural grass - Home team advantage`,
         homeAway: `**Home vs Away Trends**\n\n**Home Team at Home:**\n• Win Rate: 75%\n• Points/Game: 28.4\n• Defensive Rank: 1st`,
         playerMatchup: `**Key Player Matchup**\n\n**Quarterback Comparison:**\n• Home QB: 92.3 rating, 68% completion\n• Away QB: 88.7 rating, 65% completion`,
         recentForm: `**Recent Form Analysis**\n\n**Home Team (Last 5):**\n• Record: 4-1\n• Avg Margin: +7.2 points`,
@@ -312,6 +337,8 @@ const MatchAnalyticsScreen = () => {
   };
 
   const renderTabContent = () => {
+    if (!selectedGame) return null;
+    
     switch(activeTab) {
       case 'conditions':
         return (
@@ -390,7 +417,7 @@ const MatchAnalyticsScreen = () => {
                 <Grid item xs={12} sm={6}>
                   <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
                     <Typography variant="subtitle1" fontWeight="bold">
-                      {selectedGame.homeTeam.name} Advantages
+                      {selectedGame.homeTeam?.name || 'Home'} Advantages
                     </Typography>
                     <Box component="ul" sx={{ pl: 2, mt: 1 }}>
                       <li><Typography variant="body2">Pass rush efficiency</Typography></li>
@@ -402,7 +429,7 @@ const MatchAnalyticsScreen = () => {
                 <Grid item xs={12} sm={6}>
                   <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
                     <Typography variant="subtitle1" fontWeight="bold">
-                      {selectedGame.awayTeam.name} Advantages
+                      {selectedGame.awayTeam?.name || 'Away'} Advantages
                     </Typography>
                     <Box component="ul" sx={{ pl: 2, mt: 1 }}>
                       <li><Typography variant="body2">Run defense</Typography></li>
@@ -502,31 +529,31 @@ const MatchAnalyticsScreen = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Avatar sx={{ 
-              bgcolor: game.homeTeam.color,
+              bgcolor: game.homeTeam?.color || '#3b82f6',
               width: 32,
               height: 32,
               fontSize: 14,
               fontWeight: 'bold'
             }}>
-              {game.homeTeam.logo}
+              {game.homeTeam?.logo || 'H'}
             </Avatar>
             <Typography variant="body2" fontWeight="medium">
-              {game.homeTeam.name}
+              {game.homeTeam?.name || 'Home'}
             </Typography>
           </Box>
           <Typography variant="caption" color="text.secondary">vs</Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="body2" fontWeight="medium">
-              {game.awayTeam.name}
+              {game.awayTeam?.name || 'Away'}
             </Typography>
             <Avatar sx={{ 
-              bgcolor: game.awayTeam.color,
+              bgcolor: game.awayTeam?.color || '#ef4444',
               width: 32,
               height: 32,
               fontSize: 14,
               fontWeight: 'bold'
             }}>
-              {game.awayTeam.logo}
+              {game.awayTeam?.logo || 'A'}
             </Avatar>
           </Box>
         </Box>
@@ -544,6 +571,17 @@ const MatchAnalyticsScreen = () => {
     </Card>
   );
 
+  if (isLoading) {
+    return (
+      <Container maxWidth="lg">
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2 }}>Loading game analytics...</Typography>
+        </Box>
+      </Container>
+    );
+  }
+
   return (
     <Container maxWidth="lg">
       {/* Header */}
@@ -551,15 +589,58 @@ const MatchAnalyticsScreen = () => {
         <IconButton onClick={() => navigate(-1)}>
           <ArrowBack />
         </IconButton>
-        <Typography variant="h4" fontWeight="bold" sx={{ flex: 1 }}>
-          Game Analytics
-        </Typography>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="h4" fontWeight="bold">
+            Game Analytics
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Live scores, stats, and in-depth analysis
+          </Typography>
+        </Box>
+        
+        {/* Sport Selector */}
+        <FormControl sx={{ minWidth: 120 }}>
+          <InputLabel>Sport</InputLabel>
+          <Select
+            value={selectedSport}
+            label="Sport"
+            onChange={(e) => handleSportChange(e.target.value)}
+          >
+            <MenuItem value="nfl">NFL</MenuItem>
+            <MenuItem value="nba">NBA</MenuItem>
+            <MenuItem value="mlb">MLB</MenuItem>
+          </Select>
+        </FormControl>
+        
         <Tooltip title="Refresh">
-          <IconButton onClick={onRefresh} disabled={refreshing}>
+          <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching}>
             <Refresh />
           </IconButton>
         </Tooltip>
       </Box>
+
+      {/* Error State */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <Typography variant="body1" fontWeight="bold">
+            Failed to load game analytics
+          </Typography>
+          <Typography variant="body2">
+            {error instanceof Error ? error.message : 'Unknown error'}
+          </Typography>
+          <Button 
+            variant="outlined" 
+            size="small" 
+            onClick={handleRefresh}
+            sx={{ mt: 1 }}
+          >
+            Try Again
+          </Button>
+        </Alert>
+      )}
+
+      {/* Loading/Refreshing Indicator */}
+      {(isLoading || isRefetching) && <LinearProgress sx={{ mb: 2 }} />}
 
       {/* Search Bar */}
       <Paper sx={{ p: 2, mb: 3 }}>
@@ -597,7 +678,7 @@ const MatchAnalyticsScreen = () => {
                   key={index}
                   icon={suggestion.icon}
                   label={suggestion.text}
-                  onClick={() => handleSearchSubmit(suggestion.text || '' as any)}
+                  onClick={() => handleSearchSubmit(suggestion.text)}
                   sx={{ 
                     bgcolor: `${suggestion.color}10`,
                     borderColor: suggestion.color,
@@ -630,7 +711,7 @@ const MatchAnalyticsScreen = () => {
         )}
       </Paper>
 
-      {!searchQuery && (
+      {!searchQuery && selectedGame && (
         <>
           {/* Selected Game Header */}
           <Card sx={{ mb: 3 }}>
@@ -639,17 +720,17 @@ const MatchAnalyticsScreen = () => {
                 <Grid item xs={12} md={4}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <Avatar sx={{ 
-                      bgcolor: selectedGame.homeTeam.color,
+                      bgcolor: selectedGame.homeTeam?.color || '#3b82f6',
                       width: 80,
                       height: 80,
                       fontSize: 32,
                       fontWeight: 'bold',
                       mb: 2
                     }}>
-                      {selectedGame.homeTeam.logo}
+                      {selectedGame.homeTeam?.logo || 'H'}
                     </Avatar>
                     <Typography variant="h5" fontWeight="bold">
-                      {selectedGame.homeTeam.name}
+                      {selectedGame.homeTeam?.name || 'Home'}
                     </Typography>
                     <Typography variant="h3" color="primary" fontWeight="bold">
                       {selectedGame.homeScore}
@@ -696,17 +777,17 @@ const MatchAnalyticsScreen = () => {
                 <Grid item xs={12} md={4}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <Avatar sx={{ 
-                      bgcolor: selectedGame.awayTeam.color,
+                      bgcolor: selectedGame.awayTeam?.color || '#ef4444',
                       width: 80,
                       height: 80,
                       fontSize: 32,
                       fontWeight: 'bold',
                       mb: 2
                     }}>
-                      {selectedGame.awayTeam.logo}
+                      {selectedGame.awayTeam?.logo || 'A'}
                     </Avatar>
                     <Typography variant="h5" fontWeight="bold">
-                      {selectedGame.awayTeam.name}
+                      {selectedGame.awayTeam?.name || 'Away'}
                     </Typography>
                     <Typography variant="h3" color="secondary" fontWeight="bold">
                       {selectedGame.awayScore}
@@ -878,7 +959,7 @@ const MatchAnalyticsScreen = () => {
             </Typography>
             <Grid container spacing={2}>
               {games
-                .filter(game => game.id !== selectedGame.id)
+                .filter(game => game.id !== selectedGame?.id)
                 .slice(0, 3)
                 .map((game) => (
                   <Grid item xs={12} sm={6} md={4} key={game.id}>
@@ -893,6 +974,27 @@ const MatchAnalyticsScreen = () => {
         </>
       )}
 
+      {/* Empty State */}
+      {!searchQuery && games.length === 0 && !isLoading && (
+        <Box sx={{ textAlign: 'center', py: 8 }}>
+          <NewspaperIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
+          <Typography variant="h6" color="text.secondary">
+            No games available for {selectedSport.toUpperCase()}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Try refreshing or selecting a different sport
+          </Typography>
+          <Button 
+            variant="outlined" 
+            startIcon={<UpdateIcon />}
+            onClick={handleRefresh}
+            sx={{ mt: 2 }}
+          >
+            Refresh Games
+          </Button>
+        </Box>
+      )}
+
       {/* AI Analysis Modal */}
       <Dialog 
         open={showAIModal} 
@@ -903,9 +1005,11 @@ const MatchAnalyticsScreen = () => {
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Lightbulb sx={{ color: '#fbbf24' }} />
           AI Analysis
-          <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-            {selectedGame.homeTeam.name} vs {selectedGame.awayTeam.name}
-          </Typography>
+          {selectedGame && (
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+              {selectedGame.homeTeam?.name || 'Home'} vs {selectedGame.awayTeam?.name || 'Away'}
+            </Typography>
+          )}
         </DialogTitle>
         <DialogContent>
           {loadingAI ? (

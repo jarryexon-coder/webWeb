@@ -1,5 +1,5 @@
 // src/pages/DailyPicksScreen.tsx - UPDATED WITH HOOK INTEGRATION
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -24,7 +24,11 @@ import {
   Divider,
   Badge,
   Tooltip,
-  alpha
+  alpha,
+  Collapse,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import {
   Shield as ShieldIcon,
@@ -48,88 +52,42 @@ import {
   Close,
   AutoAwesome,
   EmojiEvents,
-  Schedule
+  Schedule,
+  ExpandMore,
+  BugReport,
+  Today,
+  SportsSoccer
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { useDailyPicks } from '../hooks/useSportsData'; // ADDED: Import the hook
+import { useDailyPicks } from '../hooks/useBackendAPI'; // Updated import
 
-// Mock Data - ONLY used as fallback
-const MOCK_PICKS = [
-  {
-    id: '1',
-    player: 'Nikola Jokic',
-    team: 'DEN',
-    sport: 'NBA',
-    pick: 'Triple-Double (Pts/Reb/Ast)',
-    confidence: 91,
-    odds: '+220',
-    edge: '+15.8%',
-    analysis: 'Jokic averaging 24.5/12.1/9.8 vs this opponent. Defense ranks 27th in defending centers.',
-    timestamp: 'Today, 8:30 PM ET',
-    category: 'High Confidence',
-    probability: '88%',
-    roi: '+32%',
-    units: '3.0',
-    requiresPremium: false,
-  },
-  {
-    id: '2',
-    player: 'Cooper Kupp',
-    team: 'LAR',
-    sport: 'NFL',
-    pick: 'Over 85.5 Receiving Yards',
-    confidence: 87,
-    odds: '-125',
-    edge: '+9.2%',
-    analysis: 'Kupp has averaged 98.2 YPG against NFC West opponents. Defense allows 7.9 YPA to slot receivers.',
-    timestamp: 'Tonight, 8:15 PM ET',
-    category: 'Value Bet',
-    probability: '82%',
-    roi: '+24%',
-    units: '2.5',
-    requiresPremium: true,
-  },
-  {
-    id: '3',
-    player: 'Connor McDavid',
-    team: 'EDM',
-    sport: 'NHL',
-    pick: 'Over 1.5 Points (G+A)',
-    confidence: 85,
-    odds: '-140',
-    edge: '+7.4%',
-    analysis: 'McDavid has 24 points in last 12 games. Opponent allows 3.8 goals per game on the road.',
-    timestamp: 'Tomorrow, 7:00 PM ET',
-    category: 'Lock Pick',
-    probability: '79%',
-    roi: '+18%',
-    units: '2.0',
-    requiresPremium: false,
-  },
-  {
-    id: '4',
-    player: 'Juan Soto',
-    team: 'NYY',
-    sport: 'MLB',
-    pick: 'To Hit a Home Run',
-    confidence: 73,
-    odds: '+350',
-    edge: '+11.3%',
-    analysis: 'Soto batting .312 with 8 HR vs lefties. Pitcher allows 1.8 HR/9 to left-handed batters.',
-    timestamp: 'Today, 7:05 PM ET',
-    category: 'High Upside',
-    probability: '34%',
-    roi: '+45%',
-    units: '1.5',
-    requiresPremium: false,
-  },
-];
+// Types
+interface DailyPick {
+  id: string;
+  player: string;
+  team: string;
+  sport: string;
+  pick: string;
+  confidence: number;
+  odds: string;
+  edge: string;
+  analysis: string;
+  timestamp: string;
+  category: string;
+  probability: string;
+  roi: string;
+  units: string;
+  requiresPremium: boolean;
+  generatedFrom?: string;
+  isToday?: boolean;
+}
 
 const SPORT_COLORS = {
   NBA: '#ef4444',
   NFL: '#3b82f6',
   NHL: '#1e40af',
-  MLB: '#10b981'
+  MLB: '#10b981',
+  SOCCER: '#8b5cf6'
 };
 
 const CATEGORY_COLORS = {
@@ -137,108 +95,128 @@ const CATEGORY_COLORS = {
   'Value Bet': '#3b82f6',
   'Lock Pick': '#f59e0b',
   'High Upside': '#8b5cf6',
-  'AI Generated': '#ec4899'
+  'AI Generated': '#ec4899',
+  'Premium Pick': '#f59e0b'
 };
 
 const DailyPicksScreen = () => {
   const navigate = useNavigate();
   
-  // Use the custom hook for data fetching - REPLACED old state
-  const { data: apiPicks, loading: apiLoading, error: apiError, refetch } = useDailyPicks();
+  // Use the custom hook for data fetching
+  const { 
+    data: picksData, 
+    isLoading, 
+    error: apiError, 
+    refetch 
+  } = useDailyPicks();
   
   // Local state for UI
-  const [picks, setPicks] = useState<any[]>([]); 
-  const [filteredPicks, setFilteredPicks] = useState<any[]>([]); 
+  const [picks, setPicks] = useState<DailyPick[]>([]);
+  const [filteredPicks, setFilteredPicks] = useState<DailyPick[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSport, setSelectedSport] = useState('All');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showGeneratingModal, setShowGeneratingModal] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
   const [remainingGenerations, setRemainingGenerations] = useState(2);
   const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Transform API data when it changes - ADDED
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [selectedPick, setSelectedPick] = useState<DailyPick | null>(null);
+  const [showPickDetail, setShowPickDetail] = useState(false);
+  
+  // Transform API data when it changes
   useEffect(() => {
-    console.log('🔄 API data changed:', { apiPicks, apiLoading, apiError });
-    
-    if (apiLoading) {
-      setLoading(true);
-      return;
-    }
-    
-    if (apiError) {
-      console.error('❌ API Error from hook:', apiError);
-      setError(apiError);
-      // Use mock data as fallback
-      console.log('🔄 Falling back to mock data');
-      setPicks(MOCK_PICKS);
-      setFilteredPicks(MOCK_PICKS);
-      setLoading(false);
-      return;
-    }
-    
-    if (apiPicks && apiPicks.length > 0) {
-      console.log(`✅ Using REAL daily picks from hook: ${apiPicks.length} picks`);
-      
-      // Transform API data to match our component structure
-      const transformedPicks = apiPicks.map((apiPick: any, index: number) => ({
-        id: apiPick.id || `api-${index + 1}`,
+    if (picksData && picksData.picks && Array.isArray(picksData.picks)) {
+      const transformedPicks = picksData.picks.map((apiPick: any, index: number) => ({
+        id: apiPick.id || `pick-${Date.now()}-${index}`,
         player: apiPick.player || apiPick.name || `Player ${index + 1}`,
         team: apiPick.team || 'TBD',
         sport: apiPick.sport || 'NBA',
-        pick: apiPick.pick || apiPick.prediction || `Pick ${index + 1}`,
-        confidence: apiPick.confidence || Math.floor(Math.random() * 30) + 70, // 70-100
+        pick: apiPick.pick || apiPick.prediction || apiPick.selection || `Pick ${index + 1}`,
+        confidence: apiPick.confidence || Math.floor(Math.random() * 30) + 70,
         odds: apiPick.odds || '+150',
-        edge: apiPick.edge || `+${Math.floor(Math.random() * 15) + 5}%`, // 5-20%
-        analysis: apiPick.analysis || apiPick.reason || `Based on recent performance and matchup analysis.`,
+        edge: apiPick.edge || apiPick.expectedValue || `+${Math.floor(Math.random() * 15) + 5}%`,
+        analysis: apiPick.analysis || apiPick.reason || apiPick.justification || 'Based on advanced analytics and matchup data.',
         timestamp: apiPick.timestamp || new Date().toLocaleString(),
         category: apiPick.category || (apiPick.confidence >= 90 ? 'High Confidence' : 
                   apiPick.confidence >= 85 ? 'Value Bet' : 
                   apiPick.confidence >= 80 ? 'Lock Pick' : 'High Upside'),
-        probability: apiPick.probability || `${Math.floor(Math.random() * 30) + 70}%`, // 70-100%
-        roi: apiPick.roi || `+${Math.floor(Math.random() * 40) + 10}%`, // 10-50%
-        units: apiPick.units || (Math.random() * 2 + 1).toFixed(1), // 1.0-3.0
+        probability: apiPick.probability || `${Math.floor(Math.random() * 30) + 70}%`,
+        roi: apiPick.roi || `+${Math.floor(Math.random() * 40) + 10}%`,
+        units: apiPick.units || (Math.random() * 2 + 1).toFixed(1),
         requiresPremium: apiPick.requiresPremium || false,
+        isToday: true
       }));
       
-      console.log('📊 Transformed picks:', transformedPicks);
       setPicks(transformedPicks);
       setFilteredPicks(transformedPicks);
-      setLoading(false);
+      setLastRefresh(new Date());
+    } else if (picksData && picksData.picks === undefined) {
+      // Use fallback data if API returns empty or invalid data
+      const fallbackPicks: DailyPick[] = [
+        {
+          id: '1',
+          player: 'Nikola Jokic',
+          team: 'DEN',
+          sport: 'NBA',
+          pick: 'Triple-Double (Pts/Reb/Ast)',
+          confidence: 91,
+          odds: '+220',
+          edge: '+15.8%',
+          analysis: 'Jokic averaging 24.5/12.1/9.8 vs this opponent. Defense ranks 27th in defending centers.',
+          timestamp: 'Today, 8:30 PM ET',
+          category: 'High Confidence',
+          probability: '88%',
+          roi: '+32%',
+          units: '3.0',
+          requiresPremium: false,
+          isToday: true
+        },
+        {
+          id: '2',
+          player: 'Cooper Kupp',
+          team: 'LAR',
+          sport: 'NFL',
+          pick: 'Over 85.5 Receiving Yards',
+          confidence: 87,
+          odds: '-125',
+          edge: '+9.2%',
+          analysis: 'Kupp has averaged 98.2 YPG against NFC West opponents. Defense allows 7.9 YPA to slot receivers.',
+          timestamp: 'Tonight, 8:15 PM ET',
+          category: 'Value Bet',
+          probability: '82%',
+          roi: '+24%',
+          units: '2.5',
+          requiresPremium: true,
+          isToday: true
+        },
+        {
+          id: '3',
+          player: 'Connor McDavid',
+          team: 'EDM',
+          sport: 'NHL',
+          pick: 'Over 1.5 Points (G+A)',
+          confidence: 85,
+          odds: '-140',
+          edge: '+7.4%',
+          analysis: 'McDavid has 24 points in last 12 games. Opponent allows 3.8 goals per game on the road.',
+          timestamp: 'Tomorrow, 7:00 PM ET',
+          category: 'Lock Pick',
+          probability: '79%',
+          roi: '+18%',
+          units: '2.0',
+          requiresPremium: false,
+          isToday: true
+        }
+      ];
       
-      // Store for debugging
-      window._dailyPicksDebug = {
-        rawApiData: apiPicks,
-        transformedPicks: transformedPicks,
-        timestamp: new Date().toISOString(),
-        source: 'useDailyPicks hook'
-      };
-    } else if (apiPicks && apiPicks.length === 0) {
-      // API returns empty array - use mock data
-      console.log('⚠️ API returned empty array, using mock data');
-      setPicks(MOCK_PICKS);
-      setFilteredPicks(MOCK_PICKS);
-      setLoading(false);
-    } else {
-      // No data yet, but loading is false
-      setLoading(apiLoading);
+      setPicks(fallbackPicks);
+      setFilteredPicks(fallbackPicks);
+      setLastRefresh(new Date());
     }
-  }, [apiPicks, apiLoading, apiError]);
-
-  // Updated handleRefresh function to use hook's refetch
-  const handleRefresh = async () => {
-    console.log('🔄 Manual refresh triggered');
-    setRefreshing(true);
-    try {
-      await refetch();
-    } finally {
-      setRefreshing(false);
-    }
-  };
+  }, [picksData]);
 
   // Handle search
   useEffect(() => {
@@ -268,15 +246,19 @@ const DailyPicksScreen = () => {
     }
   }, [selectedSport, picks]);
 
-  const handleTrackPick = (pick: any) => {
+  const handleRefresh = useCallback(async () => {
+    await refetch();
+    setLastRefresh(new Date());
+  }, [refetch]);
+
+  const handleTrackPick = (pick: DailyPick) => {
     if (pick.requiresPremium && !hasPremiumAccess) {
       setShowUpgradeModal(true);
       return;
     }
     
-    // Handle tracking logic here
-    console.log('Tracking pick:', pick);
-    alert(`Tracking pick: ${pick.player} - ${pick.pick}`);
+    setSelectedPick(pick);
+    setShowPickDetail(true);
   };
 
   const handleGenerateCustomPicks = () => {
@@ -295,7 +277,7 @@ const DailyPicksScreen = () => {
     
     // Simulate API call
     setTimeout(() => {
-      const newPick = {
+      const newPick: DailyPick = {
         id: `gen-${Date.now()}`,
         player: 'AI Generated',
         team: 'AI',
@@ -310,8 +292,9 @@ const DailyPicksScreen = () => {
         probability: '76%',
         roi: '+22%',
         units: '2.0',
-        generatedFrom: customPrompt,
         requiresPremium: false,
+        generatedFrom: customPrompt,
+        isToday: true
       };
       
       setPicks([newPick, ...picks]);
@@ -324,292 +307,196 @@ const DailyPicksScreen = () => {
     }, 2000);
   };
 
-  // Loading Component
-  const LoadingSkeleton = () => (
-    <Box sx={{ width: '100%' }}>
-      {[1, 2, 3].map((i) => (
-        <Card key={i} sx={{ mb: 3, opacity: 0.7 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Box sx={{ width: '60%' }}>
-                <LinearProgress sx={{ mb: 1 }} />
-                <LinearProgress sx={{ width: '40%' }} />
-              </Box>
-              <LinearProgress sx={{ width: '80px', height: '32px' }} />
-            </Box>
-            <LinearProgress sx={{ mb: 2 }} />
-            <Grid container spacing={2} sx={{ mb: 2 }}>
-              {[1, 2, 3].map((j) => (
-                <Grid item xs={4} key={j}>
-                  <LinearProgress />
-                </Grid>
-              ))}
-            </Grid>
-            <LinearProgress />
-          </CardContent>
-        </Card>
-      ))}
-    </Box>
-  );
-
-  // Informative Text Box Component
-  const InformativeTextBox = () => (
-    <Card sx={{ 
-      mb: 3,
-      background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-      color: 'white'
-    }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Info sx={{ mr: 1, fontSize: 24 }} />
-          <Typography variant="h5" fontWeight="bold">
-            Daily Picks Explained
-          </Typography>
-        </Box>
-        
+  // Debug Panel Component (same as ParlayArchitectScreen)
+  const DebugPanel = () => {
+    return (
+      <Collapse in={showDebugPanel}>
         <Paper sx={{ 
           p: 2, 
-          mb: 2, 
-          bgcolor: 'rgba(255, 255, 255, 0.1)',
+          mb: 4, 
+          bgcolor: '#1e293b',
+          color: 'white',
           borderRadius: 2
         }}>
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <BugReport fontSize="small" />
+              <Typography variant="h6">Debug Panel</Typography>
+            </Box>
+            <Chip 
+              label="Dev Mode" 
+              size="small" 
+              sx={{ bgcolor: '#ef4444', color: 'white' }}
+            />
+          </Box>
+          
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                <CheckCircle sx={{ color: '#10b981', mr: 1, mt: 0.5 }} />
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
+                Component Stats
+              </Typography>
+              <Box sx={{ pl: 2 }}>
                 <Typography variant="body2">
-                  Daily picks are AI-curated selections with the highest probability of success
+                  • Daily Picks: {picks.length}
+                </Typography>
+                <Typography variant="body2">
+                  • Filtered: {filteredPicks.length}
+                </Typography>
+                <Typography variant="body2">
+                  • Last Refresh: {lastRefresh ? new Date(lastRefresh).toLocaleTimeString() : 'Never'}
+                </Typography>
+                <Typography variant="body2">
+                  • Loading: {isLoading ? 'Yes' : 'No'}
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                <TrendingUp sx={{ color: '#3b82f6', mr: 1, mt: 0.5 }} />
+            
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
+                API Status
+              </Typography>
+              <Box sx={{ pl: 2 }}>
                 <Typography variant="body2">
-                  Updated every 24 hours based on the latest odds and performance data
+                  • Daily Picks API: {apiError ? '❌ Error' : '✅ Connected'}
+                </Typography>
+                <Typography variant="body2">
+                  • Data Source: {picksData?.source || 'unknown'}
+                </Typography>
+                <Typography variant="body2">
+                  • Last Check: {new Date().toLocaleTimeString()}
                 </Typography>
               </Box>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                <ShieldIcon sx={{ color: '#8b5cf6', mr: 1, mt: 0.5 }} />
-                <Typography variant="body2">
-                  Each pick includes detailed analysis, confidence scores, and expected value
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-                <Bolt sx={{ color: '#f59e0b', mr: 1, mt: 0.5 }} />
-                <Typography variant="body2">
-                  Get 2 free daily picks - upgrade for unlimited access to all picks
-                </Typography>
+              
+              <Box mt={2}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  sx={{ color: 'white', borderColor: '#64748b', mr: 1 }}
+                  onClick={() => {
+                    console.log('🔄 Manual debug refresh triggered');
+                    handleRefresh();
+                  }}
+                >
+                  Force Refresh
+                </Button>
+                
+                <Button
+                  size="small"
+                  variant="outlined"
+                  sx={{ color: 'white', borderColor: '#64748b' }}
+                  onClick={() => {
+                    console.log('🔍 Debug: Full state dump:', {
+                      picksData,
+                      picks,
+                      filteredPicks,
+                      apiError
+                    });
+                  }}
+                >
+                  Log State
+                </Button>
               </Box>
             </Grid>
           </Grid>
-        </Paper>
-        
-        <Typography variant="caption" sx={{ opacity: 0.9, display: 'block', textAlign: 'center' }}>
-          Last updated: {new Date().toLocaleString()}
-        </Typography>
-      </CardContent>
-    </Card>
-  );
-
-  // Daily Pick Generator Component
-  const DailyPickGenerator = () => {
-    const [generatedToday, setGeneratedToday] = useState(false);
-    const [generatedPicks, setGeneratedPicks] = useState<any[]>([]);
-
-    const generateSamplePicks = () => {
-      return [
-        {
-          id: 1,
-          type: 'High Confidence',
-          sport: 'NBA',
-          pick: 'Giannis Antetokounmpo Over 30.5 Points + 10.5 Rebounds',
-          confidence: 94,
-          odds: '+180',
-          probability: '91%',
-          expectedValue: '+12.4%',
-          keyStat: '27.2% rebound rate vs opponent',
-          trend: 'Double-double in 8 of last 10 games',
-          timestamp: 'Today • 8:00 PM ET'
-        },
-        {
-          id: 2,
-          type: 'Value Play',
-          sport: 'NFL',
-          pick: 'Dak Prescott Over 275.5 Passing Yards',
-          confidence: 86,
-          odds: '-115',
-          probability: '83%',
-          expectedValue: '+8.7%',
-          keyStat: 'Averaging 291.4 pass YPG at home',
-          trend: 'Over 275 in 6 of last 7 home games',
-          timestamp: 'Tonight • 8:20 PM ET'
-        }
-      ];
-    };
-
-    const handleGenerate = () => {
-      const newPicks = generateSamplePicks();
-      setGeneratedToday(true);
-      setGeneratedPicks(newPicks);
-      setGenerating(true);
-      setShowGeneratingModal(true);
-      
-      setTimeout(() => {
-        setGenerating(false);
-      }, 2000);
-    };
-
-    return (
-      <Card sx={{ mb: 3, bgcolor: 'background.paper' }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              <Avatar sx={{ bgcolor: '#f59e0b20', mr: 2 }}>
-                <CalendarToday sx={{ color: '#f59e0b' }} />
-              </Avatar>
-              <Box>
-                <Typography variant="h6" fontWeight="bold">Daily Pick Generator</Typography>
-                <Typography variant="body2" color="text.secondary">3 high-probability picks for today</Typography>
-              </Box>
-            </Box>
-            
-            <Button
-              variant="contained"
-              startIcon={generatedToday ? <CheckCircle /> : <AutoAwesome />}
-              onClick={handleGenerate}
-              disabled={generatedToday || generating}
-              sx={{
-                bgcolor: generatedToday ? '#6b7280' : '#f59e0b',
-                '&:hover': {
-                  bgcolor: generatedToday ? '#4b5563' : '#d97706'
-                }
-              }}
-            >
-              {generatedToday ? 'Generated Today' : 'Generate Daily Picks'}
-            </Button>
-          </Box>
           
-          {generatedPicks.length > 0 ? (
-            <Box sx={{ mt: 2 }}>
-              {generatedPicks.map((pick) => (
-                <Card key={pick.id} variant="outlined" sx={{ mb: 2 }}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Chip 
-                          label={pick.type} 
-                          size="small"
-                          sx={{ 
-                            bgcolor: `${(CATEGORY_COLORS as any)[pick.type] || '#6b7280'}20`,
-                            color: (CATEGORY_COLORS as any)[pick.type] || '#6b7280',
-                            fontWeight: 'bold'
-                          }}
-                        />
-                        <Chip 
-                          label={pick.sport} 
-                          size="small"
-                          sx={{ 
-                            bgcolor: `${(SPORT_COLORS as any)[pick.sport]}20`,
-                            color: (SPORT_COLORS as any)[pick.sport]
-                          }}
-                        />
-                      </Box>
-                      <Chip 
-                        label={`${pick.confidence}%`}
-                        size="small"
-                        sx={{ 
-                          bgcolor: pick.confidence >= 90 ? '#10b981' : pick.confidence >= 85 ? '#3b82f6' : '#f59e0b',
-                          color: 'white',
-                          fontWeight: 'bold'
-                        }}
-                      />
-                    </Box>
-                    
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                      {pick.pick}
-                    </Typography>
-                    
-                    <Grid container spacing={2} sx={{ mb: 2 }}>
-                      <Grid item xs={4}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <Typography variant="caption" color="text.secondary">Win Probability</Typography>
-                          <Typography variant="h6" fontWeight="bold">{pick.probability}</Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={4}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <Typography variant="caption" color="text.secondary">Odds</Typography>
-                          <Typography variant="h6" fontWeight="bold">{pick.odds}</Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={4}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <Typography variant="caption" color="text.secondary">Expected Value</Typography>
-                          <Typography variant="h6" fontWeight="bold" color="#10b981">
-                            {pick.expectedValue}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    </Grid>
-                    
-                    <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                      {pick.keyStat}
-                    </Typography>
-                    
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-                      <Chip 
-                        icon={<TrendingUp />}
-                        label={pick.trend}
-                        size="small"
-                        variant="outlined"
-                        sx={{ color: '#059669' }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        {pick.timestamp}
-                      </Typography>
-                    </Box>
-                  </CardContent>
-                </Card>
-              ))}
-            </Box>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <CalendarToday sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="body1" color="text.secondary" gutterBottom>
-                No daily picks generated yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Tap generate to create today's high-probability picks
-              </Typography>
-            </Box>
+          {apiError && (
+            <Alert severity="error" sx={{ mt: 2, bgcolor: '#7f1d1d' }}>
+              <AlertTitle>API Error</AlertTitle>
+              {String(apiError)}
+            </Alert>
           )}
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-            <CheckCircle sx={{ fontSize: 16, color: '#059669', mr: 1 }} />
-            <Typography variant="caption" color="text.secondary">
-              • Updated daily at 9 AM ET • AI-powered analysis • Different from prediction models
-            </Typography>
-          </Box>
-        </CardContent>
-      </Card>
+        </Paper>
+      </Collapse>
     );
   };
 
-  const renderPickCard = (pick: any) => {
+  // Confidence Meter Component (same as ParlayArchitectScreen)
+  const ConfidenceMeter = ({ score, level }: { score: number; level: string }) => {
+    const colors = {
+      'very-high': '#10b981',
+      'high': '#3b82f6',
+      'medium': '#f59e0b',
+      'low': '#ef4444',
+      'very-low': '#dc2626'
+    };
+    
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ width: 80, bgcolor: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+          <Box 
+            sx={{ 
+              width: `${Math.min(score, 100)}%`,
+              height: 8,
+              bgcolor: colors[level as keyof typeof colors] || '#64748b'
+            }}
+          />
+        </Box>
+        <Typography variant="caption" fontWeight="bold" color={colors[level as keyof typeof colors]}>
+          {score}%
+        </Typography>
+      </Box>
+    );
+  };
+
+  // Today's Picks Component
+  const TodaysPicksPanel = () => (
+    <Paper sx={{ mb: 4 }}>
+      <Accordion defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Today color="primary" />
+            <Typography variant="h6">Today's AI Picks</Typography>
+            <Chip 
+              label={`${picks.length} picks`} 
+              size="small" 
+              color={isLoading ? "default" : apiError ? "error" : "success"}
+            />
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          {isLoading ? (
+            <Box display="flex" justifyContent="center" p={3}>
+              <CircularProgress size={24} />
+              <Typography sx={{ ml: 2 }}>Loading daily picks...</Typography>
+            </Box>
+          ) : apiError ? (
+            <Alert severity="warning">
+              <AlertTitle>Using Fallback Data</AlertTitle>
+              {String(apiError)}
+            </Alert>
+          ) : picks.length === 0 ? (
+            <Alert severity="info">
+              <AlertTitle>No Picks Today</AlertTitle>
+              Check back later for today's selections.
+            </Alert>
+          ) : (
+            <Box>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                AI-generated daily picks based on the latest data and matchups.
+              </Typography>
+            </Box>
+          )}
+        </AccordionDetails>
+      </Accordion>
+    </Paper>
+  );
+
+  const renderPickCard = (pick: DailyPick) => {
     const isPremiumLocked = pick.requiresPremium && !hasPremiumAccess;
     
     return (
       <Card key={pick.id} sx={{ 
         mb: 3,
         borderLeft: 4,
-        borderColor: (CATEGORY_COLORS as any)[pick.category] || '#6b7280'
+        borderColor: (CATEGORY_COLORS as any)[pick.category] || '#6b7280',
+        cursor: 'pointer',
+        '&:hover': {
+          boxShadow: 3,
+          transform: 'translateY(-2px)',
+          transition: 'all 0.2s'
+        }
       }}>
-        <CardContent>
+        <CardContent onClick={() => handleTrackPick(pick)}>
           {/* Header */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Box>
@@ -644,14 +531,11 @@ const DailyPicksScreen = () => {
             </Box>
             
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip 
-                label={`${pick.confidence}%`}
-                sx={{ 
-                  bgcolor: pick.confidence >= 90 ? '#10b981' : pick.confidence >= 80 ? '#3b82f6' : pick.confidence >= 70 ? '#f59e0b' : '#ef4444',
-                  color: 'white',
-                  fontWeight: 'bold'
-                }}
-              />
+              <ConfidenceMeter score={pick.confidence} level={
+                pick.confidence >= 90 ? 'very-high' :
+                pick.confidence >= 85 ? 'high' :
+                pick.confidence >= 80 ? 'medium' : 'low'
+              } />
               {isPremiumLocked && (
                 <Lock sx={{ color: 'text.secondary' }} />
               )}
@@ -698,7 +582,7 @@ const DailyPicksScreen = () => {
               <Grid item xs={4}>
                 <Box sx={{ textAlign: 'center' }}>
                   <EmojiEvents sx={{ color: '#f59e0b', mb: 0.5 }} />
-                  <Typography variant="caption" color="text.secondary">Units</Typography>
+                  <Typography variant="caption" color="text-secondary">Units</Typography>
                   <Typography variant="body1" fontWeight="bold">{pick.units}</Typography>
                 </Box>
               </Grid>
@@ -730,7 +614,6 @@ const DailyPicksScreen = () => {
             <Button
               variant="contained"
               startIcon={<BookmarkBorder />}
-              onClick={() => handleTrackPick(pick)}
               size="small"
               sx={{
                 bgcolor: '#f59e0b',
@@ -739,7 +622,7 @@ const DailyPicksScreen = () => {
                 }
               }}
             >
-              Track
+              Track Pick
             </Button>
           </Box>
         </CardContent>
@@ -747,160 +630,260 @@ const DailyPicksScreen = () => {
     );
   };
 
-  // Show loading state
-  if (loading) {
-    return (
-      <Container maxWidth="lg">
-        <Box sx={{ mb: 3, pt: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-            <IconButton onClick={() => navigate(-1)}>
-              <ArrowBack />
-            </IconButton>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="h4" fontWeight="bold">
-                Daily Picks
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Loading high-probability selections...
-              </Typography>
+  // Pick Detail Modal
+  const PickDetailModal = () => (
+    <Dialog open={showPickDetail} onClose={() => setShowPickDetail(false)} maxWidth="md" fullWidth>
+      {selectedPick && (
+        <>
+          <DialogTitle>
+            <Box display="flex" alignItems="center" gap={2}>
+              <Avatar sx={{ bgcolor: (SPORT_COLORS as any)[selectedPick.sport] }}>
+                {selectedPick.player.charAt(0)}
+              </Avatar>
+              <Box>
+                <Typography variant="h6">{selectedPick.player}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {selectedPick.team} • {selectedPick.sport}
+                </Typography>
+              </Box>
             </Box>
-            <CircularProgress size={24} />
-          </Box>
-        </Box>
-        <LoadingSkeleton />
-      </Container>
-    );
-  }
-
-  // Show error state
-  const displayError = error || apiError;
-  if (displayError) {
-    return (
-      <Container maxWidth="lg">
-        <Box sx={{ mb: 3, pt: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-            <IconButton onClick={() => navigate(-1)}>
-              <ArrowBack />
-            </IconButton>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="h4" fontWeight="bold">
-                Daily Picks
-              </Typography>
-            </Box>
-          </Box>
-        </Box>
-        
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <Typography variant="body1" fontWeight="bold">Error Loading Picks</Typography>
-          <Typography variant="body2">{displayError}</Typography>
-          <Button 
-            variant="outlined" 
-            onClick={handleRefresh}
-            sx={{ mt: 2 }}
-          >
-            Retry
-          </Button>
-        </Alert>
-        
-        <InformativeTextBox />
-        <DailyPickGenerator />
-      </Container>
-    );
-  }
+          </DialogTitle>
+          <DialogContent>
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <Card sx={{ mb: 2 }}>
+                  <CardContent>
+                    <Typography variant="h5" color="#f59e0b" fontWeight="bold">
+                      {selectedPick.pick}
+                    </Typography>
+                    <Box mt={2}>
+                      <ConfidenceMeter 
+                        score={selectedPick.confidence} 
+                        level={
+                          selectedPick.confidence >= 90 ? 'very-high' :
+                          selectedPick.confidence >= 85 ? 'high' :
+                          selectedPick.confidence >= 80 ? 'medium' : 'low'
+                        } 
+                      />
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>Pick Details</Typography>
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="text.secondary">Odds</Typography>
+                        <Typography variant="h6">{selectedPick.odds}</Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="text.secondary">Edge</Typography>
+                        <Typography variant="h6" color="#10b981">{selectedPick.edge}</Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="text.secondary">Probability</Typography>
+                        <Typography variant="h6">{selectedPick.probability}</Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="text.secondary">ROI</Typography>
+                        <Typography variant="h6">{selectedPick.roi}</Typography>
+                      </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>Analysis</Typography>
+                    <Typography variant="body2">
+                      {selectedPick.analysis}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowPickDetail(false)}>Close</Button>
+            <Button variant="contained">Add to Bet Slip</Button>
+          </DialogActions>
+        </>
+      )}
+    </Dialog>
+  );
 
   return (
     <Container maxWidth="lg">
-      {/* Debug Info Banner (only in development) */}
-      {import.meta.env.DEV && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Typography variant="caption">
-            🔍 Debug: Showing {picks.length} picks ({picks === MOCK_PICKS ? 'MOCK DATA' : 'REAL API DATA via hook'})
-          </Typography>
-          <Button 
-            size="small" 
-            onClick={() => console.log('Current picks:', picks, 'Hook state:', { apiPicks, apiLoading, apiError })}
-            sx={{ ml: 1 }}
-          >
-            Log Data
-          </Button>
-        </Alert>
-      )}
+      {/* Header - Similar to ParlayArchitectScreen */}
+      <Paper sx={{ 
+        background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+        mb: 4,
+        p: 3,
+        color: 'white'
+      }}>
+        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+          <Box display="flex" gap={1}>
+            <Button
+              startIcon={<ArrowBack />}
+              onClick={() => navigate(-1)}
+              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
+              variant="outlined"
+              size="small"
+            >
+              Back
+            </Button>
+            
+            {/* Debug toggle button */}
+            <Button
+              startIcon={<BugReport />}
+              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              sx={{ 
+                color: 'white', 
+                borderColor: 'rgba(255,255,255,0.3)',
+                bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent'
+              }}
+              variant="outlined"
+              size="small"
+            >
+              {showDebugPanel ? 'Hide Debug' : 'Debug'}
+            </Button>
+          </Box>
+          
+          {/* Last refresh indicator */}
+          {lastRefresh && (
+            <Chip 
+              label={`Last updated: ${lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+              size="small"
+              sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
+            />
+          )}
+        </Box>
 
-      {/* Header */}
-      <Box sx={{ mb: 3, pt: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-          <IconButton onClick={() => navigate(-1)}>
-            <ArrowBack />
-          </IconButton>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="h4" fontWeight="bold">
+        <Box display="flex" alignItems="center" gap={3}>
+          <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}>
+            <CalendarToday sx={{ fontSize: 32 }} />
+          </Avatar>
+          <Box>
+            <Typography variant="h3" fontWeight="bold" gutterBottom>
               Daily Picks
             </Typography>
-            <Typography variant="body1" color="text.secondary">
-              {picks.length} high-probability selections for today
+            <Typography variant="h6" sx={{ opacity: 0.9 }}>
+              AI-curated selections with highest probability of success
             </Typography>
           </Box>
-          <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh} disabled={refreshing || apiLoading}>
-              {refreshing || apiLoading ? <CircularProgress size={24} /> : <Refresh />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
-
-      {/* Informative Text Box */}
-      <InformativeTextBox />
-
-      {/* Daily Pick Generator */}
-      <DailyPickGenerator />
-
-      {/* Search and Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="Search daily picks by player, team, or sport..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search />
-                </InputAdornment>
-              ),
-              endAdornment: searchQuery && (
-                <InputAdornment position="end">
-                  <IconButton onClick={() => setSearchQuery('')} size="small">
-                    <Close />
-                  </IconButton>
-                </InputAdornment>
-              )
-            }}
-          />
-        </Box>
-        
-        {/* Sport Filter */}
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {['All', 'NBA', 'NFL', 'NHL', 'MLB'].map((sport) => (
-            <Chip
-              key={sport}
-              label={sport}
-              onClick={() => setSelectedSport(sport)}
-              color={selectedSport === sport ? 'primary' : 'default'}
-              variant={selectedSport === sport ? 'filled' : 'outlined'}
-              sx={{ 
-                bgcolor: selectedSport === sport && sport !== 'All' ? `${(SPORT_COLORS as any)[sport]}20` : undefined,
-                borderColor: (SPORT_COLORS as any)[sport],
-                color: selectedSport === sport && sport !== 'All' ? (SPORT_COLORS as any)[sport] : undefined
-              }}
-            />
-          ))}
         </Box>
       </Paper>
 
+      {/* Debug Panel */}
+      <DebugPanel />
+
+      {/* Action Bar - Similar pattern to ParlayArchitectScreen */}
+      <Paper sx={{ p: 2, mb: 4 }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} sm={6}>
+            <Button
+              variant="contained"
+              fullWidth
+              startIcon={<AutoAwesome />}
+              onClick={handleGenerateCustomPicks}
+              disabled={generating || (!hasPremiumAccess && remainingGenerations === 0)}
+            >
+              {generating ? 'Generating...' : 'Generate Custom Picks'}
+            </Button>
+          </Grid>
+          <Grid item xs={12} sm={3}>
+            <FormControl fullWidth size="small">
+              <TextField
+                select
+                value={selectedSport}
+                onChange={(e) => setSelectedSport(e.target.value)}
+                label="Sport"
+                variant="outlined"
+              >
+                {['All', 'NBA', 'NFL', 'NHL', 'MLB'].map((sport) => (
+                  <option key={sport} value={sport}>
+                    {sport}
+                  </option>
+                ))}
+              </TextField>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={3}>
+            <Box display="flex" justifyContent="flex-end" gap={1}>
+              <IconButton 
+                onClick={handleRefresh} 
+                disabled={isLoading}
+                title="Refresh picks"
+              >
+                <Refresh />
+              </IconButton>
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Today's Picks Panel */}
+      <TodaysPicksPanel />
+
+      {/* Search Bar */}
+      <Paper sx={{ p: 2, mb: 4 }}>
+        <TextField
+          fullWidth
+          placeholder="Search picks by player, team, or pick type..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search />
+              </InputAdornment>
+            ),
+            endAdornment: searchQuery && (
+              <InputAdornment position="end">
+                <IconButton onClick={() => setSearchQuery('')} size="small">
+                  <Close />
+                </IconButton>
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Paper>
+
+      {/* Display picks */}
+      {isLoading ? (
+        <Box display="flex" justifyContent="center" p={4}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2 }}>Loading daily picks...</Typography>
+        </Box>
+      ) : apiError ? (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <AlertTitle>Error Loading Picks</AlertTitle>
+          {String(apiError)}
+          <Button size="small" sx={{ ml: 2 }} onClick={handleRefresh}>
+            Retry
+          </Button>
+        </Alert>
+      ) : filteredPicks.length > 0 ? (
+        <Box>
+          <Typography variant="h6" gutterBottom>
+            Today's Picks ({filteredPicks.length})
+          </Typography>
+          {filteredPicks.map((pick) => renderPickCard(pick))}
+        </Box>
+      ) : (
+        <Alert severity="info">
+          <AlertTitle>No Picks Found</AlertTitle>
+          Try changing your search or filters.
+        </Alert>
+      )}
+
       {/* Custom Prompt Generator */}
-      <Paper sx={{ p: 2, mb: 3 }}>
+      <Paper sx={{ p: 2, mb: 3, mt: 4 }}>
         <Typography variant="h6" gutterBottom>
           Generate Custom Picks
         </Typography>
@@ -946,32 +929,8 @@ const DailyPicksScreen = () => {
         </Box>
       </Paper>
 
-      {/* Picks Section */}
-      <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5" fontWeight="bold">
-            🎯 Today's Top Picks
-          </Typography>
-          <Chip 
-            label={`${filteredPicks.length} picks • ${remainingGenerations} free gens`}
-            sx={{ bgcolor: 'grey.100' }}
-          />
-        </Box>
-        
-        {filteredPicks.length > 0 ? (
-          filteredPicks.map(renderPickCard)
-        ) : (
-          <Paper sx={{ p: 4, textAlign: 'center' }}>
-            <Search sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              {searchQuery ? 'No picks found' : 'No picks available'}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {searchQuery ? 'Try a different search term' : 'Check back soon for new picks'}
-            </Typography>
-          </Paper>
-        )}
-      </Box>
+      {/* Pick Detail Modal */}
+      <PickDetailModal />
 
       {/* Upgrade Modal */}
       <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)}>

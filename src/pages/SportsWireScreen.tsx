@@ -1,7 +1,5 @@
 // src/pages/SportsWireScreen.tsx
 import React, { useState, useEffect } from 'react';
-import NewReleasesIcon from '@mui/icons-material/NewReleases';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import {
   Box,
   Typography,
@@ -28,7 +26,12 @@ import {
   Tabs,
   Tab,
   alpha,
-  useTheme
+  useTheme,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Alert
 } from '@mui/material';
 import {
   ArrowBack,
@@ -61,12 +64,15 @@ import {
   TrendingDown,
   Timer,
   LocalFireDepartment,
-  Bolt
+  Bolt,
+  Update as UpdateIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
 
-// At the top of the file, add:
-import { useSportsWire } from '../hooks/useSportsData';
+// Import React Query hook - UPDATE THE PATH BASED ON YOUR STRUCTURE
+import { useSportsWire } from '../hooks/useBackendAPI';
 
 // Fix for __DEV__ error - define it if not defined
 declare global {
@@ -75,8 +81,6 @@ declare global {
 
 // Initialize __DEV__ if it doesn't exist
 if (typeof __DEV__ === 'undefined') {
-  // Set to true for development, false for production
-  // You can also check the environment
   globalThis.__DEV__ = process.env.NODE_ENV === 'development';
 }
 
@@ -214,45 +218,35 @@ interface TrendingProp {
 
 // Helper function to safely extract array from hook response
 const extractArrayFromHook = (hookData: any): any[] => {
-  console.log('🔍 [extractArrayFromHook] Processing data:', {
-    rawData: hookData,
-    isArray: Array.isArray(hookData),
-    keys: hookData && typeof hookData === 'object' ? Object.keys(hookData) : 'N/A'
-  });
+  if (!hookData) return [];
   
+  // If hookData is an array of news articles (from the new API structure)
   if (Array.isArray(hookData)) {
-    console.log('✅ Data is already an array');
     return hookData;
   }
   
-  if (!hookData || typeof hookData !== 'object') {
-    console.log('⚠️ Hook data is not an object or is null');
-    return [];
+  // If hookData has a 'news' property with array (from the new API structure)
+  if (hookData.news && Array.isArray(hookData.news)) {
+    return hookData.news;
   }
   
-  // Check for different API response patterns
+  // Legacy API structure support
   if (hookData.selections && Array.isArray(hookData.selections)) {
-    console.log('✅ Found selections array:', hookData.selections.length);
     return hookData.selections;
   }
   
   if (hookData.data && Array.isArray(hookData.data)) {
-    console.log('✅ Found data array');
     return hookData.data;
   }
   
   if (hookData.results && Array.isArray(hookData.results)) {
-    console.log('✅ Found results array');
     return hookData.results;
   }
   
   if (hookData.items && Array.isArray(hookData.items)) {
-    console.log('✅ Found items array');
     return hookData.items;
   }
   
-  // If it's an object but we don't recognize the structure, return empty
-  console.log('⚠️ No recognized array structure found');
   return [];
 };
 
@@ -265,12 +259,11 @@ const convertConfidenceToNumber = (confidence: any): number => {
       case 'medium': return 65;
       case 'low': return 45;
       default:
-        // Try to parse as number
         const num = parseInt(confidence);
         return isNaN(num) ? 50 : Math.min(Math.max(num, 0), 100);
     }
   }
-  return 50; // Default
+  return 50;
 };
 
 // Helper function to parse odds
@@ -288,116 +281,108 @@ const SportsWireScreen = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   
-  const { data: hookData, loading, error } = useSportsWire();
+  // State for sport selection
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
   
-  // Add debugging console logs
-  console.log('🔍 [SportsWireScreen] HOOKS DEBUG:', {
-    dataFromHook: {
-      value: hookData,
-      type: typeof hookData,
-      isArray: Array.isArray(hookData),
-      isObject: hookData && typeof hookData === 'object',
-      keys: hookData && typeof hookData === 'object' ? Object.keys(hookData) : 'N/A',
-      fullObject: hookData // Log the full object to see its structure
-    },
-    loading: loading,
-    error: error
-  });
-
+  // Use React Query hook
+  const { 
+    data: hookData, 
+    isLoading, 
+    error, 
+    refetch,
+    isRefetching 
+  } = useSportsWire(selectedSport);
+  
+  // Extract news data from hook response
+  const newsData = hookData?.news || [];
+  const newsCount = Array.isArray(newsData) ? newsData.length : 0;
+  
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [trendingFilter, setTrendingFilter] = useState('all');
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
-  const [filteredProps, setFilteredProps] = useState<PlayerProp[]>([]);
   const [bookmarked, setBookmarked] = useState<number[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [trendingProps, setTrendingProps] = useState<TrendingProp[]>(MOCK_TRENDING_PROPS);
   const [processedPlayerProps, setProcessedPlayerProps] = useState<PlayerProp[]>([]);
   
-  // Process hook data to ensure it's an array
+  // Transform news data to player props format for compatibility with existing UI
   useEffect(() => {
-    console.log('🔄 [SportsWireScreen useEffect] Processing hook data:', { 
-      hookData, 
-      loading, 
-      error 
-    });
-    
-    // Check data validation
-    console.log('🔍 [SportsWireScreen useEffect] Data validation:', {
-      isDataValid: hookData && typeof hookData === 'object',
-      dataType: typeof hookData,
-      dataKeys: hookData && typeof hookData === 'object' ? Object.keys(hookData) : 'N/A'
-    });
-    
-    // Extract data from object structure
-    console.log('🔧 [SportsWireScreen useEffect] Extracted data:', {
-      // Common patterns to try
-      asArray: Array.isArray(hookData) ? hookData : 'Not an array',
-      fromDataProp: hookData?.data ? hookData.data : 'No .data property',
-      fromResultsProp: hookData?.results ? hookData.results : 'No .results property',
-      fromItemsProp: hookData?.items ? hookData.items : 'No .items property'
-    });
+    if (newsData && Array.isArray(newsData)) {
+      const transformedProps = newsData.map((article: any, index: number) => {
+        // Extract relevant data from news article
+        const title = article.title || '';
+        const description = article.description || '';
+        const source = article.source?.name || 'Sports News';
+        const publishedAt = article.publishedAt || new Date().toISOString();
+        
+        // Create a player prop from news data
+        // This is a transformation to maintain compatibility with the existing UI
+        return {
+          id: article.id || `news-${index}`,
+          playerName: source,
+          team: source,
+          sport: selectedSport.toUpperCase(),
+          propType: 'News',
+          line: title.substring(0, 50) + (title.length > 50 ? '...' : ''),
+          odds: '+100',
+          impliedProbability: 65,
+          matchup: description.substring(0, 60) + (description.length > 60 ? '...' : ''),
+          time: publishedAt ? format(new Date(publishedAt), 'MMM d') : 'Just now',
+          confidence: 75,
+          isBookmarked: false,
+          aiInsights: [description],
+          article: article // Keep original article data
+        };
+      });
+      
+      setProcessedPlayerProps(transformedProps);
+    } else {
+      // Fallback to mock data if no news
+      setProcessedPlayerProps(MOCK_PLAYER_PROPS);
+    }
+  }, [newsData, selectedSport]);
+  
+  // Filter props based on category and search
+  const filteredProps = React.useMemo(() => {
+    if (!processedPlayerProps || processedPlayerProps.length === 0) {
+      return [];
+    }
 
-    const extractedData = extractArrayFromHook(hookData);
+    let filtered = [...processedPlayerProps];
     
-    // Ensure all required fields exist and transform to PlayerProp format
-    const validatedData = extractedData.map((selection: any, index: number) => {
-      // Create the prop line string from type and line
-      const lineValue = typeof selection.line === 'number' ? selection.line.toFixed(1) : selection.line || '0.0';
-      const propLine = selection.type ? `${selection.type} ${lineValue}` : `Over ${lineValue}`;
-      
-      // Extract matchup from analysis if available
-      let matchup = 'Home vs Away';
-      if (selection.analysis) {
-        const match = selection.analysis.match(/in (.+?)$/);
-        if (match) matchup = match[1];
+    // Filter by category
+    if (selectedCategory !== 'all') {
+      if (selectedCategory === 'value') {
+        filtered = filtered.filter(prop => {
+          try {
+            const oddsString = prop.odds.toString();
+            const oddsValue = parseInt(oddsString.replace(/[+-]/, ''));
+            const isPositive = oddsString.startsWith('+');
+            return isPositive || prop.impliedProbability > 60;
+          } catch (error) {
+            return false;
+          }
+        });
+      } else if (selectedCategory === 'high-confidence') {
+        filtered = filtered.filter(prop => prop.confidence > 80);
+      } else {
+        filtered = filtered.filter(prop => prop.sport === selectedCategory);
       }
-      
-      // Calculate implied probability from odds (simplified calculation)
-      const oddsString = parseOdds(selection.odds);
-      let impliedProbability = 50;
-      if (oddsString.startsWith('+')) {
-        const oddsNum = parseInt(oddsString.substring(1));
-        if (!isNaN(oddsNum)) {
-          impliedProbability = Math.round(100 / (oddsNum / 100 + 1));
-        }
-      } else if (oddsString.startsWith('-')) {
-        const oddsNum = parseInt(oddsString.substring(1));
-        if (!isNaN(oddsNum)) {
-          impliedProbability = Math.round((oddsNum / (oddsNum + 100)) * 100);
-        }
-      }
-      
-      return {
-        id: selection.id || `selection-${index}`,
-        playerName: selection.player || selection.playerName || 'Unknown Player',
-        team: selection.team || 'Unknown Team',
-        sport: selection.sport || 'NBA',
-        propType: selection.stat ? selection.stat.charAt(0).toUpperCase() + selection.stat.slice(1) : 'Points',
-        line: propLine,
-        odds: oddsString,
-        impliedProbability: impliedProbability,
-        matchup: matchup,
-        time: selection.timestamp ? new Date(selection.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
-        confidence: convertConfidenceToNumber(selection.confidence),
-        isBookmarked: false,
-        aiInsights: selection.analysis ? [selection.analysis] : []
-      };
-    });
+    }
     
-    console.log('✅ [SportsWireScreen] Validated player props:', {
-      validatedLength: validatedData.length,
-      validatedData: validatedData.slice(0, 3), // Show first 3 items
-      usingMock: validatedData.length === 0
-    });
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const searchQueryLower = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(prop => 
+        prop.playerName.toLowerCase().includes(searchQueryLower) ||
+        prop.team.toLowerCase().includes(searchQueryLower) ||
+        prop.propType.toLowerCase().includes(searchQueryLower)
+      );
+    }
     
-    // Use validated data or fallback to mock
-    const finalData = validatedData.length > 0 ? validatedData : MOCK_PLAYER_PROPS;
-    setProcessedPlayerProps(finalData);
-    
-    // Initial filter with the processed data
-    applyFilters(finalData, selectedCategory, searchQuery);
-  }, [hookData, selectedCategory, searchQuery]);
+    return filtered;
+  }, [processedPlayerProps, selectedCategory, searchQuery]);
 
   const categories = [
     { id: 'all', name: 'All Sports', icon: <LocalFireDepartment />, color: '#ef4444' },
@@ -408,7 +393,7 @@ const SportsWireScreen = () => {
     { id: 'value', name: 'Value Bets', icon: <ShowChart />, color: '#10b981' },
     { id: 'live', name: 'Live Now', icon: <Bolt />, color: '#f59e0b' }
   ];  
-
+  
   const trendingFilters = [
     { id: 'all', name: 'All' },
     { id: 'NBA', name: 'NBA' },
@@ -419,7 +404,7 @@ const SportsWireScreen = () => {
   ];
 
   const [analyticsMetrics] = useState({
-    totalProps: 128,
+    totalProps: newsCount || 0,
     trendingScore: 78,
     hitRate: 65,
     avgConfidence: 68,
@@ -431,70 +416,24 @@ const SportsWireScreen = () => {
     ]
   });
 
-  // Helper function to apply filters
-  const applyFilters = (data: PlayerProp[], category: string, query: string) => {
-    if (!data || data.length === 0) {
-      setFilteredProps([]);
-      return;
-    }
+  const handleSportChange = (event: any) => {
+    setSelectedSport(event.target.value);
+  };
 
-    let filtered = [...data];
-    
-    // Filter by category
-    if (category !== 'all') {
-      if (category === 'value') {
-        filtered = filtered.filter(prop => {
-          // Safely parse odds
-          if (!prop.odds) return false;
-          
-          try {
-            const oddsString = prop.odds.toString();
-            // Remove + or - signs for parsing
-            const oddsValue = parseInt(oddsString.replace(/[+-]/, ''));
-            const isPositive = oddsString.startsWith('+');
-            
-            return isPositive || prop.impliedProbability > 60;
-          } catch (error) {
-            console.warn('Error parsing odds:', prop.odds, error);
-            return false;
-          }
-        });
-      } else if (category === 'high-confidence') {
-        filtered = filtered.filter(prop => prop.confidence > 80);
-      } else {
-        filtered = filtered.filter(prop => prop.sport === category);
-      }
-    }
-    
-    // Filter by search query
-    if (query.trim()) {
-      const searchQueryLower = query.toLowerCase().trim();
-      filtered = filtered.filter(prop => 
-        prop.playerName.toLowerCase().includes(searchQueryLower) ||
-        prop.team.toLowerCase().includes(searchQueryLower) ||
-        prop.propType.toLowerCase().includes(searchQueryLower)
-      );
-    }
-    
-    console.log('🎯 [SportsWireScreen] Filtered props:', {
-      originalCount: data.length,
-      filteredCount: filtered.length,
-      category,
-      query
-    });
-    
-    setFilteredProps(filtered);
+  const handleRefresh = () => {
+    refetch();
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
   };
 
   const getOddsColor = (odds: string) => {
-    // Handle undefined, null, or empty odds
     if (!odds || typeof odds !== 'string') {
-      return '#6b7280'; // Default gray
+      return '#6b7280';
     }
     
-    if (odds.startsWith('+')) return '#10b981'; // Positive odds = green
-    if (odds.startsWith('-')) return '#ef4444'; // Negative odds = red
-    return '#6b7280'; // Default gray
+    if (odds.startsWith('+')) return '#10b981';
+    if (odds.startsWith('-')) return '#ef4444';
+    return '#6b7280';
   };
 
   const getConfidenceColor = (confidence: number) => {
@@ -517,7 +456,6 @@ const SportsWireScreen = () => {
   };
 
   const handleBookmark = (propId: string | number) => {
-    // Convert to number for comparison
     const numId = typeof propId === 'string' ? parseInt(propId) : propId;
     
     if (bookmarked.includes(numId)) {
@@ -534,9 +472,6 @@ const SportsWireScreen = () => {
         text: `${prop.playerName} ${prop.line} ${prop.odds}`,
         url: window.location.href,
       }).catch((err) => {
-        if (__DEV__) {
-          console.error('Error sharing:', err);
-        }
         navigator.clipboard.writeText(`${prop.playerName} ${prop.propType}: ${prop.line} ${prop.odds}`)
           .then(() => {
             alert('Prop copied to clipboard!');
@@ -554,12 +489,6 @@ const SportsWireScreen = () => {
           alert('Prop information available for sharing');
         });
     }
-  };
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    // Force refresh by triggering a re-fetch
-    setTimeout(() => setRefreshing(false), 1000);
   };
 
   const renderTrendingCard = (prop: TrendingProp) => {
@@ -673,7 +602,7 @@ const SportsWireScreen = () => {
               <Share sx={{ fontSize: 16 }} />
             </IconButton>
             <IconButton size="small" onClick={() => alert(prop.aiInsights?.join('\n') || 'No AI insights available')}>
-              <AutoAwesomeIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
+              <SparklesIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
             </IconButton>
             <IconButton size="small">
               <BookmarkBorder sx={{ fontSize: 16 }} />
@@ -833,7 +762,7 @@ const SportsWireScreen = () => {
               </Typography>
               {prop.aiInsights.map((insight, idx) => (
                 <Box key={idx} sx={{ display: 'flex', alignItems: 'flex-start', mb: 0.5 }}>
-                  <AutoAwesomeIcon sx={{ fontSize: 12, color: '#8b5cf6', mt: 0.5, mr: 1 }} />
+                  <SparklesIcon sx={{ fontSize: 12, color: '#8b5cf6', mt: 0.5, mr: 1 }} />
                   <Typography variant="caption" color="#1e40af">
                     {insight}
                   </Typography>
@@ -892,12 +821,12 @@ const SportsWireScreen = () => {
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {processedPlayerProps.length || 0}
+                {newsCount || 0}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Total Props</Typography>
+              <Typography variant="caption" color="text.secondary">Total News</Typography>
               <LinearProgress 
                 variant="determinate" 
-                value={Math.min(processedPlayerProps.length || 0, 100)} 
+                value={Math.min(newsCount || 0, 100)} 
                 sx={{ mt: 1 }}
               />
             </Paper>
@@ -988,24 +917,36 @@ const SportsWireScreen = () => {
     </Dialog>
   );
 
-  if (loading) return (
+  if (isLoading) return (
     <Container maxWidth="lg">
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
-        <Typography sx={{ ml: 2 }}>Loading player props...</Typography>
+        <Typography sx={{ ml: 2 }}>Loading sports news...</Typography>
       </Box>
     </Container>
   );
   
   if (error) return (
     <Container maxWidth="lg">
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Typography color="error">Error loading player props: {error.message}</Typography>
-      </Box>
+      <Alert severity="error" sx={{ mb: 3, mt: 3 }}>
+        <Typography variant="body1" fontWeight="bold">
+          Failed to load news
+        </Typography>
+        <Typography variant="body2">
+          {error instanceof Error ? error.message : 'Unknown error'}
+        </Typography>
+        <Button 
+          variant="outlined" 
+          size="small" 
+          onClick={() => refetch()}
+          sx={{ mt: 1 }}
+        >
+          Try Again
+        </Button>
+      </Alert>
     </Container>
   );
 
-  // Use processedPlayerProps instead of raw hook data
   return (
     <Container maxWidth="lg">
       {/* Header */}
@@ -1022,64 +963,104 @@ const SportsWireScreen = () => {
             </IconButton>
             <Box sx={{ flex: 1 }}>
               <Typography variant="h4" fontWeight="bold">
-                SportsWire ({processedPlayerProps.length || 0} props)
+                SportsWire ({newsCount || 0} news)
               </Typography>
               <Typography variant="body1">
-                Player props, odds & analytics insights
+                Latest sports news and updates
               </Typography>
             </Box>
-            <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white' }}>
+            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching} sx={{ color: 'white' }}>
               <AccessTime />
             </IconButton>
           </Box>
           
+          {/* Sport Selector */}
           <Grid container spacing={2} sx={{ mt: 2 }}>
-            <Grid item xs={12} sm={4}>
-              <Button 
-                fullWidth
-                startIcon={<Analytics />}
-                onClick={() => setShowAnalyticsModal(true)}
-                sx={{ 
-                  justifyContent: 'flex-start',
-                  color: 'white',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                }}
-              >
-                Prop Analytics
-              </Button>
+            <Grid item xs={12} sm={6} md={4}>
+              <FormControl fullWidth sx={{ bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }}>
+                <InputLabel sx={{ color: 'white' }}>Sport</InputLabel>
+                <Select
+                  value={selectedSport}
+                  label="Sport"
+                  onChange={handleSportChange}
+                  sx={{ color: 'white' }}
+                >
+                  <MenuItem value="nba">NBA</MenuItem>
+                  <MenuItem value="nfl">NFL</MenuItem>
+                  <MenuItem value="mlb">MLB</MenuItem>
+                </Select>
+              </FormControl>
             </Grid>
-            <Grid item xs={12} sm={4}>
-              <Button 
-                fullWidth
-                startIcon={<TrendingUp />}
-                sx={{ 
-                  justifyContent: 'flex-start',
-                  color: 'white',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                }}
-              >
-                Trending Props
-              </Button>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <Button 
-                fullWidth
-                startIcon={<AutoAwesomeIcon />}
-                sx={{ 
-                  justifyContent: 'flex-start',
-                  color: 'white',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                }}
-              >
-                AI Insights
-              </Button>
+            <Grid item xs={12} sm={6} md={8}>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button 
+                  fullWidth
+                  startIcon={<Analytics />}
+                  onClick={() => setShowAnalyticsModal(true)}
+                  sx={{ 
+                    justifyContent: 'center',
+                    color: 'white',
+                    borderColor: 'white',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                  }}
+                  variant="outlined"
+                >
+                  Analytics
+                </Button>
+                <Button 
+                  fullWidth
+                  startIcon={<TrendingUp />}
+                  sx={{ 
+                    justifyContent: 'center',
+                    color: 'white',
+                    borderColor: 'white',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                  }}
+                  variant="outlined"
+                >
+                  Trending
+                </Button>
+                <Button 
+                  fullWidth
+                  startIcon={<SparklesIcon />}
+                  sx={{ 
+                    justifyContent: 'center',
+                    color: 'white',
+                    borderColor: 'white',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                  }}
+                  variant="outlined"
+                >
+                  AI Insights
+                </Button>
+              </Box>
             </Grid>
           </Grid>
         </Box>
       </Paper>
 
       {/* Loading/Refreshing Indicator */}
-      {(loading || refreshing) && <LinearProgress sx={{ mb: 2 }} />}
+      {(isLoading || isRefetching || refreshing) && <LinearProgress sx={{ mb: 2 }} />}
+
+      {/* Error State */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <Typography variant="body1" fontWeight="bold">
+            Failed to load news
+          </Typography>
+          <Typography variant="body2">
+            {error instanceof Error ? error.message : 'Unknown error'}
+          </Typography>
+          <Button 
+            variant="outlined" 
+            size="small" 
+            onClick={() => refetch()}
+            sx={{ mt: 1 }}
+          >
+            Try Again
+          </Button>
+        </Alert>
+      )}
 
       {/* Search Bar */}
       <Paper sx={{ p: 2, mb: 3 }}>
@@ -1142,7 +1123,7 @@ const SportsWireScreen = () => {
             {categories.find(c => c.id === selectedCategory)?.name} • {filteredProps.length} props
           </Typography>
           <Badge 
-            badgeContent={processedPlayerProps?.length || 0} 
+            badgeContent={newsCount || 0} 
             color="error"
             sx={{ cursor: 'pointer' }}
           >
@@ -1185,21 +1166,21 @@ const SportsWireScreen = () => {
           ))}
         </Box>
         
-        {/* Trending Cards - Safe iteration */}
+        {/* Trending Cards */}
         <Box sx={{ overflow: 'auto', whiteSpace: 'nowrap', pb: 1 }}>
-          {(Array.isArray(trendingProps) ? trendingProps : []).map(renderTrendingCard)}
+          {trendingProps.map(renderTrendingCard)}
         </Box>
       </Paper>
 
-      {/* Player Props */}
+      {/* Player Props / News */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Box>
             <Typography variant="h6" fontWeight="bold">
-              🎯 Player Props
+              📰 Sports News & Updates
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {filteredProps.length} props • {analyticsMetrics.hitRate}% hit rate
+              {filteredProps.length} items • Latest from {selectedSport.toUpperCase()}
             </Typography>
           </Box>
           <Chip 
@@ -1210,35 +1191,38 @@ const SportsWireScreen = () => {
           />
         </Box>
         
-        {loading || refreshing ? (
+        {isLoading || isRefetching || refreshing ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
-            <Typography sx={{ ml: 2 }}>Loading player props...</Typography>
+            <Typography sx={{ ml: 2 }}>Loading sports news...</Typography>
           </Box>
         ) : filteredProps.length > 0 ? (
-          // Safe iteration with Array.isArray check
-          (Array.isArray(filteredProps) ? filteredProps : []).map(renderPropCard)
+          filteredProps.map(renderPropCard)
         ) : (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Newspaper sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
-              No props found
+              No news available
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {searchQuery ? 'Try a different search term' : 'Check back soon for new props'}
+              {searchQuery ? 'Try a different search term' : `No news available for ${selectedSport.toUpperCase()}`}
             </Typography>
-            {searchQuery && (
+            {searchQuery ? (
               <Button onClick={() => setSearchQuery('')}>
                 Clear Search
+              </Button>
+            ) : (
+              <Button onClick={handleRefresh} startIcon={<UpdateIcon />}>
+                Refresh
               </Button>
             )}
           </Box>
         )}
         
-        {!loading && !refreshing && filteredProps.length > 0 && (
+        {!isLoading && !isRefetching && !refreshing && filteredProps.length > 0 && (
           <Box sx={{ textAlign: 'center', py: 3 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Showing {filteredProps.length} of {processedPlayerProps?.length || 0} props
+              Showing {filteredProps.length} of {newsCount || 0} news items
             </Typography>
             <Button 
               startIcon={<Analytics />}

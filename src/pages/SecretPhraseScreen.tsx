@@ -1,21 +1,12 @@
 // src/pages/SecretPhraseScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Container,
   Typography,
   Box,
   Card,
   CardContent,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Chip,
-  List,
-  ListItem,
-  ListItemText,
-  CircularProgress,
-  Alert,
-  AlertTitle,
   Grid,
   Paper,
   Button,
@@ -23,170 +14,115 @@ import {
   TextField,
   InputAdornment,
   Divider,
-  Avatar,
   CardActions,
-  alpha,
-  useTheme
+  Alert,
+  AlertTitle,
+  CircularProgress,
+  LinearProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Tooltip
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
   Psychology as PsychologyIcon,
   Lightbulb as LightbulbIcon,
   CopyAll as CopyIcon,
-  Key as KeyIcon,
   Refresh as RefreshIcon,
-  AutoAwesome as SparklesIcon,
   CheckCircle as CheckCircleIcon,
-  Warning as WarningIcon,
-  Close as CloseIcon,
-  Book as BookIcon,
-  Lock as LockIcon
+  Visibility as VisibilityIcon,
+  TrendingUp as TrendingUpIcon,
+  Lock as LockIcon,
+  SportsBasketball as BasketballIcon,
+  SportsFootball as FootballIcon,
+  ContentCopy as ContentCopyIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
+import { format } from 'date-fns';
 
-// Mock data for fallback
-const MOCK_PHRASES = [
-  {
-    id: '1',
-    category: 'Betting Terminology',
-    phrases: [
-      { term: 'Sharp Money', definition: 'Money from professional bettors', example: 'When sharp money comes in on the underdog, the line often moves' },
-      { term: 'Square', definition: 'Recreational or casual bettor', example: 'Squares often bet on favorites and popular teams' },
-      { term: 'Juice/Vig', definition: 'Commission charged by the sportsbook', example: '-110 means you bet $110 to win $100' },
-      { term: 'Steam Move', definition: 'Rapid line movement from heavy betting', example: 'The line moved from -3 to -5 due to steam' },
-      { term: 'Middle', definition: 'Betting both sides to win regardless', example: 'Betting +3.5 and -2.5 creates a middle opportunity' }
-    ]
-  },
-  {
-    id: '2',
-    category: 'NBA Analytics',
-    phrases: [
-      { term: 'PACE', definition: 'Possessions per 48 minutes', example: 'Teams with high PACE tend to score more points' },
-      { term: 'TS%', definition: 'True Shooting Percentage', example: 'Accounts for 2PT, 3PT, and FT efficiency' },
-      { term: 'PER', definition: 'Player Efficiency Rating', example: 'Single-number measure of player productivity' },
-      { term: 'VORP', definition: 'Value Over Replacement Player', example: 'Measures total contribution vs replacement-level player' },
-      { term: 'BPM', definition: 'Box Plus/Minus', example: 'Box score estimate of points contributed per 100 possessions' }
-    ]
-  },
-  {
-    id: '3',
-    category: 'Bankroll Management',
-    phrases: [
-      { term: 'Unit', definition: 'Standard betting amount', example: '1 unit = 1% of total bankroll' },
-      { term: 'Kelly Criterion', definition: 'Optimal bet sizing formula', example: 'Calculates bet size based on edge and odds' },
-      { term: 'Risk of Ruin', definition: 'Probability of losing entire bankroll', example: 'Proper bet sizing reduces risk of ruin' },
-      { term: 'Stop Loss', definition: 'Maximum daily/weekly loss limit', example: 'Set a 5-unit stop loss to prevent chasing' },
-      { term: 'Win Rate', definition: 'Percentage of bets won', example: '55% win rate with -110 odds is profitable' }
-    ]
-  }
-];
+// Import the scraper hook
+import { useSecretPhrases } from '../hooks/useSportsQueries';
 
 const SecretPhraseScreen = () => {
-  const theme = useTheme();
-  const [phrases, setPhrases] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredPhrases, setFilteredPhrases] = useState<any[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const fetchSecretPhrases = async () => {
-    console.log('🔍 Fetching secret phrases...');
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
-      const response = await fetch(`${apiBase}/api/secret/phrases`);
-      const data = await response.json();
-      
-      console.log('✅ Secret phrases response:', data);
-      
-      if (data.success && data.phrases) {
-        console.log(`✅ Using REAL secret phrases: ${data.phrases.length} categories`);
-        
-        // The API returns categories with nested phrases
-        const transformed = data.phrases.map((category: any) => ({
-          id: category.id,
-          category: category.category,
-          phrases: category.phrases || []
-        }));
-        
-        setPhrases(transformed);
-        setFilteredPhrases(transformed);
-        
-        window._secretPhrasesDebug = {
-          rawApiResponse: data,
-          transformedPhrases: transformed,
-          timestamp: new Date().toISOString()
-        };
-      } else {
-        throw new Error(data.message || 'Failed to load secret phrases');
-      }
-    } catch (error: any) {
-      console.error('❌ Secret phrases error:', error);
-      setError(error.message);
-      // Fallback to mock data
-      setPhrases(MOCK_PHRASES);
-      setFilteredPhrases(MOCK_PHRASES);
-    } finally {
-      setLoading(false);
+  // Use the scraper hook
+  const {
+    data: phrasesData,
+    isLoading,
+    error,
+    refetch,
+    isRefetching
+  } = useSecretPhrases();
+
+  const phrases = phrasesData?.phrases || [];
+  const sources = phrasesData?.sources || ['mock'];
+
+  // Filter and search logic
+  const filteredByCategory = selectedCategory === 'all'
+    ? phrases
+    : phrases.filter((phrase: any) => phrase.category === selectedCategory);
+
+  const filteredPhrases = searchQuery
+    ? filteredByCategory.filter((phrase: any) =>
+        phrase.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        phrase.source.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : filteredByCategory;
+
+  const handleRefresh = () => {
+    refetch();
+  };
+
+  const handleCopyPhrase = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const getCategoryIcon = (category: string) => {
+    switch (category) {
+      case 'insider_tip': return <VisibilityIcon />;
+      case 'expert_prediction': return <TrendingUpIcon />;
+      case 'ai_insight': return <LockIcon />;
+      default: return <LightbulbIcon />;
     }
   };
 
-  useEffect(() => {
-    fetchSecretPhrases();
-  }, []);
-
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      setFilteredPhrases(phrases);
-      return;
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'insider_tip': return 'primary';
+      case 'expert_prediction': return 'success';
+      case 'ai_insight': return 'warning';
+      default: return 'default';
     }
+  };
 
-    const lowerQuery = query.toLowerCase().trim();
-    const filtered = phrases.map(category => {
-      const filteredPhrases = category.phrases.filter((phrase: any) => 
-        phrase.term.toLowerCase().includes(lowerQuery) ||
-        phrase.definition.toLowerCase().includes(lowerQuery)
-      );
-      
-      if (filteredPhrases.length > 0) {
-        return {
-          ...category,
-          phrases: filteredPhrases
-        };
-      }
-      return null;
-    }).filter(Boolean);
-
-    setFilteredPhrases(filtered);
+  const getConfidenceColor = (confidence: number) => {
+    if (confidence >= 85) return 'success';
+    if (confidence >= 70) return 'warning';
+    return 'error';
   };
 
   const getCategories = () => {
-    const categories = ['All', ...phrases.map(cat => cat.category)];
-    return Array.from(new Set(categories));
+    const categories = new Set(phrases.map((p: any) => p.category));
+    return ['all', ...Array.from(categories)];
   };
 
-  const handleCategorySelect = (category: string) => {
-    setSelectedCategory(category);
-    if (category === 'All') {
-      setFilteredPhrases(phrases);
-    } else {
-      const filtered = phrases.filter(cat => cat.category === category);
-      setFilteredPhrases(filtered);
-    }
-  };
-
-  if (loading) {
+  if (isLoading) {
     return (
       <Container>
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
           <CircularProgress />
-          <Typography sx={{ ml: 2 }}>Loading secret phrases...</Typography>
+          <Typography sx={{ ml: 2 }}>
+            {phrasesData?.scraped === false ? 'Loading demo data...' : 'Scraping insights...'}
+          </Typography>
         </Box>
       </Container>
     );
@@ -197,8 +133,8 @@ const SecretPhraseScreen = () => {
       <Container>
         <Alert severity="error" sx={{ mb: 3 }}>
           <AlertTitle>Error Loading Secret Phrases</AlertTitle>
-          {error}
-          <Button onClick={fetchSecretPhrases} sx={{ mt: 1 }}>Retry</Button>
+          {error instanceof Error ? error.message : 'Failed to load insights'}
+          <Button onClick={handleRefresh} sx={{ mt: 1 }}>Retry</Button>
         </Alert>
       </Container>
     );
@@ -220,25 +156,40 @@ const SecretPhraseScreen = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <PsychologyIcon fontSize="large" />
             <Typography variant="h4" fontWeight="bold">
-              Secret Phrases & Terminology
+              Secret Phrases & Insights
             </Typography>
           </Box>
           <Box />
         </Box>
 
         <Typography variant="body1" color="text.secondary" align="center" sx={{ mb: 4 }}>
-          Insider terminology used by professional bettors and analysts
+          Insider tips, expert predictions, and AI-powered insights for sports betting
         </Typography>
+
+        {/* Status Alert */}
+        {phrasesData && (
+          <Alert 
+            severity={phrasesData.scraped ? "success" : "info"}
+            sx={{ mb: 3 }}
+          >
+            <Typography variant="body2">
+              {phrasesData.scraped 
+                ? `✅ Live insights scraped from ${sources.join(', ')}`
+                : '⚠️ Using demo data (scraping unavailable)'}
+              {phrasesData.timestamp && ` • Updated ${format(new Date(phrasesData.timestamp), 'PPpp')}`}
+            </Typography>
+          </Alert>
+        )}
 
         {/* Search and Filter Section */}
         <Paper sx={{ p: 3, mb: 4 }}>
           <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={8}>
+            <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                placeholder="Search terms or definitions..."
+                placeholder="Search insights or sources..."
                 value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -248,155 +199,241 @@ const SecretPhraseScreen = () => {
                 }}
               />
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth>
+                <InputLabel>Category</InputLabel>
+                <Select
+                  value={selectedCategory}
+                  label="Category"
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                >
+                  {getCategories().map((category) => (
+                    <MenuItem key={category} value={category}>
+                      {category === 'all' ? 'All Categories' : category.replace('_', ' ').toUpperCase()}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={3}>
               <Button
                 fullWidth
                 variant="outlined"
                 startIcon={<RefreshIcon />}
-                onClick={fetchSecretPhrases}
+                onClick={handleRefresh}
+                disabled={isLoading || isRefetching}
               >
-                Refresh Terms
+                {isRefetching ? 'Refreshing...' : 'Refresh Insights'}
               </Button>
             </Grid>
           </Grid>
           
-          {/* Category Filters */}
-          {phrases.length > 0 && (
-            <Box sx={{ mt: 3, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {getCategories().map((category) => (
-                <Chip
-                  key={category}
-                  label={category}
-                  onClick={() => handleCategorySelect(category)}
-                  color={selectedCategory === category ? 'primary' : 'default'}
-                  variant={selectedCategory === category ? 'filled' : 'outlined'}
-                />
-              ))}
-            </Box>
-          )}
+          {/* Source Badges */}
+          <Box sx={{ mt: 3, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {sources.includes('espn') && (
+              <Chip
+                icon={<BasketballIcon />}
+                label="ESPN"
+                size="small"
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            {sources.includes('sportsline') && (
+              <Chip
+                icon={<FootballIcon />}
+                label="SportsLine"
+                size="small"
+                color="success"
+                variant="outlined"
+              />
+            )}
+            {sources.includes('ai') && (
+              <Chip
+                icon={<LockIcon />}
+                label="AI Analysis"
+                size="small"
+                color="warning"
+                variant="outlined"
+              />
+            )}
+            {sources.includes('mock') && (
+              <Chip
+                label="Demo Data"
+                size="small"
+                color="default"
+                variant="outlined"
+              />
+            )}
+          </Box>
         </Paper>
 
-        {/* Secret Phrases Content */}
+        {/* Progress for Refetching */}
+        {isRefetching && (
+          <Box sx={{ mb: 3 }}>
+            <LinearProgress />
+            <Typography variant="body2" sx={{ mt: 1, textAlign: 'center' }}>
+              Updating insights...
+            </Typography>
+          </Box>
+        )}
+
+        {/* Insights Grid */}
         {filteredPhrases.length === 0 ? (
           <Paper sx={{ p: 4, textAlign: 'center' }}>
             <PsychologyIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            {searchQuery ? (
+            {searchQuery || selectedCategory !== 'all' ? (
               <>
                 <Typography variant="h6" gutterBottom>
-                  No terms found
+                  No insights found
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Try a different search or filter
+                  Try a different search or category filter
                 </Typography>
               </>
             ) : (
               <>
                 <Typography variant="h6" gutterBottom>
-                  No secret phrases available
+                  No insights available
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Check back for new terminology updates
+                  Try refreshing to load new insights
                 </Typography>
               </>
             )}
           </Paper>
         ) : (
-          <Box>
-            {filteredPhrases.map((category) => (
-              <Accordion key={category.id} sx={{ mb: 3 }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                    <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                      {category.category}
+          <Grid container spacing={3}>
+            {filteredPhrases.map((phrase: any) => (
+              <Grid item xs={12} sm={6} md={4} key={phrase.id}>
+                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <CardContent sx={{ flexGrow: 1 }}>
+                    {/* Phrase Header */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                      <Box>
+                        <Chip
+                          icon={getCategoryIcon(phrase.category)}
+                          label={phrase.category.replace('_', ' ').toUpperCase()}
+                          color={getCategoryColor(phrase.category)}
+                          size="small"
+                          sx={{ mb: 1 }}
+                        />
+                        <Typography variant="caption" color="text.secondary" display="block">
+                          {phrase.source}
+                        </Typography>
+                      </Box>
+                      
+                      <Box sx={{ textAlign: 'right' }}>
+                        <Chip
+                          label={`${phrase.confidence}%`}
+                          color={getConfidenceColor(phrase.confidence)}
+                          size="small"
+                          variant="outlined"
+                        />
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                          Confidence
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    {/* Phrase Text */}
+                    <Typography variant="body1" sx={{ 
+                      fontStyle: 'italic',
+                      p: 2,
+                      backgroundColor: 'action.hover',
+                      borderRadius: 1,
+                      mb: 2
+                    }}>
+                      "{phrase.text}"
                     </Typography>
-                    <Chip 
-                      label={`${category.phrases.length} terms`}
-                      size="small"
-                    />
-                  </Box>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Grid container spacing={3}>
-                    {category.phrases.map((phrase: any, index: number) => (
-                      <Grid item xs={12} sm={6} md={4} key={index}>
-                        <Card sx={{ height: '100%' }}>
-                          <CardContent>
-                            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                              <Avatar sx={{ bgcolor: alpha('#8b5cf6', 0.1), color: '#8b5cf6', mr: 2 }}>
-                                <LightbulbIcon />
-                              </Avatar>
-                              <Typography variant="h6" fontWeight="bold">
-                                {phrase.term}
-                              </Typography>
-                            </Box>
-                            
-                            <Typography variant="body2" color="text.secondary" paragraph>
-                              {phrase.definition}
-                            </Typography>
-                            
-                            {phrase.example && (
-                              <>
-                                <Divider sx={{ my: 1 }} />
-                                <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                                  Example: {phrase.example}
-                                </Typography>
-                              </>
-                            )}
-                          </CardContent>
-                          <CardActions sx={{ p: 2, pt: 0 }}>
-                            <Button
-                              size="small"
-                              startIcon={<CopyIcon />}
-                              onClick={() => navigator.clipboard.writeText(phrase.term)}
-                            >
-                              Copy Term
-                            </Button>
-                          </CardActions>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-                </AccordionDetails>
-              </Accordion>
+
+                    {/* Metadata */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="caption" color="text.secondary">
+                        {phrase.scraped_at && format(new Date(phrase.scraped_at), 'MMM d, h:mm a')}
+                      </Typography>
+                      
+                      <Tooltip title={copiedId === phrase.id ? "Copied!" : "Copy insight"}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleCopyPhrase(phrase.text, phrase.id)}
+                        >
+                          {copiedId === phrase.id ? <CheckCircleIcon color="success" /> : <ContentCopyIcon />}
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </CardContent>
+
+                  {/* URL Link if Available */}
+                  {phrase.url && (
+                    <>
+                      <Divider />
+                      <CardActions>
+                        <Button 
+                          size="small" 
+                          href={phrase.url.startsWith('http') ? phrase.url : `https://${phrase.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          startIcon={<VisibilityIcon />}
+                        >
+                          View Source
+                        </Button>
+                      </CardActions>
+                    </>
+                  )}
+                </Card>
+              </Grid>
             ))}
-          </Box>
+          </Grid>
         )}
 
-        {/* Stats Card */}
+        {/* Stats Footer */}
         {phrases.length > 0 && (
           <Grid container spacing={3} sx={{ mb: 4, mt: 4 }}>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={6} sm={3}>
               <Card>
                 <CardContent sx={{ textAlign: 'center' }}>
                   <Typography variant="h3" color="primary" gutterBottom>
                     {phrases.length}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
+                    Total Insights
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="success" gutterBottom>
+                    {Math.round(phrases.reduce((acc: number, p: any) => acc + p.confidence, 0) / phrases.length)}%
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Avg Confidence
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="warning" gutterBottom>
+                    {new Set(phrases.map((p: any) => p.source)).size}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Sources
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h3" color="info" gutterBottom>
+                    {new Set(phrases.map((p: any) => p.category)).size}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
                     Categories
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography variant="h3" color="secondary" gutterBottom>
-                    {phrases.reduce((total, cat) => total + cat.phrases.length, 0)}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Terms
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography variant="h3" color="success.main" gutterBottom>
-                    📚
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Expert Knowledge
                   </Typography>
                 </CardContent>
               </Card>

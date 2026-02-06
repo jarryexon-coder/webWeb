@@ -1,0 +1,128 @@
+src/pages/DailyPicksScreen.tsx:146:  // Use the custom hook for data fetching - REPLACED old state
+src/pages/DailyPicksScreen.tsx:147:  const { data: apiPicks, loading: apiLoading, error: apiError, refetch } = useDailyPicks();
+src/pages/DailyPicksScreen.tsx:232:  // Updated handleRefresh function to use hook's refetch
+src/pages/DailyPicksScreen.tsx:237:      await refetch();
+src/pages/DailyPicksScreen.tsx:814:      {import.meta.env.DEV && (
+src/pages/MatchAnalyticsScreen.tsx:206:  // Add this fetch function near your existing useEffect
+src/pages/MatchAnalyticsScreen.tsx:207:  const fetchAnalyticsData = async () => {
+src/pages/MatchAnalyticsScreen.tsx:209:      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
+src/pages/MatchAnalyticsScreen.tsx:214:      const response = await fetch(`${apiBaseUrl}/api/${sport}/analytics`, {
+src/pages/MatchAnalyticsScreen.tsx:239:      console.error(`❌ Failed to fetch ${selectedSport} analytics, using mock:`, error);
+src/pages/MatchAnalyticsScreen.tsx:249:    fetchAnalyticsData();
+src/pages/MatchAnalyticsScreen.tsx:277:      await fetchAnalyticsData();
+src/pages/KalshiPredictionsScreen.tsx:539:    refetch 
+src/pages/KalshiPredictionsScreen.tsx:626:  // ✅ Updated refresh function to use hook's refetch
+src/pages/KalshiPredictionsScreen.tsx:631:      await refetch();
+src/pages/KalshiPredictionsScreen.tsx:867:      {import.meta.env.DEV && (
+src/pages/PredictionsOutcomeScreen.tsx:88:// Inside your component, replace fetch logic with:
+src/pages/SportsWireScreen.tsx:80:  globalThis.__DEV__ = process.env.NODE_ENV === 'development';
+src/pages/SportsWireScreen.tsx:286:// Inside your component, replace fetch logic with:
+src/pages/SportsWireScreen.tsx:561:    // Force refresh by triggering a re-fetch
+src/pages/SecretPhraseScreen.tsx:95:  const fetchSecretPhrases = async () => {
+src/pages/SecretPhraseScreen.tsx:101:      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
+src/pages/SecretPhraseScreen.tsx:102:      const response = await fetch(`${apiBase}/api/secret/phrases`);
+src/pages/SecretPhraseScreen.tsx:140:    fetchSecretPhrases();
+src/pages/SecretPhraseScreen.tsx:201:          <Button onClick={fetchSecretPhrases} sx={{ mt: 1 }}>Retry</Button>
+src/pages/SecretPhraseScreen.tsx:256:                onClick={fetchSecretPhrases}
+src/pages/PlayerStatsScreen.tsx:613:  const fetchPlayerStats = async () => {
+src/pages/PlayerStatsScreen.tsx:615:      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
+src/pages/PlayerStatsScreen.tsx:618:      const response = await fetch(`${apiBaseUrl}/api/players`, {
+src/pages/PlayerStatsScreen.tsx:641:      console.error('❌ Failed to fetch player stats, using mock data:', error);
+src/pages/PlayerStatsScreen.tsx:655:    fetchPlayerStats();
+src/pages/PlayerStatsScreen.tsx:660:    fetchPlayerStats();
+src/pages/LiveGamesScreen.tsx:80:    console.log('API Base URL:', import.meta.env.VITE_API_BASE);
+src/pages/LiveGamesScreen.tsx:149:  // Replace your entire fetchGames function with this:
+src/pages/LiveGamesScreen.tsx:156:      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
+src/pages/LiveGamesScreen.tsx:161:        const response = await fetch(`${apiBaseUrl}/api/games`, {
+src/pages/LiveGamesScreen.tsx:258:      } catch (fetchError) {
+src/pages/LiveGamesScreen.tsx:259:        console.error('❌ Backend fetch failed, using mock data:', fetchError);
+src/pages/LiveGamesScreen.tsx:260:        throw new Error('Backend fetch failed');
+src/pages/LiveGamesScreen.tsx:267:      // ONLY use mock data if the fetch completely fails
+src/pages/LiveGamesScreen.tsx:946:              Source: {import.meta.env.VITE_API_BASE ? 'Backend API' : 'Demo Data'}
+src/pages/LiveGamesScreen.tsx:1003:          Backend URL: {import.meta.env.VITE_API_BASE || 'http://localhost:5001'}
+src/pages/ParlayArchitectScreen.tsx:70:// Custom hooks for data fetching
+src/pages/ParlayArchitectScreen.tsx:141:  // Use ref to prevent multiple fetches (from File 1)
+src/pages/ParlayArchitectScreen.tsx:143:  const fetchCountRef = useRef(0);
+src/pages/ParlayArchitectScreen.tsx:161:    refetch: refetchGames,
+src/pages/ParlayArchitectScreen.tsx:172:    refetch: refetchProps
+src/pages/ParlayArchitectScreen.tsx:201:  // UPDATED fetchParlaySuggestions with improvements from File 1
+src/pages/ParlayArchitectScreen.tsx:202:  const fetchParlaySuggestions = useCallback(async () => {
+src/pages/ParlayArchitectScreen.tsx:203:    // Prevent multiple simultaneous fetches
+src/pages/ParlayArchitectScreen.tsx:205:      console.log('⏳ Already fetching parlays, skipping');
+src/pages/ParlayArchitectScreen.tsx:209:    fetchCountRef.current++;
+src/pages/ParlayArchitectScreen.tsx:210:    console.log(`📡 [ParlayArchitectScreen] Fetch #${fetchCountRef.current}`, new Date().toISOString());
+src/pages/ParlayArchitectScreen.tsx:217:      const response = await fetch(`${API_BASE}/api/parlay/suggestions`);
+src/pages/ParlayArchitectScreen.tsx:261:      console.error('❌ Error fetching parlays:', error);
+src/pages/ParlayArchitectScreen.tsx:271:    fetchParlaySuggestions();
+src/pages/ParlayArchitectScreen.tsx:272:  }, [fetchParlaySuggestions]);
+src/pages/ParlayArchitectScreen.tsx:282:        fetchParlaySuggestions();
+src/pages/ParlayArchitectScreen.tsx:287:  }, [lastRefresh, fetchParlaySuggestions]);
+src/pages/ParlayArchitectScreen.tsx:406:          fetchCount: fetchCountRef.current,
+src/pages/ParlayArchitectScreen.tsx:455:                • Fetch Count: {fetchCountRef.current}
+src/pages/ParlayArchitectScreen.tsx:489:                  fetchParlaySuggestions();
+src/pages/ParlayArchitectScreen.tsx:490:                  refetchGames();
+src/pages/ParlayArchitectScreen.tsx:781:              onClick={() => fetchParlaySuggestions()} 
+src/pages/ParlayArchitectScreen.tsx:808:        <Button size="small" sx={{ ml: 2 }} onClick={fetchParlaySuggestions}>
+src/pages/NewsDeskScreen.tsx:194:  const fetchNews = async () => {
+src/pages/NewsDeskScreen.tsx:196:      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
+src/pages/NewsDeskScreen.tsx:199:      const response = await fetch(`${apiBaseUrl}/api/news`, {
+src/pages/NewsDeskScreen.tsx:228:      console.error('❌ Failed to fetch news, using mock data:', error);
+src/pages/NewsDeskScreen.tsx:252:  const fetchAllData = async (isRefresh = false) => {
+src/pages/NewsDeskScreen.tsx:257:      await fetchNews();
+src/pages/NewsDeskScreen.tsx:279:      console.error('Error fetching data:', error);
+src/pages/NewsDeskScreen.tsx:286:  // Update useEffect to use fetchAllData
+src/pages/NewsDeskScreen.tsx:289:    fetchAllData();
+src/pages/NewsDeskScreen.tsx:338:    fetchAllData(true);
+src/pages/FantasyHubScreen.tsx:273:      const response = await fetch('http://localhost:5001/api/fantasy/teams');
+src/pages/FantasyHubScreen.tsx:398:  const API_BASE_URL = import.meta.env?.VITE_API_BASE || 'http://localhost:5001';
+src/pages/FantasyHubScreen.tsx:401:  const fetchFantasyTeams = useCallback(async () => {
+src/pages/FantasyHubScreen.tsx:402:    console.log('🔍 [fetchFantasyTeams] Fetching fantasy teams...');
+src/pages/FantasyHubScreen.tsx:421:          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+src/pages/FantasyHubScreen.tsx:531:      console.error('❌ Error fetching fantasy teams:', error);
+src/pages/FantasyHubScreen.tsx:548:  const fetchPlayerData = useCallback(async () => {
+src/pages/FantasyHubScreen.tsx:549:    console.log('🔍 [fetchPlayerData] Fetching player data...');
+src/pages/FantasyHubScreen.tsx:567:          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+src/pages/FantasyHubScreen.tsx:710:      console.error('❌ Error fetching player data:', error);
+src/pages/FantasyHubScreen.tsx:866:        fetchFantasyTeams(),
+src/pages/FantasyHubScreen.tsx:867:        fetchPlayerData()
+src/pages/FantasyHubScreen.tsx:901:  }, [fetchFantasyTeams, fetchPlayerData, playerData, applyValueFiltering, sortByValueScore]);
+src/pages/FantasyHubScreen.tsx:1035:          fetchSnakeDraft(position);
+src/pages/FantasyHubScreen.tsx:1037:          fetchTurnDraft(position);
+src/pages/FantasyHubScreen.tsx:1121:  const fetchSnakeDraft = async (position: number) => {
+src/pages/FantasyHubScreen.tsx:1148:  const fetchTurnDraft = async (position: number) => {
+src/pages/FantasyHubScreen.tsx:2076:            <Button color="inherit" size="small" onClick={fetchPlayerData}>
+src/pages/FantasyHubScreen.tsx:2134:            Player data is not available. The system is trying to fetch real player statistics from the API.
+src/pages/FantasyHubScreen.tsx:2167:                onClick={() => fetchSnakeDraft(12)}
+src/pages/FantasyHubScreen.tsx:2178:                onClick={() => fetchTurnDraft(33)}
+src/pages/FantasyHubScreen.tsx:2189:                onClick={() => fetchSnakeDraft(1)}
+src/pages/FantasyHubScreen.tsx:2200:                onClick={() => fetchTurnDraft(10)}
+src/pages/PrizePicksScreen.tsx:165:  const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:5001';
+src/pages/PrizePicksScreen.tsx:641:  // ===== Updated fetchPrizePicksData function =====
+src/pages/PrizePicksScreen.tsx:642:  const fetchPrizePicksData = async () => {
+src/pages/PrizePicksScreen.tsx:649:      const response = await fetch(
+src/pages/PrizePicksScreen.tsx:659:      console.log('🔍 [fetchPrizePicksData] API Response:', {
+src/pages/PrizePicksScreen.tsx:686:      console.error('❌ Error fetching PrizePicks data:', error);
+src/pages/PrizePicksScreen.tsx:940:        const response = await fetch(`${API_BASE_URL}${endpoint.path}?sport=${sport}`);
+src/pages/PrizePicksScreen.tsx:1166:  const fetchPrizePicksAnalytics = async () => {
+src/pages/PrizePicksScreen.tsx:1168:      const response = await fetch(`${API_BASE_URL}/api/prizepicks/analytics`);
+src/pages/PrizePicksScreen.tsx:1171:        throw new Error(`Failed to fetch analytics: ${response.status} ${response.statusText}`);
+src/pages/PrizePicksScreen.tsx:1175:      console.log('📈 [fetchPrizePicksAnalytics] Analytics response:', {
+src/pages/PrizePicksScreen.tsx:1190:      console.error('❌ Error fetching PrizePicks analytics:', err);
+src/pages/PrizePicksScreen.tsx:1196:    console.log('🚀 PrizePicksScreen mounted, fetching data...');
+src/pages/PrizePicksScreen.tsx:1198:      await fetchPrizePicksData();
+src/pages/PrizePicksScreen.tsx:1199:      await fetchPrizePicksAnalytics();
+src/pages/PrizePicksScreen.tsx:1204:    const interval = setInterval(fetchPrizePicksData, 120000);
+src/pages/PrizePicksScreen.tsx:1228:    await fetchPrizePicksData();
+src/pages/PrizePicksScreen.tsx:1229:    await fetchPrizePicksAnalytics();
+src/pages/NFLAnalyticsScreen.tsx:18:    const fetchNFLStandings = async () => {
+src/pages/NFLAnalyticsScreen.tsx:20:        const apiUrl = process.env.VITE_API_URL || 'http://localhost:5001';
+src/pages/NFLAnalyticsScreen.tsx:23:        const response = await fetch(`${apiUrl}/api/nfl/standings`);
+src/pages/NFLAnalyticsScreen.tsx:71:        console.error('Error fetching NFL standings:', err);
+src/pages/NFLAnalyticsScreen.tsx:78:    fetchNFLStandings();
+src/pages/AdvancedAnalyticsScreen.tsx:119:  const { data: apiAnalytics, loading: apiLoading, error: apiError, refetch: refetchAnalytics } = useAdvancedAnalytics();
+src/pages/AdvancedAnalyticsScreen.tsx:120:  const { data: playerTrends, loading: trendsLoading, error: trendsError, refetch: refetchTrends } = usePlayerTrends();
+src/pages/AdvancedAnalyticsScreen.tsx:566:  // ✅ Updated refresh function to use hooks' refetch functions
+src/pages/AdvancedAnalyticsScreen.tsx:572:        refetchAnalytics(),
+src/pages/AdvancedAnalyticsScreen.tsx:573:        refetchTrends()
+src/pages/AdvancedAnalyticsScreen.tsx:579:  }, [refetchAnalytics, refetchTrends]);
+src/pages/AdvancedAnalyticsScreen.tsx:1570:  const debugInfo = import.meta.env.DEV && (

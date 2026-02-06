@@ -1,5 +1,5 @@
-// src/pages/ParlayArchitectScreen.tsx - COMPLETE FIX
-import React, { useState, useEffect } from 'react';
+// src/pages/ParlayArchitectScreen.tsx - UPDATED WITH HOOKS
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -16,11 +16,6 @@ import {
   AlertTitle,
   Paper,
   Avatar,
-  Divider,
-  useTheme,
-  Badge,
-  Modal,
-  Fade,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -31,17 +26,21 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  ListItemSecondaryAction
+  TextField,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  Slider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Collapse
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp as TrendingUpIcon,
   AttachMoney as CashIcon,
-  EmojiEvents as TrophyIcon,
   Refresh as RefreshIcon,
   Build as BuildIcon,
   ArrowBack as ArrowBackIcon,
@@ -50,375 +49,515 @@ import {
   SportsFootball as FootballIcon,
   SportsHockey as HockeyIcon,
   SportsBaseball as BaseballIcon,
-  SportsSoccer as SoccerIcon,
   Merge as MergeIcon,
   AddCircle as AddCircleIcon,
-  Delete as DeleteIcon,
-  Close as CloseIcon,
+  Search as SearchIcon,
   CheckCircle as CheckCircleIcon,
   Layers as LayersIcon,
-  Speed as SpeedometerIcon,
-  Wallet as WalletIcon,
-  Sync as SyncIcon,
-  Search as SearchIcon,
-  Whatshot as FlameIcon,
-  Timeline as TimelineIcon,
-  DarkMode as DarkModeIcon,
-  Gamepad as GamepadIcon,
-  Shield as ShieldIcon,
-  FilterList as FilterListIcon,
-  Shuffle as ShuffleIcon
+  Today as TodayIcon,
+  Schedule as ScheduleIcon,
+  Autorenew as AutorenewIcon,
+  ExpandMore as ExpandMoreIcon,
+  Clear as ClearIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  BugReport as BugReportIcon
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
+import { format, parseISO, isToday } from 'date-fns';
 
-// At the top of the file, add:
-import { useParlaySuggestions } from '../hooks/useSportsData';
+// Import the new hooks
+import { useParlaySuggestions, useOddsGames } from '../hooks/useBackendAPI';
 
-// Mock data for fallback
-const MOCK_PARLAY_SUGGESTIONS = Array.from({ length: 6 }, (_, i) => {
-  const sports = ['Mixed', 'NBA', 'NFL', 'MLB', 'NHL'];
-  const types = ['Cross-Sport Value', 'Multi-Sport Smash', 'Spread Mix', 'Player Props', 'Moneyline Mix'];
-  
-  return {
-    id: `parlay-${i + 1}`,
-    name: `${types[i % types.length]} Parlay ${i + 1}`,
-    sport: sports[i % sports.length],
-    legs: Array.from({ length: 3 }, (_, legIndex) => ({
-      id: `leg-${i}-${legIndex}`,
-      sport: ['NBA', 'NFL', 'MLB', 'NHL'][legIndex % 4],
-      pick: `Over ${Math.floor(Math.random() * 10) + 25}.5 Points`,
-      odds: ['-150', '-110', '+120', '+180'][Math.floor(Math.random() * 4)],
-      confidence: Math.floor(Math.random() * 20) + 70,
-      edge: `+${(3 + Math.random() * 7).toFixed(1)}%`,
-      analysis: 'Strong value play with positive expected value',
-      type: ['Points', 'Assists', 'Rebounds', 'Yards'][Math.floor(Math.random() * 4)],
-      keyStat: 'Player averaging strong performance vs opponent',
-      matchup: 'Featured matchup tonight'
-    })),
-    totalOdds: '+425',
-    stake: '$10',
-    potentialWin: '$42.50',
-    confidence: Math.floor(Math.random() * 30) + 70,
-    analysis: 'Diversified across sports with low correlation risk. Optimal balance of risk/reward.',
-    timestamp: 'Just generated',
-    expert: 'AI Parlay Architect'
-  };
-});
+// Types
+interface Game {
+  id: string;
+  sport_key: string;
+  sport_title: string;
+  commence_time: string;
+  home_team: string;
+  away_team: string;
+  bookmakers?: Array<{
+    key: string;
+    title: string;
+    last_update: string;
+    markets?: Array<{
+      key: string;
+      last_update: string;
+      outcomes?: Array<{
+        name: string;
+        price: number;
+        point?: number;
+      }>;
+    }>;
+  }>;
+}
 
-// Inside your component, replace fetch logic with:
+interface ParlaySuggestion {
+  id: string;
+  name: string;
+  sport: string;
+  type: string;
+  legs: Array<{
+    id: string;
+    gameId: string;
+    description: string;
+    odds: string;
+    confidence: number;
+    sport: string;
+    market: string;
+    outcome: string;
+  }>;
+  totalOdds: string;
+  confidence: number;
+  analysis: string;
+  timestamp: string;
+  isGenerated: boolean;
+  isToday: boolean;
+  source?: string;
+  confidence_level?: string;
+  expected_value?: string;
+}
+
+const API_BASE = 'https://pleasing-determination-production.up.railway.app';
+
 const ParlayArchitectScreen = () => {
   const navigate = useNavigate();
-  const theme = useTheme();
   
-  const { data: suggestions, loading, error } = useParlaySuggestions();
-  
-  const [selectedParlays, setSelectedParlays] = useState<any[]>([]);
-  const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+  // State management
+  const [filteredSuggestions, setFilteredSuggestions] = useState<ParlaySuggestion[]>([]);
+  const [selectedParlay, setSelectedParlay] = useState<ParlaySuggestion | null>(null);
   const [showBuildModal, setShowBuildModal] = useState(false);
-  const [selectedParlayToBuild, setSelectedParlayToBuild] = useState<any>(null);
-  const [analyticsMetrics] = useState({
-    totalParlays: 128,
-    winRate: '68.4%',
-    avgLegs: '2.7',
-    avgOdds: '+425',
-    bestParlay: '+1250',
-    multiSport: '42%'
-  });
-
-  const sportsData = [
-    { id: 'All', name: 'All Sports', icon: <TimelineIcon />, color: '#f59e0b' },
-    { id: 'NBA', name: 'NBA', icon: <BasketballIcon />, color: '#ef4444' },
-    { id: 'NFL', name: 'NFL', icon: <FootballIcon />, color: '#3b82f6' },
-    { id: 'NHL', name: 'NHL', icon: <HockeyIcon />, color: '#1e40af' },
-    { id: 'MLB', name: 'MLB', icon: <BaseballIcon />, color: '#10b981' },
+  const [showGeneratorModal, setShowGeneratorModal] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  
+  // Filter states
+  const [selectedSport, setSelectedSport] = useState('all');
+  const [selectedType, setSelectedType] = useState('all');
+  const [minConfidence, setMinConfidence] = useState(60);
+  const [maxLegs, setMaxLegs] = useState(5);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFilters, setShowFilters] = useState(true);
+  const [showTodaysGames, setShowTodaysGames] = useState(true);
+  const [dateFilter, setDateFilter] = useState('today');
+  
+  // Use custom hooks
+  const { 
+    data: parlayData, 
+    isLoading, 
+    error: parlayError, 
+    refetch: refetchParlays 
+  } = useParlaySuggestions(selectedSport, 4);
+  
+  const {
+    data: oddsData,
+    isLoading: oddsLoading,
+    error: oddsError,
+    refetch: refetchOdds
+  } = useOddsGames(selectedSport === 'all' ? undefined : selectedSport, dateFilter);
+  
+  const suggestions = parlayData?.suggestions || [];
+  const todaysGames = oddsData?.games || [];
+  
+  // Sport options based on available games
+  const SPORTS = [
+    { id: 'all', name: 'All Sports', icon: <MergeIcon />, color: '#f59e0b' },
+    { id: 'basketball_nba', name: 'NBA', icon: <BasketballIcon />, color: '#ef4444' },
+    { id: 'americanfootball_nfl', name: 'NFL', icon: <FootballIcon />, color: '#3b82f6' },
+    { id: 'icehockey_nhl', name: 'NHL', icon: <HockeyIcon />, color: '#1e40af' },
+    { id: 'baseball_mlb', name: 'MLB', icon: <BaseballIcon />, color: '#10b981' }
   ];
 
-  const handleBuildParlay = (parlay: any) => {
-    setSelectedParlayToBuild(parlay);
-    setShowBuildModal(true);
-  };
-
-  const getSportIcon = (sport: string) => {
-    switch(sport) {
-      case 'NBA': return <BasketballIcon />;
-      case 'NFL': return <FootballIcon />;
-      case 'NHL': return <HockeyIcon />;
-      case 'MLB': return <BaseballIcon />;
-      default: return <TimelineIcon />;
+  // Log usage on mount
+  useEffect(() => {
+    console.log('🏗️ ParlayArchitectScreen mounted');
+    return () => {
+      console.log('🏗️ ParlayArchitectScreen unmounted');
+    };
+  }, []);
+  
+  // Generate parlay from today's games
+  const generateParlayFromGames = useCallback(async (sport: string, numLegs: number) => {
+    if (todaysGames.length === 0) {
+      alert('No games available to generate parlays');
+      return;
     }
-  };
-
-  const getSportColor = (sport: string) => {
-    switch(sport) {
-      case 'NBA': return '#ef4444';
-      case 'NFL': return '#3b82f6';
-      case 'NHL': return '#1e40af';
-      case 'MLB': return '#10b981';
-      default: return '#f59e0b';
+    
+    setGenerating(true);
+    
+    try {
+      // Filter games by sport and today's date
+      const sportKey = sport === 'all' ? undefined : sport;
+      const filteredGames = todaysGames.filter((game: Game) => {
+        if (sportKey && game.sport_key !== sportKey) return false;
+        return isToday(parseISO(game.commence_time));
+      });
+      
+      if (filteredGames.length === 0) {
+        throw new Error(`No games found for ${sport}`);
+      }
+      
+      // Select random games
+      const selectedGames = [...filteredGames]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, Math.min(numLegs, filteredGames.length));
+      
+      // Build legs from selected games
+      const legs = selectedGames.map((game: Game, index: number) => {
+        const bookmaker = game.bookmakers?.find(b => b.key === 'draftkings') || game.bookmakers?.[0];
+        const market = bookmaker?.markets?.find(m => m.key === 'h2h') || bookmaker?.markets?.[0];
+        const outcome = market?.outcomes?.[0];
+        
+        return {
+          id: `leg-${Date.now()}-${index}`,
+          gameId: game.id,
+          description: `${game.away_team} @ ${game.home_team}`,
+          odds: outcome?.price ? (outcome.price > 0 ? `+${outcome.price}` : outcome.price.toString()) : '+100',
+          confidence: 65 + Math.floor(Math.random() * 20),
+          sport: game.sport_title,
+          market: market?.key || 'h2h',
+          outcome: outcome?.name || ''
+        };
+      });
+      
+      const newParlay: ParlaySuggestion = {
+        id: `generated-${Date.now()}`,
+        name: `${sport.replace('_', ' ')} Parlay`,
+        sport: legs.length > 1 ? 'Mixed' : sport,
+        type: 'Moneyline',
+        legs,
+        totalOdds: '+450',
+        confidence: Math.floor(legs.reduce((acc, leg) => acc + leg.confidence, 0) / legs.length),
+        analysis: 'AI-generated parlay based on today\'s matchups from The Odds API.',
+        timestamp: new Date().toISOString(),
+        isGenerated: true,
+        isToday: true
+      };
+      
+      setSelectedParlay(newParlay);
+      setShowBuildModal(true);
+      
+    } catch (error: any) {
+      console.error('Error generating parlay:', error);
+      alert(`Failed to generate parlay: ${error.message}`);
+    } finally {
+      setGenerating(false);
     }
-  };
+  }, [todaysGames]);
 
-  const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 80) return '#10b981';
-    if (confidence >= 70) return '#f59e0b';
-    return '#ef4444';
-  };
+  // Apply filters
+  useEffect(() => {
+    let filtered = [...suggestions];
+    
+    // Date filter
+    if (dateFilter === 'today') {
+      filtered = filtered.filter(p => p.isToday);
+    }
+    
+    // Sport filter
+    if (selectedSport !== 'all') {
+      filtered = filtered.filter(p => p.sport === selectedSport);
+    }
+    
+    // Type filter
+    if (selectedType !== 'all') {
+      filtered = filtered.filter(p => p.type === selectedType);
+    }
+    
+    // Confidence filter
+    filtered = filtered.filter(p => p.confidence >= minConfidence);
+    
+    // Max legs filter
+    filtered = filtered.filter(p => p.legs.length <= maxLegs);
+    
+    // Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(p => 
+        p.name.toLowerCase().includes(query) ||
+        p.analysis.toLowerCase().includes(query) ||
+        p.legs.some(leg => leg.description.toLowerCase().includes(query))
+      );
+    }
+    
+    setFilteredSuggestions(filtered);
+  }, [suggestions, selectedSport, selectedType, minConfidence, maxLegs, searchQuery, dateFilter]);
 
-  const AnalyticsDashboard = () => (
-    <Dialog 
-      open={showAnalyticsModal} 
-      onClose={() => setShowAnalyticsModal(false)}
-      maxWidth="md"
-      fullWidth
-    >
-      <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
-        Parlay Performance Analytics
-      </DialogTitle>
-      <DialogContent sx={{ pt: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          📊 Parlay Performance Metrics
-        </Typography>
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.winRate}
+// Debug Panel Component
+const DebugPanel = () => {
+  const [componentStats, setComponentStats] = useState<any>({});
+  
+  useEffect(() => {
+    const updateStats = () => {
+      const stats = {
+        'ParlayArchitectScreen': {
+          mountTime: new Date().toISOString(),
+          suggestionCount: suggestions.length,
+          filteredCount: filteredSuggestions.length,
+          todaysGamesCount: todaysGames?.length || 0,
+          lastRefresh: lastRefresh ? format(lastRefresh, 'h:mm:ss a') : 'Never'
+        }
+      };
+      setComponentStats(stats);
+    };
+    
+    updateStats();
+    const interval = setInterval(updateStats, 2000);
+    return () => clearInterval(interval);
+  }, [suggestions, filteredSuggestions, todaysGames, lastRefresh]);
+  
+  return (
+    <Collapse in={showDebugPanel}>
+      <Paper sx={{ 
+        p: 2, 
+        mb: 4, 
+        bgcolor: '#1e293b',
+        color: 'white',
+        borderRadius: 2
+      }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <BugReportIcon fontSize="small" />
+            <Typography variant="h6">Debug Panel</Typography>
+          </Box>
+          <Chip 
+            label="Dev Mode" 
+            size="small" 
+            sx={{ bgcolor: '#ef4444', color: 'white' }}
+          />
+        </Box>
+        
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
+              Component Stats
+            </Typography>
+            <Box sx={{ pl: 2 }}>
+              <Typography variant="body2">
+                • Suggestions: {suggestions.length}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Win Rate</Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={parseFloat(analyticsMetrics.winRate)} 
-                sx={{ mt: 1, bgcolor: '#10b98120', '& .MuiLinearProgress-bar': { bgcolor: '#10b981' } }}
-              />
-            </Paper>
+              <Typography variant="body2">
+                • Filtered: {filteredSuggestions.length}
+              </Typography>
+              <Typography variant="body2">
+                • Today's Games: {todaysGames?.length || 0}
+              </Typography>
+              <Typography variant="body2">
+                • Last Refresh: {lastRefresh ? format(lastRefresh, 'h:mm:ss a') : 'Never'}
+              </Typography>
+            </Box>
           </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.avgLegs}
+          
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
+              API Status
+            </Typography>
+            <Box sx={{ pl: 2 }}>
+              <Typography variant="body2">
+                • Parlay API: {parlayError ? '❌ Error' : '✅ Connected'}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Avg Legs</Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={(parseFloat(analyticsMetrics.avgLegs) / 5) * 100} 
-                sx={{ mt: 1, bgcolor: '#3b82f620', '& .MuiLinearProgress-bar': { bgcolor: '#3b82f6' } }}
-              />
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.avgOdds}
+              <Typography variant="body2">
+                • Odds API: {oddsError ? '❌ Error' : '✅ Connected'}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Avg Odds</Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.bestParlay}
+              <Typography variant="body2">
+                • Last Check: {new Date().toLocaleTimeString()}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Best Parlay</Typography>
-            </Paper>
+            </Box>
+            
+            <Box mt={2}>
+              <Button
+                size="small"
+                variant="outlined"
+                sx={{ color: 'white', borderColor: '#64748b', mr: 1 }}
+                onClick={() => {
+                  console.log('🔄 Manual debug refresh triggered');
+                  refetchParlays();
+                  refetchOdds();
+                }}
+              >
+                Force Refresh
+              </Button>
+            </Box>
           </Grid>
         </Grid>
         
-        <Typography variant="h6" gutterBottom>
-          🎯 Multi-Sport Performance
-        </Typography>
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-            <Typography variant="h5" fontWeight="bold" color="#f59e0b">
-              {analyticsMetrics.multiSport}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              of winning parlays
-            </Typography>
-          </Box>
-          <Typography variant="body2">
-            Multi-sport parlays have shown higher success rates due to reduced correlation risk.
-          </Typography>
-        </Paper>
-        
-        <Typography variant="h6" gutterBottom>
-          💡 Parlay Building Tips
-        </Typography>
-        <List>
-          <ListItem>
-            <CheckCircleIcon sx={{ color: '#10b981', mr: 2, fontSize: 16 }} />
-            <ListItemText primary="2-3 legs have highest success rate" />
-          </ListItem>
-          <ListItem>
-            <CheckCircleIcon sx={{ color: '#10b981', mr: 2, fontSize: 16 }} />
-            <ListItemText primary="Combine sports for better value" />
-          </ListItem>
-          <ListItem>
-            <CheckCircleIcon sx={{ color: '#10b981', mr: 2, fontSize: 16 }} />
-            <ListItemText primary="Balance high-probability with value picks" />
-          </ListItem>
-        </List>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setShowAnalyticsModal(false)}>Close Dashboard</Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  const BuildParlayModal = () => (
-    <Dialog 
-      open={showBuildModal} 
-      onClose={() => setShowBuildModal(false)}
-      maxWidth="sm"
-      fullWidth
-    >
-      <DialogTitle>
-        Build Parlay: {selectedParlayToBuild?.name}
-      </DialogTitle>
-      <DialogContent>
-        {selectedParlayToBuild && (
-          <>
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                Parlay Details
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">Sport</Typography>
-                  <Typography variant="body2">{selectedParlayToBuild.sport}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">Total Odds</Typography>
-                  <Typography variant="body2" fontWeight="bold">{selectedParlayToBuild.totalOdds}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">Confidence</Typography>
-                  <Typography variant="body2" color={getConfidenceColor(selectedParlayToBuild.confidence)}>
-                    {selectedParlayToBuild.confidence}%
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">Potential Win</Typography>
-                  <Typography variant="body2" color="success.main">{selectedParlayToBuild.potentialWin}</Typography>
-                </Grid>
-              </Grid>
-            </Box>
-            
-            <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-              Parlay Legs ({selectedParlayToBuild.legs?.length || 0})
-            </Typography>
-            <TableContainer component={Paper} sx={{ mb: 3 }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Sport</TableCell>
-                    <TableCell>Pick</TableCell>
-                    <TableCell>Odds</TableCell>
-                    <TableCell>Confidence</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {selectedParlayToBuild.legs?.map((leg: any, index: number) => (
-                    <TableRow key={leg.id || index}>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          {getSportIcon(leg.sport)}
-                          <Typography variant="caption">{leg.sport}</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>{leg.pick}</TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={leg.odds}
-                          size="small"
-                          sx={{ 
-                            bgcolor: leg.odds.startsWith('+') ? '#10b98120' : '#ef444420',
-                            color: leg.odds.startsWith('+') ? '#10b981' : '#ef4444'
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <LinearProgress 
-                          variant="determinate" 
-                          value={leg.confidence} 
-                          sx={{ 
-                            height: 6,
-                            borderRadius: 3,
-                            bgcolor: '#e2e8f0',
-                            '& .MuiLinearProgress-bar': {
-                              bgcolor: getConfidenceColor(leg.confidence)
-                            }
-                          }}
-                        />
-                        <Typography variant="caption" sx={{ ml: 1 }}>
-                          {leg.confidence}%
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            
-            {selectedParlayToBuild.analysis && (
-              <Paper sx={{ p: 2, mb: 3, bgcolor: '#f8fafc' }}>
-                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                  Analysis
-                </Typography>
-                <Typography variant="body2">
-                  {selectedParlayToBuild.analysis}
-                </Typography>
-              </Paper>
-            )}
-          </>
+        {parlayError && (
+          <Alert severity="error" sx={{ mt: 2, bgcolor: '#7f1d1d' }}>
+            <AlertTitle>API Error</AlertTitle>
+            {String(parlayError)}
+          </Alert>
         )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setShowBuildModal(false)}>Cancel</Button>
-        <Button 
-          variant="contained" 
-          onClick={() => {
-            alert('Parlay added to your bet slip!');
-            setShowBuildModal(false);
-          }}
-        >
-          Add to Bet Slip
-        </Button>
-      </DialogActions>
-    </Dialog>
+      </Paper>
+    </Collapse>
   );
+};
 
-  if (loading) return (
-    <Container>
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <CircularProgress />
-        <Typography sx={{ ml: 2 }}>Loading parlay suggestions...</Typography>
-      </Box>
-    </Container>
-  );
-
-  if (error) return (
-    <Container>
-      <Alert severity="error" sx={{ mb: 3, mt: 2 }}>
-        <AlertTitle>Error Loading Parlay Suggestions</AlertTitle>
-        {error}
-      </Alert>
-    </Container>
-  );
-
-  const displaySuggestions = suggestions && suggestions.length > 0 ? suggestions : MOCK_PARLAY_SUGGESTIONS;
-
+// Add to your ParlayArchitectScreen.tsx render function
+const ConfidenceMeter = ({ score, level }: { score: number; level: string }) => {
+  const colors = {
+    'very-high': '#10b981',
+    'high': '#3b82f6',
+    'medium': '#f59e0b',
+    'low': '#ef4444',
+    'very-low': '#dc2626'
+  };
+  
   return (
-    <Container maxWidth="lg">
-      {/* Header */}
-      <Box sx={{ 
-        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-        borderRadius: 3,
-        mb: 4,
-        mt: 2,
-        p: 3,
-        color: 'white'
-      }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ width: 80, bgcolor: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+        <Box 
+          sx={{ 
+            width: `${Math.min(score, 100)}%`,
+            height: 8,
+            bgcolor: colors[level as keyof typeof colors] || '#64748b'
+          }}
+        />
+      </Box>
+      <Typography variant="caption" fontWeight="bold" color={colors[level as keyof typeof colors]}>
+        {score}%
+      </Typography>
+    </Box>
+  );
+};
+
+// Today's Games Component
+const TodaysGamesPanel = () => (
+  <Paper sx={{ mb: 4 }}>
+    <Accordion expanded={showTodaysGames} onChange={() => setShowTodaysGames(!showTodaysGames)}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Box display="flex" alignItems="center" gap={2}>
+          <TodayIcon color="primary" />
+          <Typography variant="h6">Today's Games (Live from The Odds API)</Typography>
+          <Chip 
+            label={`${todaysGames?.length || 0} games`} 
+            size="small" 
+            color={oddsLoading ? "default" : oddsError ? "error" : "success"}
+          />
+        </Box>
+      </AccordionSummary>
+      <AccordionDetails>
+        {oddsLoading ? (
+          <Box display="flex" justifyContent="center" p={3}>
+            <CircularProgress size={24} />
+            <Typography sx={{ ml: 2 }}>Loading live games...</Typography>
+          </Box>
+        ) : oddsError ? (
+          <Alert severity="warning">
+            <AlertTitle>Using Fallback Data</AlertTitle>
+            {String(oddsError)}
+          </Alert>
+        ) : (!todaysGames || todaysGames.length === 0) ? (
+          <Alert severity="info">
+            <AlertTitle>No Games Today</AlertTitle>
+            Check back later for today's matchups.
+          </Alert>
+        ) : (
+          <Grid container spacing={2}>
+            {todaysGames.map((game: Game) => (
+              <Grid item xs={12} sm={6} md={4} key={game.id}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                      <Typography variant="caption" color="text.secondary">
+                        <ScheduleIcon fontSize="small" sx={{ mr: 0.5 }} />
+                        {format(parseISO(game.commence_time), 'h:mm a')}
+                      </Typography>
+                      <Chip 
+                        label={game.sport_title} 
+                        size="small" 
+                        variant="outlined"
+                      />
+                    </Box>
+                    
+                    <Box textAlign="center" mb={2}>
+                      <Typography variant="body2" fontWeight="bold" color="primary">
+                        {game.away_team}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">@</Typography>
+                      <Typography variant="body2" fontWeight="bold" color="primary">
+                        {game.home_team}
+                      </Typography>
+                    </Box>
+                    
+                    {game.bookmakers?.[0]?.markets?.[0]?.outcomes && (
+                      <Box display="flex" justifyContent="center" gap={1}>
+                        {game.bookmakers[0].markets[0].outcomes.slice(0, 2).map((outcome, idx) => (
+                          <Chip
+                            key={idx}
+                            label={`${outcome.name}: ${outcome.price > 0 ? '+' : ''}${outcome.price}`}
+                            size="small"
+                            sx={{
+                              bgcolor: outcome.price > 0 ? '#10b98120' : '#ef444420',
+                              color: outcome.price > 0 ? '#10b981' : '#ef4444'
+                            }}
+                          />
+                        ))}
+                      </Box>
+                    )}
+                    
+                    <Button 
+                      size="small" 
+                      variant="outlined" 
+                      fullWidth
+                      sx={{ mt: 2 }}
+                      onClick={() => {
+                        // Quick pick from this game
+                        const quickParlay: ParlaySuggestion = {
+                          id: `quick-${Date.now()}`,
+                          name: `${game.away_team} @ ${game.home_team}`,
+                          sport: game.sport_title,
+                          type: 'Moneyline',
+                          legs: [{
+                            id: `leg-${Date.now()}`,
+                            gameId: game.id,
+                            description: `${game.home_team} ML`,
+                            odds: game.bookmakers?.[0]?.markets?.[0]?.outcomes?.[1]?.price 
+                              ? (game.bookmakers[0].markets[0].outcomes[1].price > 0 
+                                ? `+${game.bookmakers[0].markets[0].outcomes[1].price}`
+                                : game.bookmakers[0].markets[0].outcomes[1].price.toString())
+                              : '-110',
+                            confidence: 68,
+                            sport: game.sport_title,
+                            market: 'h2h',
+                            outcome: game.home_team
+                          }],
+                          totalOdds: '-110',
+                          confidence: 68,
+                          analysis: 'Quick pick from today\'s live game',
+                          timestamp: new Date().toISOString(),
+                          isGenerated: true,
+                          isToday: true
+                        };
+                        setSelectedParlay(quickParlay);
+                        setShowBuildModal(true);
+                      }}
+                    >
+                      Quick Pick
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        )}
+      </AccordionDetails>
+    </Accordion>
+  </Paper>
+);
+
+return (
+  <Container maxWidth="lg">
+    {/* Header */}
+    <Paper sx={{ 
+      background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+      mb: 4,
+      p: 3,
+      color: 'white'
+    }}>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+        <Box display="flex" gap={1}>
           <Button
             startIcon={<ArrowBackIcon />}
             onClick={() => navigate(-1)}
@@ -428,229 +567,223 @@ const ParlayArchitectScreen = () => {
           >
             Back
           </Button>
-          <Box display="flex" alignItems="center" gap={1}>
-            <Button
-              startIcon={<AnalyticsIcon />}
-              onClick={() => setShowAnalyticsModal(true)}
-              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
-              variant="outlined"
-              size="small"
-            >
-              Analytics
-            </Button>
-          </Box>
+          
+          {/* Debug toggle button */}
+          <Button
+            startIcon={<BugReportIcon />}
+            onClick={() => setShowDebugPanel(!showDebugPanel)}
+            sx={{ 
+              color: 'white', 
+              borderColor: 'rgba(255,255,255,0.3)',
+              bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent'
+            }}
+            variant="outlined"
+            size="small"
+          >
+            {showDebugPanel ? 'Hide Debug' : 'Debug'}
+          </Button>
         </Box>
-
-        <Box display="flex" alignItems="center" gap={3}>
-          <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}>
-            <MergeIcon sx={{ fontSize: 32 }} />
-          </Avatar>
-          <Box>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>
-              Parlay Architect ({displaySuggestions.length} suggestions)
-            </Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>
-              AI-powered parlay suggestions with risk management
-            </Typography>
-          </Box>
-        </Box>
+        
+        {/* Last refresh indicator */}
+        {lastRefresh && (
+          <Chip 
+            label={`Last updated: ${format(lastRefresh, 'h:mm:ss a')}`}
+            size="small"
+            sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
+          />
+        )}
       </Box>
 
-      {/* Stats Bar */}
-      <Paper sx={{ p: 2, mb: 4 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={6} sm={3}>
-            <Box textAlign="center">
-              <Typography variant="caption" color="text.secondary">Total Suggestions</Typography>
-              <Typography variant="h5" fontWeight="bold">{displaySuggestions.length}</Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Box textAlign="center">
-              <Typography variant="caption" color="text.secondary">Avg Confidence</Typography>
-              <Typography variant="h5" fontWeight="bold" color="#10b981">
-                {Math.round(displaySuggestions.reduce((acc: number, s: any) => acc + (s.confidence || 0), 0) / displaySuggestions.length)}%
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Box textAlign="center">
-              <Typography variant="caption" color="text.secondary">Avg Legs</Typography>
-              <Typography variant="h5" fontWeight="bold">
-                {displaySuggestions[0]?.legs?.length || 3}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Box textAlign="center">
-              <Typography variant="caption" color="text.secondary">Best Value</Typography>
-              <Typography variant="h5" fontWeight="bold" color="#f59e0b">
-                +{Math.floor(Math.random() * 500) + 300}
-              </Typography>
-            </Box>
-          </Grid>
-        </Grid>
-      </Paper>
+      <Box display="flex" alignItems="center" gap={3}>
+        <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}>
+          <MergeIcon sx={{ fontSize: 32 }} />
+        </Avatar>
+        <Box>
+          <Typography variant="h3" fontWeight="bold" gutterBottom>
+            Parlay Architect
+          </Typography>
+          <Typography variant="h6" sx={{ opacity: 0.9 }}>
+            Live odds from The Odds API + AI-generated suggestions
+          </Typography>
+        </Box>
+      </Box>
+    </Paper>
 
-      {/* Parlay Suggestions */}
-      <Grid container spacing={3}>
-        {displaySuggestions.map((parlay: any) => (
-          <Grid item xs={12} md={6} key={parlay.id}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+    {/* Debug Panel - Placed right after header */}
+    <DebugPanel />
+
+    {/* Action Bar */}
+    <Paper sx={{ p: 2, mb: 4 }}>
+      <Grid container spacing={2} alignItems="center">
+        <Grid item xs={12} sm={4}>
+          <Button
+            variant="contained"
+            fullWidth
+            startIcon={<AutorenewIcon />}
+            onClick={() => generateParlayFromGames(selectedSport, 3)}
+            disabled={generating || !todaysGames || todaysGames.length === 0}
+          >
+            {generating ? 'Generating...' : 'Generate Parlay'}
+          </Button>
+        </Grid>
+        <Grid item xs={12} sm={4}>
+          <FormControl fullWidth size="small">
+            <InputLabel>Sport</InputLabel>
+            <Select
+              value={selectedSport}
+              onChange={(e) => setSelectedSport(e.target.value)}
+              label="Sport"
+            >
+              {SPORTS.map((sport) => (
+                <MenuItem key={sport.id} value={sport.id}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    {sport.icon}
+                    {sport.name}
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} sm={4}>
+          <Box display="flex" justifyContent="flex-end" gap={1}>
+            <IconButton 
+              onClick={() => {
+                refetchParlays();
+                setLastRefresh(new Date());
+              }} 
+              disabled={isLoading}
+              title="Refresh parlays"
+            >
+              <RefreshIcon />
+            </IconButton>
+            <IconButton onClick={() => setShowFilters(!showFilters)}>
+              <SearchIcon />
+            </IconButton>
+          </Box>
+        </Grid>
+      </Grid>
+    </Paper>
+
+    {/* Today's Games Panel */}
+    <TodaysGamesPanel />
+
+    {/* Display suggestions */}
+    {isLoading ? (
+      <Box display="flex" justifyContent="center" p={4}>
+        <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading parlay suggestions...</Typography>
+      </Box>
+    ) : parlayError ? (
+      <Alert severity="error" sx={{ mb: 3 }}>
+        <AlertTitle>Error Loading Parlays</AlertTitle>
+        {String(parlayError)}
+        <Button size="small" sx={{ ml: 2 }} onClick={() => refetchParlays()}>
+          Retry
+        </Button>
+      </Alert>
+    ) : filteredSuggestions.length > 0 ? (
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Parlay Suggestions ({filteredSuggestions.length})
+        </Typography>
+        <Grid container spacing={3}>
+          {filteredSuggestions.map((parlay) => (
+            <Grid item xs={12} md={6} key={parlay.id}>
+              <Card>
+                <CardContent>
                   <Typography variant="h6">{parlay.name}</Typography>
-                  <Chip 
-                    label={`${parlay.confidence}%`}
-                    color={parlay.confidence >= 80 ? 'success' : parlay.confidence >= 70 ? 'warning' : 'error'}
-                  />
-                </Box>
-                
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                  <Chip 
-                    icon={getSportIcon(parlay.sport)}
-                    label={parlay.sport}
-                    size="small"
-                    sx={{ 
-                      bgcolor: alpha(getSportColor(parlay.sport), 0.1),
-                      color: getSportColor(parlay.sport)
-                    }}
-                  />
                   <Typography variant="body2" color="text.secondary">
-                    {parlay.legs?.length || 0} legs
-                  </Typography>
-                </Box>
-                
-                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <CashIcon fontSize="small" />
-                    <Typography>Odds: {parlay.totalOdds}</Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <TrendingUpIcon fontSize="small" />
-                    <Typography>Win: {parlay.potentialWin}</Typography>
-                  </Box>
-                </Box>
-                
-                {parlay.analysis && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     {parlay.analysis}
                   </Typography>
-                )}
-                
-                {/* Legs Preview */}
-                {parlay.legs && parlay.legs.length > 0 && (
-                  <Paper sx={{ p: 1, mb: 2, bgcolor: '#f8fafc' }}>
-                    <Typography variant="caption" fontWeight="bold" gutterBottom>
-                      Legs Preview:
-                    </Typography>
-                    {parlay.legs.slice(0, 2).map((leg: any, index: number) => (
-                      <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                  
+                  {/* Added: AI Confidence and EV Display */}
+                  {parlay.confidence !== undefined && (
+                    <Box sx={{ mb: 2, mt: 1 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                         <Typography variant="caption" color="text.secondary">
-                          {leg.sport}:
-                        </Typography>
-                        <Typography variant="caption" fontWeight="medium">
-                          {leg.pick}
+                          AI Confidence: {parlay.confidence_level?.replace('-', ' ')}
                         </Typography>
                         <Chip 
-                          label={leg.odds}
+                          label={`EV: ${parlay.expected_value || '+0%'}`}
                           size="small"
                           sx={{ 
-                            height: 18,
-                            fontSize: '0.6rem',
-                            bgcolor: leg.odds.startsWith('+') ? '#10b98120' : '#ef444420',
-                            color: leg.odds.startsWith('+') ? '#10b981' : '#ef4444'
+                            bgcolor: parlay.expected_value?.startsWith('+') ? '#10b98120' : '#ef444420',
+                            color: parlay.expected_value?.startsWith('+') ? '#10b981' : '#ef4444',
+                            fontSize: '0.7rem'
                           }}
                         />
                       </Box>
-                    ))}
-                    {parlay.legs.length > 2 && (
-                      <Typography variant="caption" color="text.secondary">
-                        +{parlay.legs.length - 2} more legs
-                      </Typography>
-                    )}
-                  </Paper>
-                )}
-                
-                <Button 
-                  variant="contained" 
-                  fullWidth
-                  startIcon={<BuildIcon />}
-                  onClick={() => handleBuildParlay(parlay)}
-                  sx={{ 
-                    bgcolor: '#f59e0b',
-                    '&:hover': { bgcolor: '#d97706' }
-                  }}
-                >
-                  Build This Parlay
-                </Button>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-
-      {/* Empty State */}
-      {displaySuggestions.length === 0 && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <MergeIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" gutterBottom>
-            No parlay suggestions available
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Check back later for new parlay suggestions
-          </Typography>
-        </Paper>
-      )}
-
-      {/* Footer Tips */}
-      <Card sx={{ mt: 4, mb: 4 }}>
-        <CardContent>
-          <Typography variant="h6" fontWeight="bold" gutterBottom>
-            💡 Smart Parlay Building Tips
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                <CheckCircleIcon sx={{ color: '#10b981', mt: 0.5 }} />
-                <Box>
-                  <Typography variant="subtitle2" fontWeight="bold">Optimal Leg Count</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    2-3 legs have the highest success rate for parlay bets
-                  </Typography>
-                </Box>
-              </Box>
+                      <ConfidenceMeter score={parlay.confidence} level={parlay.confidence_level || 'medium'} />
+                    </Box>
+                  )}
+                  
+                  <Button 
+                    variant="contained" 
+                    sx={{ mt: 2 }}
+                    onClick={() => {
+                      setSelectedParlay(parlay);
+                      setShowBuildModal(true);
+                    }}
+                  >
+                    Build This Parlay
+                  </Button>
+                </CardContent>
+              </Card>
             </Grid>
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                <CheckCircleIcon sx={{ color: '#10b981', mt: 0.5 }} />
-                <Box>
-                  <Typography variant="subtitle2" fontWeight="bold">Multi-Sport Advantage</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Combine different sports to eliminate correlation risk
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                <CheckCircleIcon sx={{ color: '#10b981', mt: 0.5 }} />
-                <Box>
-                  <Typography variant="subtitle2" fontWeight="bold">Risk Management</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Mix high-probability picks with value bets for optimal EV
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+          ))}
+        </Grid>
+      </Box>
+    ) : (
+      <Alert severity="info">
+        <AlertTitle>No Parlay Suggestions</AlertTitle>
+        Try changing your filters or generating a new parlay.
+      </Alert>
+    )}
 
-      <AnalyticsDashboard />
-      <BuildParlayModal />
-    </Container>
-  );
+    {/* Build Modal */}
+    <Dialog open={showBuildModal} onClose={() => setShowBuildModal(false)} maxWidth="md" fullWidth>
+      <DialogTitle>
+        Build Parlay: {selectedParlay?.name}
+      </DialogTitle>
+      <DialogContent>
+        {selectedParlay && (
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Pick</TableCell>
+                  <TableCell>Odds</TableCell>
+                  <TableCell>Confidence</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {selectedParlay.legs.map((leg, index) => (
+                  <TableRow key={index}>
+                    <TableCell>{leg.description}</TableCell>
+                    <TableCell>{leg.odds}</TableCell>
+                    <TableCell>
+                      <LinearProgress 
+                        variant="determinate" 
+                        value={leg.confidence}
+                        sx={{ width: 100 }}
+                      />
+                      <Typography variant="body2">{leg.confidence}%</Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setShowBuildModal(false)}>Cancel</Button>
+        <Button variant="contained">Add to Bet Slip</Button>
+      </DialogActions>
+    </Dialog>
+  </Container>
+);
 };
 
 export default ParlayArchitectScreen;

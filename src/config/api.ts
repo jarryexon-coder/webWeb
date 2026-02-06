@@ -1,8 +1,9 @@
 // src/config/api.ts - UPDATED VERSION
-export const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+
 export const API_ENDPOINTS = {
   // Fantasy Hub endpoints
-  fantasyPlayers: '/api/players',
+  fantasyPlayers: '/api/fantasy/players',
   fantasyTeams: '/api/fantasy/teams',
   
   // PrizePicks endpoints
@@ -10,13 +11,13 @@ export const API_ENDPOINTS = {
   prizePicksAnalytics: '/api/prizepicks/analytics',
   
   // Sports Wire
-  sportsWire: '/api/sportswire',
+  sportsWire: '/api/sports-wire',
   
   // Daily Picks
-  dailyPicks: '/api/picks/daily',
+  dailyPicks: '/api/picks',
   
   // Advanced Analytics
-  advancedAnalytics: '/api/analytics/advanced',
+  advancedAnalytics: '/api/analytics',
   
   // Parlay Architect
   parlaySuggestions: '/api/parlay/suggestions',
@@ -25,10 +26,18 @@ export const API_ENDPOINTS = {
   kalshiPredictions: '/api/kalshi/predictions',
   
   // Predictions History
-  predictionsHistory: '/api/predictions/history',
+  predictions: '/api/predictions',
+  predictionsHistory: '/api/history',
   
   // Player Trends
+  trends: '/api/trends',
   playerTrends: '/api/players/trends',
+  
+  // Player Props
+  playerProps: '/api/player-props',
+  
+  // Odds Games
+  oddsGames: '/api/odds/games',
   
   // System Status
   systemStatus: '/api/system/status',

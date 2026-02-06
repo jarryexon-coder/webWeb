@@ -1,3 +1,4 @@
+// src/pages/PrizePicksScreen.tsx - UPDATED VERSION
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -33,6 +34,7 @@ import {
   TableRow
 } from '@mui/material';
 import { Refresh as RefreshIcon, SportsBasketball, SportsFootball, SportsBaseball, Info as InfoIcon, FilterList as FilterIcon, TrendingUp, ShowChart, AttachMoney } from '@mui/icons-material';
+import { usePrizePicksSelections, usePlayerProps, usePrizePicksAnalytics } from '../hooks/useBackendAPI';
 
 // Fix for Chip size prop
 const Chip = (props: any) => <MuiChip size="small" {...props} />;
@@ -127,21 +129,35 @@ interface ProjectionValueResult {
 
 const PrizePicksScreen: React.FC = () => {
   // ===== STATE DECLARATIONS =====
-  const [combinedData, setCombinedData] = useState<CombinedPlayerProp[]>([]); // ← CRITICAL: Add this
+  const [combinedData, setCombinedData] = useState<CombinedPlayerProp[]>([]);
   const [filteredProps, setFilteredProps] = useState<CombinedPlayerProp[]>([]);
-  const [sortedProps, setSortedProps] = useState<CombinedPlayerProp[]>([]); // Sorted by projection value
-  const [isLoading, setIsLoading] = useState(false);
+  const [sortedProps, setSortedProps] = useState<CombinedPlayerProp[]>([]);
   
-  // Your other states...
-  const [playerProps, setPlayerProps] = useState<PlayerProp[]>([]);
-  const [combinedProps, setCombinedProps] = useState<CombinedPlayerProp[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [sport, setSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
+  // Use React Query hooks
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLeague, setSelectedLeague] = useState('All');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'info' | 'success' | 'warning' | 'error' });
   
-  // Original states from File 2
+  // Use React Query hooks for data fetching
+  const { 
+    data: picksData, 
+    isLoading: picksLoading, 
+    error: picksError,
+    refetch: refetchPicks 
+  } = usePrizePicksSelections(selectedSport);
+  
+  const { 
+    data: propsData, 
+    isLoading: propsLoading 
+  } = usePlayerProps(selectedSport);
+  
+  const {
+    data: analyticsData,
+    isLoading: analyticsLoading
+  } = usePrizePicksAnalytics();
+
+  // Original states from File 2 (keep for compatibility)
   const [analytics, setAnalytics] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,20 +165,26 @@ const PrizePicksScreen: React.FC = () => {
 
   // ===== ADDED: Projection Filtering State =====
   const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
-  const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0); // Default 1.0 difference
-  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(true); // Only show where projection and edge agree
-  const [sortByProjectionValue, setSortByProjectionValue] = useState(true); // Sort by projection value vs edge
+  const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0);
+  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(true);
+  const [sortByProjectionValue, setSortByProjectionValue] = useState(true);
 
   // ===== ADDED: Kelly Criterion State =====
-  const [kellyFraction, setKellyFraction] = useState(0.25); // Quarter Kelly by default
+  const [kellyFraction, setKellyFraction] = useState(0.25);
   const [showKellySizing, setShowKellySizing] = useState(true);
-  const [bankrollAmount, setBankrollAmount] = useState(1000); // Default $1000 bankroll
+  const [bankrollAmount, setBankrollAmount] = useState(1000);
 
   // ===== ADDED: Value Filtering State =====
-  const [minEdgeThreshold, setMinEdgeThreshold] = useState(0); // Minimum edge required
+  const [minEdgeThreshold, setMinEdgeThreshold] = useState(0);
 
-  // API configuration
-  const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:5001';
+  // Extract data from API responses
+  const selections = picksData?.selections || [];
+  const props = propsData?.props || [];
+  const analyticsFromAPI = analyticsData?.analytics || [];
+
+  // Update loading state
+  const loading = picksLoading || propsLoading;
+  const apiError = picksError;
 
   // ===== Diagnostic Code =====
   console.log('🎯 Component State Check:');
@@ -171,7 +193,8 @@ const PrizePicksScreen: React.FC = () => {
   console.log('  combinedData is array:', Array.isArray(combinedData));
   console.log('  combinedData length:', combinedData?.length || 0);
   console.log('  filteredProps length:', filteredProps?.length || 0);
-  console.log('  isLoading:', isLoading);
+  console.log('  selections length:', selections?.length || 0);
+  console.log('  props length:', props?.length || 0);
   console.log('  loading:', loading);
 
   // Helper function to calculate complementary odds
@@ -638,67 +661,6 @@ const PrizePicksScreen: React.FC = () => {
     };
   };
 
-  // ===== Updated fetchPrizePicksData function =====
-  const fetchPrizePicksData = async () => {
-    try {
-      setIsLoading(true);
-      setLoading(true);
-      setRefreshing(true);
-      console.log('🚀 Fetching PrizePicks data...');
-      
-      const response = await fetch(
-        `${API_BASE_URL}/api/prizepicks/selections?sport=${sport}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      console.log('🔍 [fetchPrizePicksData] API Response:', {
-        success: data.success,
-        count: data.count,
-        selectionsLength: data.selections?.length || 0
-      });
-
-      if (data.success && data.selections && Array.isArray(data.selections)) {
-        // Process the data
-        const processedData = processPrizePicksData(data);
-        
-        // SET THE STATE - This is what makes combinedData available
-        setCombinedData(processedData);
-        setCombinedProps(processedData);
-        console.log(`✅ Set combinedData with ${processedData.length} items`);
-        
-        setActiveEndpoint(`/api/prizepicks/selections?sport=${sport}`);
-        setError(null);
-        
-        setSnackbar({
-          open: true,
-          message: `Successfully loaded ${processedData.length} ${sport.toUpperCase()} player props`,
-          severity: 'success'
-        });
-      } else {
-        throw new Error(data.message || 'Invalid response format');
-      }
-    } catch (error: any) {
-      console.error('❌ Error fetching PrizePicks data:', error);
-      setError(error.message);
-      setCombinedData([]); // Set empty array on error
-      
-      setSnackbar({
-        open: true,
-        message: `Failed to load data: ${error.message}`,
-        severity: 'error'
-      });
-    } finally {
-      setIsLoading(false);
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
   // Processing function
   const processPrizePicksData = (data: any): CombinedPlayerProp[] => {
     // Group items by player + stat + line to combine over/under
@@ -863,7 +825,7 @@ const PrizePicksScreen: React.FC = () => {
         under_price: underPrice,
         bookmaker: firstItem.bookmaker || 'PrizePicks',
         game: `${firstItem.team || ''}`,
-        sport: firstItem.sport || sport,
+        sport: firstItem.sport || selectedSport,
         last_update: firstItem.timestamp || new Date().toISOString(),
         id: key,
         // Use calculated confidence
@@ -924,77 +886,6 @@ const PrizePicksScreen: React.FC = () => {
     return combined;
   };
 
-  // Alternative endpoints fallback (from File 2)
-  const tryAlternativeEndpoints = async () => {
-    console.log('🔍 Trying alternative endpoints...');
-    const endpointsToTry = [
-      { path: '/api/prizepicks/picks', name: 'Picks' },
-      { path: '/api/picks/prizepicks', name: 'Picks (alt)' },
-      { path: '/api/prize-picks', name: 'Prize-Picks' },
-      { path: '/api/prizepicks', name: 'Root' },
-    ];
-
-    for (const endpoint of endpointsToTry) {
-      try {
-        console.log(`🎯 Trying: ${endpoint.name} (${endpoint.path})`);
-        const response = await fetch(`${API_BASE_URL}${endpoint.path}?sport=${sport}`);
-        
-        if (response.ok) {
-          const data = await response.json();
-          
-          // Use our helper function to extract data
-          const extractedData = extractArrayFromResponse(data);
-          
-          if (extractedData.length > 0) {
-            // Transform to PlayerProp format with validation
-            const transformedData = extractedData.map((item: any) => ({
-              player_name: item.player_name || item.player || item.name || 'Unknown Player',
-              prop_type: item.prop_type || item.market || 'Over',
-              line: item.line || item.projection || 0,
-              over_price: item.over_price || item.over_odds || null,
-              under_price: item.under_price || item.under_odds || null,
-              bookmaker: item.bookmaker || item.sportsbook || 'PrizePicks',
-              game: item.game || item.matchup || 'Unknown Game',
-              sport: item.sport || sport,
-              last_update: item.last_update || item.timestamp || new Date().toISOString(),
-              id: item.id || `pick-${Date.now()}-${Math.random()}`,
-              stat_type: item.stat_type || item.type
-            }));
-            
-            setPlayerProps(transformedData);
-            
-            // Combine Over/Under pairs
-            const combinedData = combinePlayerProps(transformedData);
-            setCombinedData(combinedData);
-            setCombinedProps(combinedData);
-            
-            setActiveEndpoint(endpoint.path);
-            setError(null);
-            
-            setSnackbar({
-              open: true,
-              message: `Loaded ${combinedData.length} picks from ${endpoint.name}`,
-              severity: 'success'
-            });
-            
-            return; // Stop trying endpoints
-          }
-        }
-      } catch (error) {
-        console.log(`❌ ${endpoint.name} failed:`, error);
-      }
-    }
-    
-    // If all endpoints fail, use mock data
-    console.log('⚠️ All endpoints failed, using mock data');
-    setSnackbar({
-      open: true,
-      message: 'Using sample data - API endpoints unavailable',
-      severity: 'warning'
-    });
-    setActiveEndpoint('mock');
-  };
-
   // Combine player props function (helper)
   const combinePlayerProps = (props: PlayerProp[]): CombinedPlayerProp[] => {
     const grouped: { [key: string]: CombinedPlayerProp } = {};
@@ -1028,6 +919,35 @@ const PrizePicksScreen: React.FC = () => {
   };
 
   // ===== Enhanced Filter useEffect with Value Analysis =====
+  useEffect(() => {
+    console.log('🔄 Filter useEffect triggered');
+    
+    // Check if we have selections from API
+    if (selections && selections.length > 0) {
+      console.log(`📊 Processing ${selections.length} selections from API`);
+      const processedData = processPrizePicksData({ success: true, selections });
+      setCombinedData(processedData);
+      setActiveEndpoint(`/api/prizepicks/selections?sport=${selectedSport}`);
+      setError(null);
+    } else if (props && props.length > 0) {
+      console.log(`📊 Processing ${props.length} player props from API`);
+      // Process player props data if available
+      const processedData = processPlayerPropsData(props);
+      setCombinedData(processedData);
+      setActiveEndpoint(`/api/playerprops?sport=${selectedSport}`);
+    }
+    
+    // Update analytics from API
+    if (analyticsFromAPI && analyticsFromAPI.length > 0) {
+      setAnalytics(analyticsFromAPI);
+    }
+    
+    // Set error if API failed
+    if (apiError) {
+      setError(apiError.message);
+    }
+  }, [selections, props, analyticsFromAPI, apiError, selectedSport]);
+
   useEffect(() => {
     console.log('🔄 Filter useEffect triggered');
     
@@ -1159,55 +1079,77 @@ const PrizePicksScreen: React.FC = () => {
     sortByProjectionValue,
     kellyFraction,
     bankrollAmount,
-    minEdgeThreshold // Added from File 2
+    minEdgeThreshold
   ]);
 
-  // Fetch analytics data (from File 2)
-  const fetchPrizePicksAnalytics = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/prizepicks/analytics`);
+  // Helper function to process player props data
+  const processPlayerPropsData = (propsArray: any[]): CombinedPlayerProp[] => {
+    const groupedItems: { [key: string]: any[] } = {};
+    
+    propsArray.forEach((item: any) => {
+      const key = `${item.player_name || item.player}-${item.stat_type || 'points'}-${item.line || 0}-${item.bookmaker || 'default'}`;
+      if (!groupedItems[key]) {
+        groupedItems[key] = [];
+      }
+      groupedItems[key].push(item);
+    });
+    
+    return Object.entries(groupedItems).map(([key, items]) => {
+      const firstItem = items[0];
+      const confidenceInfo = calculateConfidenceWithProjection(
+        firstItem.over_price,
+        firstItem.under_price,
+        firstItem.projection,
+        firstItem.line
+      );
       
-      if (!response.ok) {
-        throw new Error(`Failed to fetch analytics: ${response.status} ${response.statusText}`);
+      const projectionValue = calculateProjectionValue(
+        firstItem.projection,
+        firstItem.line,
+        firstItem.over_price,
+        firstItem.under_price
+      );
+      
+      // Calculate Kelly bet size
+      let kellyBetSize = 0;
+      if (projectionValue.edge > 0 && projectionValue.recommendedSide !== 'none') {
+        const odds = projectionValue.recommendedSide === 'over' ? firstItem.over_price : firstItem.under_price;
+        if (odds !== null) {
+          const kellyResult = calculateKellyBetSize(projectionValue.edge, odds, bankrollAmount);
+          kellyBetSize = kellyResult.percentOfBankroll;
+        }
       }
       
-      const data = await response.json();
-      console.log('📈 [fetchPrizePicksAnalytics] Analytics response:', {
-        data,
-        type: typeof data,
-        isArray: Array.isArray(data),
-        keys: data && typeof data === 'object' ? Object.keys(data) : 'N/A'
-      });
-      
-      if (data.success && data.analytics) {
-        // Use our helper function to extract analytics data
-        const analyticsData = extractArrayFromResponse(data.analytics);
-        
-        console.log(`✅ Extracted ${analyticsData.length} analytics items`);
-        setAnalytics(analyticsData);
-      }
-    } catch (err: any) {
-      console.error('❌ Error fetching PrizePicks analytics:', err);
-    }
+      return {
+        player_name: firstItem.player_name || firstItem.player || 'Unknown Player',
+        stat_type: firstItem.stat_type || 'points',
+        line: firstItem.line || 0,
+        over_price: firstItem.over_price,
+        under_price: firstItem.under_price,
+        bookmaker: firstItem.bookmaker || 'Unknown',
+        game: firstItem.game || '',
+        sport: firstItem.sport || selectedSport,
+        last_update: firstItem.last_update || new Date().toISOString(),
+        id: key,
+        calculated_confidence: confidenceInfo.level,
+        calculated_edge: confidenceInfo.edge,
+        projection: firstItem.projection,
+        value_side: getValueSide(firstItem.over_price, firstItem.under_price, confidenceInfo),
+        projectionEdge: projectionValue.edge,
+        recommendedSide: projectionValue.recommendedSide,
+        kellyBetSize,
+        projection_confidence: projectionValue.confidence,
+        market_implied: projectionValue.marketImplied,
+        estimated_true_prob: projectionValue.estimatedTrueProb,
+        projection_diff: projectionValue.projectionDiff,
+        value_score: projectionValue.edge > 0 ? projectionValue.edge * 100 : 0
+      };
+    });
   };
 
-  // Load data on mount
-  useEffect(() => {
-    console.log('🚀 PrizePicksScreen mounted, fetching data...');
-    const loadData = async () => {
-      await fetchPrizePicksData();
-      await fetchPrizePicksAnalytics();
-    };
-    loadData();
-    
-    // Auto-refresh every 2 minutes
-    const interval = setInterval(fetchPrizePicksData, 120000);
-    return () => clearInterval(interval);
-  }, [sport]);
-
-  // Handle sport change (from File 1)
+  // Handle sport change
   const handleSportChange = (newSport: 'nba' | 'nfl' | 'mlb') => {
-    setSport(newSport);
+    setSelectedSport(newSport);
     setSnackbar({
       open: true,
       message: `Loading ${newSport.toUpperCase()} player props...`,
@@ -1225,9 +1167,9 @@ const PrizePicksScreen: React.FC = () => {
       severity: 'info'
     });
     
-    await fetchPrizePicksData();
-    await fetchPrizePicksAnalytics();
+    await refetchPicks();
     
+    setRefreshing(false);
     setSnackbar({
       open: true,
       message: 'Data refreshed successfully',
@@ -1237,7 +1179,7 @@ const PrizePicksScreen: React.FC = () => {
 
   // Helper functions from File 1 - UPDATED WITH SAFETY CHECKS
   const formatPropType = (type: string | undefined): string => {
-    if (!type) return 'Points'; // Default if type is undefined/null
+    if (!type) return 'Points';
     
     const typeMap: Record<string, string> = {
       'player_points': 'Points',
@@ -1257,12 +1199,10 @@ const PrizePicksScreen: React.FC = () => {
       'under': 'Under'
     };
     
-    // Check if type exists in our map
     if (typeMap[type.toLowerCase()]) {
       return typeMap[type.toLowerCase()];
     }
     
-    // Safely transform the string if not in map
     try {
       return type
         .replace('player_', '')
@@ -1270,7 +1210,7 @@ const PrizePicksScreen: React.FC = () => {
         .replace(/\b\w/g, (l: string) => l.toUpperCase());
     } catch (error) {
       console.warn('❌ Error formatting prop type:', { type, error });
-      return type; // Return original type if transformation fails
+      return type;
     }
   };
 
@@ -1313,7 +1253,7 @@ const PrizePicksScreen: React.FC = () => {
     if (price > 0) {
       return `+${price}`;
     } else if (price < 0) {
-      return price.toString(); // Already has minus sign
+      return price.toString();
     } else {
       return 'EV';
     }
@@ -1322,14 +1262,14 @@ const PrizePicksScreen: React.FC = () => {
   // Get confidence color for chip display
   const getConfidenceColor = (confidence: string | undefined) => {
     switch(confidence) {
-      case 'arbitrage': return '#7c3aed'; // Purple for arbitrage
-      case 'good-value': return '#059669'; // Green for good value
-      case 'fair': return '#3b82f6'; // Blue for fair
-      case 'slight-juice': return '#f59e0b'; // Orange/Yellow for slight juice
-      case 'bad-value': return '#ef4444'; // Red for bad value
-      case 'invalid': return '#6b7280'; // Gray for invalid
-      case 'error': return '#6b7280'; // Gray for error
-      default: return '#64748b'; // Default gray
+      case 'arbitrage': return '#7c3aed';
+      case 'good-value': return '#059669';
+      case 'fair': return '#3b82f6';
+      case 'slight-juice': return '#f59e0b';
+      case 'bad-value': return '#ef4444';
+      case 'invalid': return '#6b7280';
+      case 'error': return '#6b7280';
+      default: return '#64748b';
     }
   };
 
@@ -1398,7 +1338,7 @@ const PrizePicksScreen: React.FC = () => {
           <CircularProgress />
           <Typography sx={{ ml: 2, mt: 2 }}>Loading prize picks...</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Loading {sport.toUpperCase()} player props...
+            Loading {selectedSport.toUpperCase()} player props...
           </Typography>
         </Box>
       </Container>
@@ -1414,7 +1354,8 @@ const PrizePicksScreen: React.FC = () => {
           <Typography variant="caption">combinedData loaded: {combinedData ? 'YES' : 'NO'}</Typography>
           <Typography variant="caption">combinedData length: {combinedData?.length || 0}</Typography>
           <Typography variant="caption">sortedProps length: {sortedProps?.length || 0}</Typography>
-          <Typography variant="caption">isLoading: {isLoading ? 'YES' : 'NO'}</Typography>
+          <Typography variant="caption">selections length: {selections?.length || 0}</Typography>
+          <Typography variant="caption">props length: {props?.length || 0}</Typography>
           <Typography variant="caption">sortByProjectionValue: {sortByProjectionValue ? 'YES' : 'NO'}</Typography>
           <Typography variant="caption">minEdgeThreshold: {(minEdgeThreshold * 100).toFixed(1)}%</Typography>
         </Box>
@@ -1430,9 +1371,9 @@ const PrizePicksScreen: React.FC = () => {
             Live player props from various bookmakers
             {activeEndpoint && (
               <Chip 
-                label={`Source: ${activeEndpoint === 'mock' ? 'Sample Data' : activeEndpoint}`}
+                label={`Source: ${activeEndpoint}`}
                 size="small"
-                color={activeEndpoint === 'mock' ? 'warning' : 'success'}
+                color="success"
                 sx={{ ml: 2 }}
               />
             )}
@@ -1441,10 +1382,10 @@ const PrizePicksScreen: React.FC = () => {
         <Button 
           variant="contained" 
           onClick={handleRefresh} 
-          disabled={refreshing}
+          disabled={refreshing || picksLoading}
           startIcon={<RefreshIcon />}
         >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
+          {refreshing || picksLoading ? 'Refreshing...' : 'Refresh'}
         </Button>
       </Box>
 
@@ -1667,45 +1608,45 @@ const PrizePicksScreen: React.FC = () => {
         )}
       </Paper>
 
-      {/* Sport selector (from File 1) */}
+      {/* Sport selector */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
         <Button
-          variant={sport === 'nba' ? 'contained' : 'outlined'}
+          variant={selectedSport === 'nba' ? 'contained' : 'outlined'}
           onClick={() => handleSportChange('nba')}
           startIcon={<SportsBasketball />}
           sx={{
-            bgcolor: sport === 'nba' ? getSportColor('nba') : 'transparent',
+            bgcolor: selectedSport === 'nba' ? getSportColor('nba') : 'transparent',
             borderColor: getSportColor('nba'),
             '&:hover': {
-              bgcolor: sport === 'nba' ? getSportColor('nba') : `${getSportColor('nba')}20`,
+              bgcolor: selectedSport === 'nba' ? getSportColor('nba') : `${getSportColor('nba')}20`,
             }
           }}
         >
           NBA
         </Button>
         <Button
-          variant={sport === 'nfl' ? 'contained' : 'outlined'}
+          variant={selectedSport === 'nfl' ? 'contained' : 'outlined'}
           onClick={() => handleSportChange('nfl')}
           startIcon={<SportsFootball />}
           sx={{
-            bgcolor: sport === 'nfl' ? getSportColor('nfl') : 'transparent',
+            bgcolor: selectedSport === 'nfl' ? getSportColor('nfl') : 'transparent',
             borderColor: getSportColor('nfl'),
             '&:hover': {
-              bgcolor: sport === 'nfl' ? getSportColor('nfl') : `${getSportColor('nfl')}20`,
+              bgcolor: selectedSport === 'nfl' ? getSportColor('nfl') : `${getSportColor('nfl')}20`,
             }
           }}
         >
           NFL
         </Button>
         <Button
-          variant={sport === 'mlb' ? 'contained' : 'outlined'}
+          variant={selectedSport === 'mlb' ? 'contained' : 'outlined'}
           onClick={() => handleSportChange('mlb')}
           startIcon={<SportsBaseball />}
           sx={{
-            bgcolor: sport === 'mlb' ? getSportColor('mlb') : 'transparent',
+            bgcolor: selectedSport === 'mlb' ? getSportColor('mlb') : 'transparent',
             borderColor: getSportColor('mlb'),
             '&:hover': {
-              bgcolor: sport === 'mlb' ? getSportColor('mlb') : `${getSportColor('mlb')}20`,
+              bgcolor: selectedSport === 'mlb' ? getSportColor('mlb') : `${getSportColor('mlb')}20`,
             }
           }}
         >
@@ -1713,7 +1654,7 @@ const PrizePicksScreen: React.FC = () => {
         </Button>
       </Box>
 
-      {/* Search and Filter Controls (from File 1) */}
+      {/* Search and Filter Controls */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
           placeholder="Search players, games, or stats..."
@@ -1987,320 +1928,320 @@ const PrizePicksScreen: React.FC = () => {
         </Alert>
       )}
 
-{/* Player Props Grid - Using sorted props */}
-<Box sx={{ mb: 4 }}>
-  <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#3a0ca3', mb: 3 }}>
-    🎯 Player Props ({sortedProps.length})
-    {sortedProps.length > 0 && (
-      <Chip 
-        label={`${sortedProps.filter(p => p.projection !== undefined).length} with projections`}
-        size="small"
-        color="success"
-        sx={{ ml: 2 }}
-      />
-    )}
-  </Typography>
-  
-  {sortedProps.length === 0 ? (
-    <Alert severity="info" sx={{ mt: 2 }}>
-      <Typography variant="body1">
-        {searchQuery.trim() 
-          ? `No props found matching "${searchQuery}"`
-          : enableProjectionFiltering
-          ? `No props found with projections ${projectionDifferenceThreshold}+ points from line${onlyShowProjectionEdges ? ' where projection agrees with edge' : ''}. Try adjusting filters.`
-          : `No player props available for ${sport.toUpperCase()} right now. Try refreshing or check back closer to game time.`
-        }
-      </Typography>
-    </Alert>
-  ) : (
-    <Grid container spacing={3}>
-      {sortedProps.slice(0, 50).map((prop, index) => {              
-        return (
-          <Grid item xs={12} sm={6} md={4} key={prop.id || index}>
-            <Card sx={{ 
-              height: '100%', 
-              display: 'flex', 
-              flexDirection: 'column',
-              transition: 'transform 0.2s',
-              '&:hover': {
-                transform: 'translateY(-4px)',
-                boxShadow: 6,
-              },
-              border: (prop.projectionEdge || 0) > 0.03 ? '2px solid #059669' : 
-                      (prop.projectionEdge || 0) > 0 ? '1px solid #10b981' : '1px solid #e5e7eb'
-            }}>
-              <CardContent>
-                {/* Header */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 1 }}>
-                  <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', flex: 1 }}>
-                    {prop.player_name || 'Unknown Player'}
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                    <Chip 
-                      label={prop.bookmaker || 'Unknown'}
-                      size="small"
-                      sx={{ 
-                        bgcolor: getBookmakerColor(prop.bookmaker),
-                        color: 'white',
-                        fontWeight: 'bold',
-                        mb: 0.5
-                      }}
-                    />
-                    {(prop.projectionEdge || 0) > 0 && (
-                      <Chip 
-                        label={`+${((prop.projectionEdge || 0) * 100).toFixed(1)}% Edge`}
-                        size="small"
-                        sx={{ 
-                          bgcolor: (prop.projectionEdge || 0) > 0.05 ? '#059669' : 
-                                  (prop.projectionEdge || 0) > 0.03 ? '#10b981' : '#3b82f6',
-                          color: 'white',
-                          fontWeight: 'bold',
-                          fontSize: '0.6rem'
-                        }}
-                      />
-                    )}
-                  </Box>
-                </Box>
-                
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  {prop.game || 'Unknown Game'}
-                </Typography>
-                
-                {/* Stat Type and Line */}
-                <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Chip 
-                    label={formatPropType(prop.stat_type)}
-                    size="small"
-                    sx={{ 
-                      bgcolor: `${getSportColor(prop.sport)}20`,
-                      color: getSportColor(prop.sport),
-                      fontWeight: 'bold'
-                    }}
-                  />
-                  <Typography variant="h6" sx={{ color: getSportColor(prop.sport), fontWeight: 'bold' }}>
-                    Line: {prop.line || 0}
-                  </Typography>
-                </Box>
-                
-                {/* ===== ENHANCED: Projection Display with Edge and Confidence ===== */}
-                {prop.projection !== undefined && prop.projection !== null && (
-                  <Box sx={{ 
-                    mb: 2, 
-                    p: 1, 
-                    bgcolor: '#f8fafc', 
-                    borderRadius: 1,
-                    border: '1px solid #e2e8f0'
+      {/* Player Props Grid - Using sorted props */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#3a0ca3', mb: 3 }}>
+          🎯 Player Props ({sortedProps.length})
+          {sortedProps.length > 0 && (
+            <Chip 
+              label={`${sortedProps.filter(p => p.projection !== undefined).length} with projections`}
+              size="small"
+              color="success"
+              sx={{ ml: 2 }}
+            />
+          )}
+        </Typography>
+        
+        {sortedProps.length === 0 ? (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            <Typography variant="body1">
+              {searchQuery.trim() 
+                ? `No props found matching "${searchQuery}"`
+                : enableProjectionFiltering
+                ? `No props found with projections ${projectionDifferenceThreshold}+ points from line${onlyShowProjectionEdges ? ' where projection agrees with edge' : ''}. Try adjusting filters.`
+                : `No player props available for ${selectedSport.toUpperCase()} right now. Try refreshing or check back closer to game time.`
+              }
+            </Typography>
+          </Alert>
+        ) : (
+          <Grid container spacing={3}>
+            {sortedProps.slice(0, 50).map((prop, index) => {              
+              return (
+                <Grid item xs={12} sm={6} md={4} key={prop.id || index}>
+                  <Card sx={{ 
+                    height: '100%', 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    transition: 'transform 0.2s',
+                    '&:hover': {
+                      transform: 'translateY(-4px)',
+                      boxShadow: 6,
+                    },
+                    border: (prop.projectionEdge || 0) > 0.03 ? '2px solid #059669' : 
+                            (prop.projectionEdge || 0) > 0 ? '1px solid #10b981' : '1px solid #e5e7eb'
                   }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Box>
-                        <Typography variant="body2" fontWeight="bold">
-                          Projection: {prop.projection.toFixed(1)}
+                    <CardContent>
+                      {/* Header */}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 1 }}>
+                        <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', flex: 1 }}>
+                          {prop.player_name || 'Unknown Player'}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Diff: {prop.projection_diff ? (prop.projection_diff > 0 ? '+' : '') + prop.projection_diff.toFixed(1) : 'N/A'}
-                        </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                          <Chip 
+                            label={prop.bookmaker || 'Unknown'}
+                            size="small"
+                            sx={{ 
+                              bgcolor: getBookmakerColor(prop.bookmaker),
+                              color: 'white',
+                              fontWeight: 'bold',
+                              mb: 0.5
+                            }}
+                          />
+                          {(prop.projectionEdge || 0) > 0 && (
+                            <Chip 
+                              label={`+${((prop.projectionEdge || 0) * 100).toFixed(1)}% Edge`}
+                              size="small"
+                              sx={{ 
+                                bgcolor: (prop.projectionEdge || 0) > 0.05 ? '#059669' : 
+                                        (prop.projectionEdge || 0) > 0.03 ? '#10b981' : '#3b82f6',
+                                color: 'white',
+                                fontWeight: 'bold',
+                                fontSize: '0.6rem'
+                              }}
+                            />
+                          )}
+                        </Box>
                       </Box>
-                      <Box sx={{ textAlign: 'right' }}>
-                        <Chip 
-                          label={`${prop.projection > prop.line ? 'Over' : 'Under'} by ${Math.abs(prop.projection - prop.line).toFixed(1)}`}
-                          size="small"
-                          sx={{ 
-                            bgcolor: prop.projection > prop.line ? '#10b981' : '#ef4444',
-                            color: 'white',
-                            fontWeight: 'bold',
-                            mb: 0.5
-                          }}
-                        />
-                        <Typography variant="caption" fontWeight="bold" color={(prop.projectionEdge || 0) > 0 ? '#059669' : '#ef4444'}>
-                          Edge: {getEdgeSign(prop.projectionEdge)}{((prop.projectionEdge || 0) * 100).toFixed(1)}%
-                        </Typography>
-                      </Box>
-                    </Box>
-                    
-                    {/* Projection Confidence */}
-                    {prop.projection_confidence && (
-                      <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="caption" color="text.secondary">
-                          Confidence:
-                        </Typography>
-                        <Chip 
-                          label={formatProjectionConfidence(prop.projection_confidence)}
-                          size="small"
-                          sx={{ 
-                            bgcolor: prop.projection_confidence === 'very-high' ? '#059669' : 
-                                   prop.projection_confidence === 'high' ? '#10b981' :
-                                   prop.projection_confidence === 'medium' ? '#f59e0b' :
-                                   prop.projection_confidence === 'low' ? '#3b82f6' : '#64748b',
-                            color: 'white',
-                            fontSize: '0.6rem'
-                          }}
-                        />
-                      </Box>
-                    )}
-                    
-                    {/* Kelly Bet Sizing */}
-                    {showKellySizing && prop.kellyBetSize && prop.kellyBetSize > 0 && (
-                      <Box sx={{ mt: 1, p: 0.5, bgcolor: '#ecfdf5', borderRadius: 0.5 }}>
-                        <Typography variant="caption" fontWeight="bold" color="#059669">
-                          💰 Kelly Bet: {formatKellyBetSize(prop.kellyBetSize)}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                )}
-                
-                {/* Updated Odds Display */}
-                <Box sx={{ 
-                  display: 'flex',
-                  borderRadius: 1,
-                  overflow: 'hidden',
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  mb: 2
-                }}>
-                  <Box sx={{ 
-                    flex: 1, 
-                    textAlign: 'center', 
-                    p: 1,
-                    bgcolor: prop.over_price !== null ? '#10b981' : '#64748b',
-                    color: 'white',
-                    opacity: prop.over_price !== null ? 1 : 0.7
-                  }}>
-                    <Typography variant="caption" display="block">
-                      Over
-                    </Typography>
-                    <Typography variant="body1" fontWeight="bold">
-                      {formatPrice(prop.over_price)}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ 
-                    flex: 1, 
-                    textAlign: 'center', 
-                    p: 1,
-                    bgcolor: prop.under_price !== null ? '#ef4444' : '#64748b',
-                    color: 'white',
-                    opacity: prop.under_price !== null ? 1 : 0.7
-                  }}>
-                    <Typography variant="caption" display="block">
-                      Under
-                    </Typography>
-                    <Typography variant="body1" fontWeight="bold">
-                      {formatPrice(prop.under_price)}
-                    </Typography>
-                  </Box>
-                </Box>
-                
-                {/* Updated Confidence Display with new confidence levels */}
-                {(prop.calculated_confidence) && (
-                  <Box sx={{ mt: 1, mb: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      Market Analysis: 
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                      <Chip 
-                        label={`${formatConfidence(prop.calculated_confidence)} (${getEdgeSign(prop.calculated_edge)}${((prop.calculated_edge || 0) * 100).toFixed(1)}%)`}
-                        size="small"
-                        sx={{ 
-                          bgcolor: getConfidenceColor(prop.calculated_confidence),
-                          color: 'white',
-                          fontSize: '0.7rem',
-                          height: '20px',
-                          fontWeight: 'bold'
-                        }}
-                      />
                       
-                      {prop.recommendedSide && prop.recommendedSide !== 'none' && (
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        {prop.game || 'Unknown Game'}
+                      </Typography>
+                      
+                      {/* Stat Type and Line */}
+                      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Chip 
-                          label={`${prop.recommendedSide.toUpperCase()} (${getEdgeSign(prop.projectionEdge)}${((prop.projectionEdge || 0) * 100).toFixed(1)}%)`}
+                          label={formatPropType(prop.stat_type)}
                           size="small"
                           sx={{ 
-                            bgcolor: prop.recommendedSide === 'over' ? '#10b981' : '#ef4444',
-                            color: 'white',
-                            fontSize: '0.6rem',
-                            height: '18px'
+                            bgcolor: `${getSportColor(prop.sport)}20`,
+                            color: getSportColor(prop.sport),
+                            fontWeight: 'bold'
                           }}
                         />
+                        <Typography variant="h6" sx={{ color: getSportColor(prop.sport), fontWeight: 'bold' }}>
+                          Line: {prop.line || 0}
+                        </Typography>
+                      </Box>
+                      
+                      {/* ===== ENHANCED: Projection Display with Edge and Confidence ===== */}
+                      {prop.projection !== undefined && prop.projection !== null && (
+                        <Box sx={{ 
+                          mb: 2, 
+                          p: 1, 
+                          bgcolor: '#f8fafc', 
+                          borderRadius: 1,
+                          border: '1px solid #e2e8f0'
+                        }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="body2" fontWeight="bold">
+                                Projection: {prop.projection.toFixed(1)}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Diff: {prop.projection_diff ? (prop.projection_diff > 0 ? '+' : '') + prop.projection_diff.toFixed(1) : 'N/A'}
+                              </Typography>
+                            </Box>
+                            <Box sx={{ textAlign: 'right' }}>
+                              <Chip 
+                                label={`${prop.projection > prop.line ? 'Over' : 'Under'} by ${Math.abs(prop.projection - prop.line).toFixed(1)}`}
+                                size="small"
+                                sx={{ 
+                                  bgcolor: prop.projection > prop.line ? '#10b981' : '#ef4444',
+                                  color: 'white',
+                                  fontWeight: 'bold',
+                                  mb: 0.5
+                                }}
+                              />
+                              <Typography variant="caption" fontWeight="bold" color={(prop.projectionEdge || 0) > 0 ? '#059669' : '#ef4444'}>
+                                Edge: {getEdgeSign(prop.projectionEdge)}{((prop.projectionEdge || 0) * 100).toFixed(1)}%
+                              </Typography>
+                            </Box>
+                          </Box>
+                          
+                          {/* Projection Confidence */}
+                          {prop.projection_confidence && (
+                            <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Typography variant="caption" color="text.secondary">
+                                Confidence:
+                              </Typography>
+                              <Chip 
+                                label={formatProjectionConfidence(prop.projection_confidence)}
+                                size="small"
+                                sx={{ 
+                                  bgcolor: prop.projection_confidence === 'very-high' ? '#059669' : 
+                                         prop.projection_confidence === 'high' ? '#10b981' :
+                                         prop.projection_confidence === 'medium' ? '#f59e0b' :
+                                         prop.projection_confidence === 'low' ? '#3b82f6' : '#64748b',
+                                  color: 'white',
+                                  fontSize: '0.6rem'
+                                }}
+                              />
+                            </Box>
+                          )}
+                          
+                          {/* Kelly Bet Sizing */}
+                          {showKellySizing && prop.kellyBetSize && prop.kellyBetSize > 0 && (
+                            <Box sx={{ mt: 1, p: 0.5, bgcolor: '#ecfdf5', borderRadius: 0.5 }}>
+                              <Typography variant="caption" fontWeight="bold" color="#059669">
+                                💰 Kelly Bet: {formatKellyBetSize(prop.kellyBetSize)}
+                              </Typography>
+                            </Box>
+                          )}
+                        </Box>
                       )}
-                    </Box>
-                  </Box>
-                )}
+                      
+                      {/* Updated Odds Display */}
+                      <Box sx={{ 
+                        display: 'flex',
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        mb: 2
+                      }}>
+                        <Box sx={{ 
+                          flex: 1, 
+                          textAlign: 'center', 
+                          p: 1,
+                          bgcolor: prop.over_price !== null ? '#10b981' : '#64748b',
+                          color: 'white',
+                          opacity: prop.over_price !== null ? 1 : 0.7
+                        }}>
+                          <Typography variant="caption" display="block">
+                            Over
+                          </Typography>
+                          <Typography variant="body1" fontWeight="bold">
+                            {formatPrice(prop.over_price)}
+                          </Typography>
+                        </Box>
+                        <Box sx={{ 
+                          flex: 1, 
+                          textAlign: 'center', 
+                          p: 1,
+                          bgcolor: prop.under_price !== null ? '#ef4444' : '#64748b',
+                          color: 'white',
+                          opacity: prop.under_price !== null ? 1 : 0.7
+                        }}>
+                          <Typography variant="caption" display="block">
+                            Under
+                          </Typography>
+                          <Typography variant="body1" fontWeight="bold">
+                            {formatPrice(prop.under_price)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      
+                      {/* Updated Confidence Display with new confidence levels */}
+                      {(prop.calculated_confidence) && (
+                        <Box sx={{ mt: 1, mb: 1 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            Market Analysis: 
+                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                            <Chip 
+                              label={`${formatConfidence(prop.calculated_confidence)} (${getEdgeSign(prop.calculated_edge)}${((prop.calculated_edge || 0) * 100).toFixed(1)}%)`}
+                              size="small"
+                              sx={{ 
+                                bgcolor: getConfidenceColor(prop.calculated_confidence),
+                                color: 'white',
+                                fontSize: '0.7rem',
+                                height: '20px',
+                                fontWeight: 'bold'
+                              }}
+                            />
+                            
+                            {prop.recommendedSide && prop.recommendedSide !== 'none' && (
+                              <Chip 
+                                label={`${prop.recommendedSide.toUpperCase()} (${getEdgeSign(prop.projectionEdge)}${((prop.projectionEdge || 0) * 100).toFixed(1)}%)`}
+                                size="small"
+                                sx={{ 
+                                  bgcolor: prop.recommendedSide === 'over' ? '#10b981' : '#ef4444',
+                                  color: 'white',
+                                  fontSize: '0.6rem',
+                                  height: '18px'
+                                }}
+                              />
+                            )}
+                          </Box>
+                        </Box>
+                      )}
 
-                {/* ENHANCED VALUE BET SECTION with projection confidence */}
-                {((prop.calculated_edge !== undefined && prop.calculated_edge > 0) || (prop.projectionEdge !== undefined && prop.projectionEdge > 0)) && (
-                  <Box sx={{ 
-                    mt: 1, 
-                    p: 1, 
-                    bgcolor: prop.projection_confidence === 'very-high' ? '#f0fdf4' : 
-                            prop.projection_confidence === 'high' ? '#f0f9ff' : 
-                            prop.calculated_confidence === 'arbitrage' ? '#faf5ff' : '#fefce8', 
-                    borderRadius: 1,
-                    border: `1px solid ${
-                      prop.projection_confidence === 'very-high' ? '#bbf7d0' : 
-                      prop.projection_confidence === 'high' ? '#bae6fd' : 
-                      prop.calculated_confidence === 'arbitrage' ? '#ddd6fe' : '#fef08a'
-                    }`
-                  }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Typography variant="caption" fontWeight="bold" color={
-                        prop.projection_confidence === 'very-high' ? '#059669' :
-                        prop.projection_confidence === 'high' ? '#0369a1' :
-                        prop.calculated_confidence === 'arbitrage' ? '#7c3aed' : '#92400e'
-                      }>
-                        {prop.projection_confidence === 'very-high' ? '🎯 VERY HIGH VALUE' :
-                         prop.projection_confidence === 'high' ? '✅ HIGH VALUE' :
-                         prop.calculated_confidence === 'arbitrage' ? '💰 ARBITRAGE OPPORTUNITY' : '🔥 VALUE BET'}
-                      </Typography>
-                      <Typography variant="caption" fontWeight="bold" color="#059669">
-                        Edge: {getEdgeSign(prop.projectionEdge)}{(((prop.projectionEdge || prop.calculated_edge || 0)) * 100).toFixed(1)}%
-                      </Typography>
-                    </Box>
-                    
-                    {prop.recommendedSide && prop.recommendedSide !== 'none' && (
-                      <Typography variant="body2" sx={{ mt: 0.5, color: '#0c4a6e' }}>
-                        <strong>Bet:</strong> {prop.recommendedSide.toUpperCase()} {prop.stat_type} {prop.line}
-                      </Typography>
-                    )}
-                    
-                    {prop.projection && (
-                      <Typography variant="body2" sx={{ color: '#0c4a6e' }}>
-                        <strong>Projection:</strong> {prop.projection.toFixed(1)} ({prop.projection > prop.line ? 'Over' : 'Under'} by {Math.abs(prop.projection - prop.line).toFixed(1)})
-                      </Typography>
-                    )}
-                    
-                    {prop.estimated_true_prob !== undefined && prop.market_implied !== undefined && (
-                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#0c4a6e' }}>
-                        True Prob: {(prop.estimated_true_prob * 100).toFixed(1)}% vs Market: {(prop.market_implied * 100).toFixed(1)}%
-                      </Typography>
-                    )}
-                  </Box>
-                )}
-                
-                {/* Footer */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-                  {prop.sport && (
-                    <Chip 
-                      label={(prop.sport || '').toUpperCase()}
-                      size="small"
-                      sx={{ 
-                        bgcolor: `${getSportColor(prop.sport)}20`,
-                        color: getSportColor(prop.sport),
-                      }}
-                    />
-                  )}
-                  <Typography variant="caption" color="text.secondary">
-                    Updated: {prop.last_update ? new Date(prop.last_update).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
+                      {/* ENHANCED VALUE BET SECTION with projection confidence */}
+                      {((prop.calculated_edge !== undefined && prop.calculated_edge > 0) || (prop.projectionEdge !== undefined && prop.projectionEdge > 0)) && (
+                        <Box sx={{ 
+                          mt: 1, 
+                          p: 1, 
+                          bgcolor: prop.projection_confidence === 'very-high' ? '#f0fdf4' : 
+                                  prop.projection_confidence === 'high' ? '#f0f9ff' : 
+                                  prop.calculated_confidence === 'arbitrage' ? '#faf5ff' : '#fefce8', 
+                          borderRadius: 1,
+                          border: `1px solid ${
+                            prop.projection_confidence === 'very-high' ? '#bbf7d0' : 
+                            prop.projection_confidence === 'high' ? '#bae6fd' : 
+                            prop.calculated_confidence === 'arbitrage' ? '#ddd6fe' : '#fef08a'
+                          }`
+                        }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Typography variant="caption" fontWeight="bold" color={
+                              prop.projection_confidence === 'very-high' ? '#059669' :
+                              prop.projection_confidence === 'high' ? '#0369a1' :
+                              prop.calculated_confidence === 'arbitrage' ? '#7c3aed' : '#92400e'
+                            }>
+                              {prop.projection_confidence === 'very-high' ? '🎯 VERY HIGH VALUE' :
+                               prop.projection_confidence === 'high' ? '✅ HIGH VALUE' :
+                               prop.calculated_confidence === 'arbitrage' ? '💰 ARBITRAGE OPPORTUNITY' : '🔥 VALUE BET'}
+                            </Typography>
+                            <Typography variant="caption" fontWeight="bold" color="#059669">
+                              Edge: {getEdgeSign(prop.projectionEdge)}{(((prop.projectionEdge || prop.calculated_edge || 0)) * 100).toFixed(1)}%
+                            </Typography>
+                          </Box>
+                          
+                          {prop.recommendedSide && prop.recommendedSide !== 'none' && (
+                            <Typography variant="body2" sx={{ mt: 0.5, color: '#0c4a6e' }}>
+                              <strong>Bet:</strong> {prop.recommendedSide.toUpperCase()} {prop.stat_type} {prop.line}
+                            </Typography>
+                          )}
+                          
+                          {prop.projection && (
+                            <Typography variant="body2" sx={{ color: '#0c4a6e' }}>
+                              <strong>Projection:</strong> {prop.projection.toFixed(1)} ({prop.projection > prop.line ? 'Over' : 'Under'} by {Math.abs(prop.projection - prop.line).toFixed(1)})
+                            </Typography>
+                          )}
+                          
+                          {prop.estimated_true_prob !== undefined && prop.market_implied !== undefined && (
+                            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#0c4a6e' }}>
+                              True Prob: {(prop.estimated_true_prob * 100).toFixed(1)}% vs Market: {(prop.market_implied * 100).toFixed(1)}%
+                            </Typography>
+                          )}
+                        </Box>
+                      )}
+                      
+                      {/* Footer */}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+                        {prop.sport && (
+                          <Chip 
+                            label={(prop.sport || '').toUpperCase()}
+                            size="small"
+                            sx={{ 
+                              bgcolor: `${getSportColor(prop.sport)}20`,
+                              color: getSportColor(prop.sport),
+                            }}
+                          />
+                        )}
+                        <Typography variant="caption" color="text.secondary">
+                          Updated: {prop.last_update ? new Date(prop.last_update).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
           </Grid>
-        );
-      })}
-    </Grid>
-  )}
-</Box>
+        )}
+      </Box>
 
-      {/* Analytics Section (from File 2) - SAFELY mapped */}
+      {/* Analytics Section - SAFELY mapped */}
       {analytics.length > 0 && (
         <Box sx={{ mt: 4 }}>
           <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', color: '#3a0ca3', mb: 3 }}>
@@ -2390,17 +2331,17 @@ const PrizePicksScreen: React.FC = () => {
                   width: 24, 
                   height: 24, 
                   borderRadius: '50%', 
-                  bgcolor: getSportColor(sport),
+                  bgcolor: getSportColor(selectedSport),
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'white',
                   fontSize: '12px'
                 }}>
-                  {sport === 'nba' ? '🏀' : sport === 'nfl' ? '🏈' : '⚾'}
+                  {selectedSport === 'nba' ? '🏀' : selectedSport === 'nfl' ? '🏈' : '⚾'}
                 </Box>
                 <Typography variant="body1" fontWeight="bold">
-                  {sport.toUpperCase()}
+                  {selectedSport.toUpperCase()}
                 </Typography>
               </Box>
             </Box>
@@ -2479,9 +2420,9 @@ const PrizePicksScreen: React.FC = () => {
           
           <Box sx={{ mt: 2, textAlign: 'center' }}>
             <Typography variant="caption" color="text.secondary">
-              {activeEndpoint === 'mock' 
-                ? 'Note: Using sample data. Real picks will load when API endpoints return data.'
-                : `Data loaded from ${activeEndpoint}. Auto-refreshes every 2 minutes.`}
+              {activeEndpoint 
+                ? `Data loaded from ${activeEndpoint}. Auto-refreshes every 2 minutes.`
+                : 'Loading data from API...'}
             </Typography>
           </Box>
         </Paper>

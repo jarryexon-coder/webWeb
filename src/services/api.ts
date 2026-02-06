@@ -1,5 +1,5 @@
 // src/services/api.ts
-const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app';
 
 export const api = {
   baseUrl: API_BASE_URL,

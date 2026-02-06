@@ -1,9 +1,16 @@
-// src/App.tsx - COMPLETE PRODUCTION VERSION WITH ERROR BOUNDARY
+// src/App.tsx - UPDATED WITH REACT QUERY PROVIDER
 import React, { useEffect } from 'react'
 import { Routes, Route, Navigate, BrowserRouter as Router } from 'react-router-dom'
 
+// Import React Query
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+
 // Import Global Error Boundary
 import GlobalErrorBoundary from './components/GlobalErrorBoundary'
+
+// Import React Query Provider (if you create a separate provider file)
+// import { ReactQueryProvider } from './providers/ReactQueryProvider'
 
 // Import all screens
 import Layout from './layouts/Layout'
@@ -31,6 +38,79 @@ import DiagnosticScreen from './pages/DiagnosticScreen'
 // Firebase initialization (if needed)
 import { initializeApp } from 'firebase/app'
 import { getAnalytics } from 'firebase/analytics'
+
+// Create a React Query Client
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 10 * 60 * 1000, // 10 minutes (Note: cacheTime is now gcTime in v5)
+      retry: 2,
+      refetchOnWindowFocus: false, // Disable to prevent unwanted refetches
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+})
+
+// Create ReactQueryProvider component (if you want it separate)
+const ReactQueryProvider = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
+}
+
+// Infinite Loop Detector variables
+let renderCount = 0;
+const renderTimestamps: number[] = [];
+
+// Infinite Loop Detector Component
+const InfiniteLoopDetector = () => {
+  useEffect(() => {
+    renderCount++;
+    const now = Date.now();
+    renderTimestamps.push(now);
+    
+    // Keep only last 100 timestamps
+    if (renderTimestamps.length > 100) {
+      renderTimestamps.shift();
+    }
+    
+    // Check for excessive renders (more than 50 in 5 seconds)
+    const fiveSecondsAgo = now - 5000;
+    const recentRenders = renderTimestamps.filter(t => t > fiveSecondsAgo);
+    
+    if (recentRenders.length > 50) {
+      console.error('🚨 INFINITE LOOP DETECTED!');
+      console.error(`Renders in last 5 seconds: ${recentRenders.length}`);
+      console.error(`Total renders: ${renderCount}`);
+      
+      // Log component tree for debugging
+      console.error('Current render count:', renderCount);
+      console.error('Render timestamps:', renderTimestamps.slice(-10));
+      
+      // Throw error to trigger error boundary
+      throw new Error(`Infinite render loop detected: ${recentRenders.length} renders in 5 seconds`);
+    }
+    
+    // Log warning for high render counts
+    if (renderCount % 100 === 0) {
+      console.warn(`⚠️ High render count: ${renderCount} renders`);
+    }
+    
+    // Log periodic debug info (every 20 renders)
+    if (renderCount % 20 === 0 && import.meta.env.DEV) {
+      console.debug(`📊 Render #${renderCount}, Recent: ${recentRenders.length} in 5s`);
+    }
+  });
+  
+  return null;
+};
 
 function App() {
   // Initialize Firebase on app load
@@ -74,40 +154,48 @@ function App() {
   }, [])
 
   return (
-    <GlobalErrorBoundary>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            {/* Home Route */}
-            <Route index element={<HomeScreen />} />
-            
-            {/* All Application Routes */}
-            <Route path="live-games" element={<LiveGamesScreen />} />
-            <Route path="nfl-analytics" element={<NFLAnalyticsScreen />} />
-            <Route path="news-desk" element={<NewsDeskScreen />} />
-            <Route path="fantasy-hub" element={<FantasyHubScreen />} />
-            <Route path="player-stats" element={<PlayerStatsScreen />} />
-            <Route path="sports-wire" element={<SportsWireScreen />} />
-            <Route path="nhl-trends" element={<NHLTrendsScreen />} />
-            <Route path="match-analytics" element={<MatchAnalyticsScreen />} />
-            <Route path="daily-picks" element={<DailyPicksScreen />} />
-            <Route path="parlay-architect" element={<ParlayArchitectScreen />} />
-            <Route path="advanced-analytics" element={<AdvancedAnalyticsScreen />} />
-            <Route path="predictions-outcome" element={<PredictionsOutcomeScreen />} />
-            <Route path="Kalshi-predictions" element={<KalshiPredictionsScreen />} />
-            <Route path="secret-phrases" element={<SecretPhraseScreen />} />
-            <Route path="prize-picks" element={<PrizePicksScreen />} />
-            <Route path="subscription" element={<SubscriptionScreen />} />
-            <Route path="login" element={<LoginScreenEnhanced />} />
-            <Route path="diagnostic" element={<DiagnosticScreen />} />
-            <Route path="backend-test" element={<BackendTestScreen />} />
-            
-            {/* Catch-all redirect */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </Router>
-    </GlobalErrorBoundary>
+    <ReactQueryProvider>
+      <GlobalErrorBoundary>
+        <Router>
+          {/* Infinite Loop Detector - place it at the top level */}
+          <InfiniteLoopDetector />
+          
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              {/* Home Route */}
+              <Route index element={<HomeScreen />} />
+              
+              {/* All Application Routes */}
+              <Route path="live-games" element={<LiveGamesScreen />} />
+              <Route path="nfl-analytics" element={<NFLAnalyticsScreen />} />
+              <Route path="news-desk" element={<NewsDeskScreen />} />
+              <Route path="fantasy-hub" element={<FantasyHubScreen />} />
+              <Route path="player-stats" element={<PlayerStatsScreen />} />
+              <Route path="sports-wire" element={<SportsWireScreen />} />
+              <Route path="nhl-trends" element={<NHLTrendsScreen />} />
+              <Route path="match-analytics" element={<MatchAnalyticsScreen />} />
+              <Route path="daily-picks" element={<DailyPicksScreen />} />
+              <Route path="parlay-architect" element={<ParlayArchitectScreen />} />
+              <Route path="advanced-analytics" element={<AdvancedAnalyticsScreen />} />
+              <Route path="predictions-outcome" element={<PredictionsOutcomeScreen />} />
+              <Route path="Kalshi-predictions" element={<KalshiPredictionsScreen />} />
+              <Route path="secret-phrases" element={<SecretPhraseScreen />} />
+              <Route path="prize-picks" element={<PrizePicksScreen />} />
+              <Route path="subscription" element={<SubscriptionScreen />} />
+              <Route path="login" element={<LoginScreenEnhanced />} />
+              <Route path="diagnostic" element={<DiagnosticScreen />} />
+              <Route path="backend-test" element={<BackendTestScreen />} />
+              
+              {/* Catch-all redirect */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </Router>
+      </GlobalErrorBoundary>
+      
+      {/* React Query DevTools - only in development */}
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />}
+    </ReactQueryProvider>
   )
 }
 

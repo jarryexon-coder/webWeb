@@ -105,6 +105,9 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSearch } from '../providers/SearchProvider';
 import { logEvent, logScreenView } from '../utils/analytics';
 
+// ADD THESE IMPORTS
+import { useFantasyPlayers, useFantasyTeams } from '../hooks/useBackendAPI';
+
 // ===== ADD MISSING RENDERHEADER FUNCTION =====
 const renderHeader = (navigate: Function) => (
   <Box sx={{ 
@@ -265,40 +268,6 @@ const MOCK_PLAYERS: Player[] = [
   }
 ];
 
-// ===== TEST API CONNECTION COMPONENT =====
-const TestAPIConnection = () => {
-  const testConnection = async () => {
-    console.log('🧪 Testing API connection...');
-    try {
-      const response = await fetch('http://localhost:5001/api/fantasy/teams');
-      const data = await response.json();
-      console.log('API Response:', data);
-      console.log('Teams count:', data.teams?.length);
-      console.log('First team:', data.teams?.[0]);
-      
-      if (data.teams && data.teams.length > 0) {
-        alert(`✅ API is working! Found ${data.teams.length} teams.\nFirst: ${data.teams[0].name}`);
-      } else {
-        alert('⚠️ API returned success but no teams');
-      }
-    } catch (error: any) {
-      console.error('API test failed:', error);
-      alert(`❌ API test failed: ${error.message}`);
-    }
-  };
-
-  return (
-    <Button 
-      variant="outlined" 
-      color="secondary" 
-      onClick={testConnection}
-      sx={{ mt: 1 }}
-    >
-      Test API Connection
-    </Button>
-  );
-};
-
 const FantasyHubScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -308,20 +277,49 @@ const FantasyHubScreen = () => {
   // ===== STATE MANAGEMENT =====
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
-  // FANTASY TEAMS STATE
-  const [fantasyTeams, setFantasyTeams] = useState<FantasyTeam[]>([]);
-  const [teamsError, setTeamsError] = useState<string | null>(null);
+  // ===== REPLACE FETCH LOGIC WITH HOOKS =====
+  const [selectedSport, setSelectedSport] = useState('nba');
   
-  // PLAYER DATA STATE
-  const [playersLoading, setPlayersLoading] = useState(false);
-  const [playerData, setPlayerData] = useState<Player[]>([]);
-  const [playersError, setPlayersError] = useState<string | null>(null);
+  // Use React Query hooks instead of manual fetch
+  const { 
+    data: playersData, 
+    isLoading: playersLoading, 
+    error: playersError,
+    refetch: refetchPlayers 
+  } = useFantasyPlayers(selectedSport, {
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: true,
+    refetchInterval: 30 * 1000, // 30 seconds polling
+  });
+  
+  const { 
+    data: teamsData, 
+    isLoading: teamsLoading, 
+    error: teamsError,
+    refetch: refetchTeams 
+  } = useFantasyTeams(selectedSport, {
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30 * 1000,
+  });
+  
+  // Extract data from hooks
+  const playerData = playersData?.players || [];
+  const fantasyTeams = teamsData?.teams || [];
+  
+  // Set loading state based on both queries
+  const loading = playersLoading || teamsLoading;
+  
+  // FANTASY TEAMS STATE (now managed by hook)
+  const [teamsErrorState, setTeamsErrorState] = useState<string | null>(null);
+  
+  // PLAYER DATA STATE (now managed by hook)
+  const [playersErrorState, setPlayersErrorState] = useState<string | null>(null);
   
   // PROJECTION FILTERING STATE
-  const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false); // Keep as false
+  const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
   const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0);
   const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(true);
   const [sortByProjectionValue, setSortByProjectionValue] = useState(true);
@@ -342,7 +340,7 @@ const FantasyHubScreen = () => {
   const [sortedPlayers, setSortedPlayers] = useState<Player[]>([]);
   
   // Filters
-  const [selectedSport, setSelectedSport] = useState('NBA');
+  const [selectedSportDisplay, setSelectedSportDisplay] = useState('NBA');
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [selectedPosition, setSelectedPosition] = useState('ALL');
   
@@ -374,7 +372,7 @@ const FantasyHubScreen = () => {
     severity: 'success' as 'success' | 'error' | 'info' | 'warning' 
   });
   
-  // ACTIVE ENDPOINT STATE
+  // ACTIVE ENDPOINT STATE (optional, can remove if not needed)
   const [activeEndpoint, setActiveEndpoint] = useState<string>('');
   
   // Positions
@@ -386,335 +384,13 @@ const FantasyHubScreen = () => {
     { name: 'DraftKings', budget: 50000, color: '#8b5cf6' }
   ];
   
-  // Sports
+  // Sports mapping for display
   const sports = [
-    { value: 'NBA', label: 'NBA', icon: <BasketballIcon /> },
-    { value: 'NFL', label: 'NFL', icon: <FootballIcon /> },
-    { value: 'NHL', label: 'NHL', icon: <HockeyIcon /> },
-    { value: 'MLB', label: 'MLB', icon: <BaseballIcon /> }
+    { value: 'NBA', label: 'NBA', icon: <BasketballIcon />, apiValue: 'nba' },
+    { value: 'NFL', label: 'NFL', icon: <FootballIcon />, apiValue: 'nfl' },
+    { value: 'NHL', label: 'NHL', icon: <HockeyIcon />, apiValue: 'nhl' },
+    { value: 'MLB', label: 'MLB', icon: <BaseballIcon />, apiValue: 'mlb' }
   ];
-
-  // ===== API BASE CONFIG =====
-  const API_BASE_URL = import.meta.env?.VITE_API_BASE || 'http://localhost:5001';
-
-  // ===== UPDATED FETCH FANTASY TEAMS FUNCTION =====
-  const fetchFantasyTeams = useCallback(async () => {
-    console.log('🔍 [fetchFantasyTeams] Fetching fantasy teams...');
-    console.log('API_BASE_URL:', API_BASE_URL);
-    setLoading(true);
-    setTeamsError(null);
-    setRefreshing(true);
-    
-    try {
-      const endpoints = [
-        '/api/fantasy/teams',
-        '/api/fantasyhub',
-        '/api/fantasy',
-      ];
-      
-      let success = false;
-      let lastError: string = '';
-      
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`🎯 Trying endpoint: ${API_BASE_URL}${endpoint}`);
-          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-          });
-          
-          console.log(`Response status: ${response.status}`);
-          
-          if (!response.ok) {
-            console.log(`❌ ${endpoint}: HTTP ${response.status}`);
-            lastError = `HTTP ${response.status}`;
-            continue;
-          }
-          
-          const data = await response.json();
-          console.log(`✅ ${endpoint}: Response received`, data);
-          
-          // IMPORTANT: Check if we have REAL data, not just a success message
-          if (data.success && data.teams && Array.isArray(data.teams) && data.teams.length > 0) {
-            console.log(`🎉 Found ${data.teams.length} REAL teams from API!`);
-            
-            // Transform API data with proper player name extraction
-            const transformedTeams = data.teams.map((team: any, index: number) => {
-              // Extract player names from the players array
-              let playerNames: string[] = [];
-              if (Array.isArray(team.players)) {
-                playerNames = team.players.map((player: any) => {
-                  if (typeof player === 'string') {
-                    return player;
-                  } else if (player && typeof player === 'object') {
-                    return player.name || player.playerName || player.id || 'Unknown Player';
-                  }
-                  return 'Unknown Player';
-                });
-              } else if (Array.isArray(team.roster)) {
-                playerNames = team.roster.map((player: any) => {
-                  if (typeof player === 'string') {
-                    return player;
-                  } else if (player && typeof player === 'object') {
-                    return player.name || player.playerName || player.id || 'Unknown Player';
-                  }
-                  return 'Unknown Player';
-                });
-              }
-              
-              return {
-                id: team.id || team._id || `team-${Date.now()}-${index}`,
-                name: team.name || team.teamName || 'Unknown Team',
-                owner: team.owner || team.user || 'Unknown Owner',
-                sport: team.sport || selectedSport,
-                league: team.league || team.leagueName || 'Unknown League',
-                record: team.record || `${team.wins || 0}-${team.losses || 0}-${team.ties || 0}`,
-                points: team.points || team.totalPoints || 0,
-                rank: team.rank || team.position || 1,
-                players: playerNames, // Now this is always an array of strings
-                waiverPosition: team.waiverPosition || team.waiver || 1,
-                movesThisWeek: team.movesThisWeek || team.transactions || 0,
-                lastUpdated: team.lastUpdated || team.updatedAt || new Date().toISOString(),
-                projectionRank: team.projectionRank,
-                projectedPoints: team.projectedPoints,
-                winProbability: team.winProbability,
-                strengthOfSchedule: team.strengthOfSchedule
-              };
-            });
-            
-            setFantasyTeams(transformedTeams);
-            setActiveEndpoint(endpoint);
-            setTeamsError(null);
-            
-            console.log(`✅ Successfully loaded ${transformedTeams.length} fantasy teams from ${endpoint}`);
-            console.log('First team from API:', transformedTeams[0]);
-            console.log('First team players:', transformedTeams[0].players);
-            
-            setSnackbar({
-              open: true,
-              message: `Loaded ${transformedTeams.length} teams from API`,
-              severity: 'success'
-            });
-            
-            success = true;
-            break;
-          } else {
-            console.log(`⚠️ ${endpoint}: No real team data found in response`);
-            console.log('Response structure:', data);
-            lastError = 'No team data in response';
-          }
-        } catch (error: any) {
-          console.log(`❌ ${endpoint} failed:`, error);
-          lastError = error.message;
-        }
-      }
-      
-      if (!success) {
-        // Only use mock data if ALL endpoints fail
-        console.log('⚠️ All real endpoints failed, using mock data');
-        console.log('Last error:', lastError);
-        
-        setFantasyTeams(MOCK_FANTASY_TEAMS);
-        setActiveEndpoint('mock');
-        setTeamsError(lastError);
-        
-        setSnackbar({
-          open: true,
-          message: `Using sample data - API unavailable: ${lastError}`,
-          severity: 'warning'
-        });
-      }
-      
-    } catch (error: any) {
-      console.error('❌ Error fetching fantasy teams:', error);
-      setTeamsError(error.message);
-      setFantasyTeams(MOCK_FANTASY_TEAMS);
-      setActiveEndpoint('mock');
-      
-      setSnackbar({
-        open: true,
-        message: `Using sample data - Error: ${error.message}`,
-        severity: 'warning'
-      });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [API_BASE_URL, selectedSport]);
-
-  // ===== UPDATED FUNCTION TO FETCH PLAYER DATA =====
-  const fetchPlayerData = useCallback(async () => {
-    console.log('🔍 [fetchPlayerData] Fetching player data...');
-    setPlayersLoading(true);
-    setPlayersError(null);
-    
-    try {
-      // Try different endpoints for player data
-      const playerEndpoints = [
-        '/api/players',
-        '/api/fantasy/players',
-        '/api/stats/players',
-      ];
-      
-      let success = false;
-      let lastError: string = '';
-      
-      for (const endpoint of playerEndpoints) {
-        try {
-          console.log(`🎯 Trying player endpoint: ${API_BASE_URL}${endpoint}`);
-          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-          });
-          
-          console.log(`Player response status: ${response.status}`);
-          
-          if (!response.ok) {
-            console.log(`❌ Player endpoint ${endpoint}: HTTP ${response.status}`);
-            lastError = `HTTP ${response.status}`;
-            continue;
-          }
-          
-          const data = await response.json();
-          console.log(`✅ Player endpoint ${endpoint}: Response received`, data);
-          
-          // Check if we have player data
-          if (data.players && Array.isArray(data.players) && data.players.length > 0) {
-            console.log(`🎉 Found ${data.players.length} REAL players from API!`);
-            
-            // Transform player data with better debugging
-            const transformedPlayers = data.players.map((player: any, index: number) => {
-              const transformedPlayer = {
-                id: player.id || player._id || `player-${Date.now()}-${index}`,
-                name: player.name || player.playerName || 'Unknown Player',
-                team: player.team || player.teamAbbrev || 'UNK',
-                position: player.position || player.pos || 'N/A',
-                fanDuelSalary: player.fanDuelSalary || player.fdSalary || player.salary || 5000,
-                draftKingsSalary: player.draftKingsSalary || player.dkSalary || player.salary || 5000,
-                salary: player.salary || player.fanDuelSalary || player.draftKingsSalary || 5000,
-                fantasyScore: player.fantasyScore || player.fp || player.points || 0,
-                value: player.value || 1.0,
-                trend: player.trend || 'stable',
-                points: player.points || player.pts || 0,
-                rebounds: player.rebounds || player.reb || 0,
-                assists: player.assists || player.ast || 0,
-                steals: player.steals || player.stl || 0,
-                blocks: player.blocks || player.blk || 0,
-                ownership: player.ownership || player.own || 0,
-                threePointers: player.threePointers || player.threes || 0,
-                projection: player.projection || player.proj || 0,
-                projectionEdge: player.projectionEdge,
-                projectionConfidence: player.projectionConfidence,
-                valueScore: player.valueScore,
-                projectedFantasyScore: player.projectedFantasyScore || player.projFP || 0
-              };
-              
-              // Log if player has projection
-              if (player.projection || player.proj) {
-                console.log(`Player ${transformedPlayer.name} has projection: ${transformedPlayer.projection}`);
-              }
-              
-              return transformedPlayer;
-            });
-            
-            setPlayerData(transformedPlayers);
-            setAvailablePlayers(transformedPlayers);
-            setPlayersError(null);
-            
-            console.log(`✅ Successfully loaded ${transformedPlayers.length} players from ${endpoint}`);
-            console.log('First player details:', transformedPlayers[0]);
-            console.log('Player projection check:', {
-              name: transformedPlayers[0].name,
-              hasProjection: transformedPlayers[0].projection !== undefined,
-              projectionValue: transformedPlayers[0].projection,
-              fantasyScore: transformedPlayers[0].fantasyScore
-            });
-            
-            setSnackbar({
-              open: true,
-              message: `Loaded ${transformedPlayers.length} players`,
-              severity: 'success'
-            });
-            
-            success = true;
-            break;
-          } else if (data.data && Array.isArray(data.data)) {
-            // Alternative response format
-            console.log(`🎉 Found ${data.data.length} players from API (data array)!`);
-            
-            const transformedPlayers = data.data.map((player: any, index: number) => ({
-              id: player.id || player._id || `player-${Date.now()}-${index}`,
-              name: player.name || player.playerName || 'Unknown Player',
-              team: player.team || player.teamAbbrev || 'UNK',
-              position: player.position || player.pos || 'N/A',
-              fanDuelSalary: player.fanDuelSalary || player.fdSalary || player.salary || 5000,
-              draftKingsSalary: player.draftKingsSalary || player.dkSalary || player.salary || 5000,
-              salary: player.salary || player.fanDuelSalary || player.draftKingsSalary || 5000,
-              fantasyScore: player.fantasyScore || player.fp || player.points || 0,
-              value: player.value || 1.0,
-              trend: player.trend || 'stable',
-              points: player.points || player.pts || 0,
-              rebounds: player.rebounds || player.reb || 0,
-              assists: player.assists || player.ast || 0,
-              steals: player.steals || player.stl || 0,
-              blocks: player.blocks || player.blk || 0,
-              ownership: player.ownership || player.own || 0,
-              threePointers: player.threePointers || player.threes || 0,
-              projection: player.projection || player.proj || 0,
-              projectionEdge: player.projectionEdge,
-              projectionConfidence: player.projectionConfidence,
-              valueScore: player.valueScore,
-              projectedFantasyScore: player.projectedFantasyScore || player.projFP || 0
-            }));
-            
-            setPlayerData(transformedPlayers);
-            setAvailablePlayers(transformedPlayers);
-            setPlayersError(null);
-            
-            console.log(`✅ Successfully loaded ${transformedPlayers.length} players from ${endpoint}`);
-            
-            success = true;
-            break;
-          } else {
-            console.log(`⚠️ ${endpoint}: No player data found in response`);
-            console.log('Response structure:', Object.keys(data));
-            lastError = 'No player data in response';
-          }
-        } catch (error: any) {
-          console.log(`❌ Player endpoint ${endpoint} failed:`, error);
-          lastError = error.message;
-        }
-      }
-      
-      if (!success) {
-        console.log('⚠️ All player endpoints failed, using mock player data');
-        console.log('Last error:', lastError);
-        
-        // Use mock players as fallback
-        setPlayerData(MOCK_PLAYERS);
-        setAvailablePlayers(MOCK_PLAYERS);
-        setPlayersError(lastError);
-        
-        setSnackbar({
-          open: true,
-          message: `Using sample player data - API unavailable: ${lastError}`,
-          severity: 'warning'
-        });
-      }
-      
-    } catch (error: any) {
-      console.error('❌ Error fetching player data:', error);
-      setPlayersError(error.message);
-      setPlayerData(MOCK_PLAYERS);
-      setAvailablePlayers(MOCK_PLAYERS);
-    } finally {
-      setPlayersLoading(false);
-    }
-  }, [API_BASE_URL]);
 
   // ===== PROJECTION VALUE CALCULATION =====
   const calculateProjectionValue = useCallback((player: Player): ProjectionValueResult => {
@@ -856,55 +532,40 @@ const FantasyHubScreen = () => {
     });
   }, [calculateProjectionValue, sortByProjectionValue]);
 
-  // ===== UPDATED INITIALIZE DATA FUNCTION =====
+  // ===== UPDATED INITIALIZE DATA =====
   const initializeData = useCallback(async () => {
     try {
-      setLoading(true);
+      console.log('🔍 Initializing data with React Query hooks...');
       
-      // Fetch both fantasy teams AND player data in parallel
-      await Promise.all([
-        fetchFantasyTeams(),
-        fetchPlayerData()
-      ]);
+      // Data is automatically fetched by hooks
+      // Just process the data once it's loaded
       
-      // Use either real player data or mock data as fallback
-      const playersToUse = playerData.length > 0 ? playerData : MOCK_PLAYERS;
-      
-      // Apply filtering and sorting
-      const valueFiltered = applyValueFiltering(playersToUse);
-      const sortedByValue = sortByValueScore(valueFiltered);
-      
-      setFilteredPlayers(valueFiltered);
-      setSortedPlayers(sortedByValue);
-      
-      calculateTeamStats([]);
-      
-      console.log('✅ Data initialized:', {
-        fantasyTeams: fantasyTeams.length,
-        players: playerData.length,
-        filtered: valueFiltered.length,
-        sorted: sortedByValue.length
-      });
-      
-      setSnackbar({ 
-        open: true, 
-        message: `Loaded ${fantasyTeams.length} fantasy teams and ${playerData.length} players`, 
-        severity: 'success' 
-      });
+      if (playerData.length > 0) {
+        // Apply filtering and sorting
+        const valueFiltered = applyValueFiltering(playerData);
+        const sortedByValue = sortByValueScore(valueFiltered);
+        
+        setAvailablePlayers(playerData);
+        setFilteredPlayers(valueFiltered);
+        setSortedPlayers(sortedByValue);
+        
+        console.log('✅ Data processed:', {
+          players: playerData.length,
+          filtered: valueFiltered.length,
+          sorted: sortedByValue.length
+        });
+      }
       
     } catch (error) {
-      console.error('Error initializing data:', error);
-      setSnackbar({ open: true, message: 'Failed to load data', severity: 'error' });
-    } finally {
-      setLoading(false);
+      console.error('Error processing data:', error);
+      setSnackbar({ open: true, message: 'Failed to process data', severity: 'error' });
     }
-  }, [fetchFantasyTeams, fetchPlayerData, playerData, applyValueFiltering, sortByValueScore]);
+  }, [playerData, applyValueFiltering, sortByValueScore]);
 
   // ===== UPDATE FILTER EFFECT =====
   useEffect(() => {
     console.log('🔄 FantasyHub filter useEffect triggered');
     console.log('Available players count:', availablePlayers.length);
-    console.log('Player data count:', playerData.length);
     
     if (!availablePlayers || availablePlayers.length === 0) {
       console.log('No players available for filtering');
@@ -953,33 +614,55 @@ const FantasyHubScreen = () => {
     
     console.log(`✅ Filtered to ${valueFiltered.length} players, sorted: ${sorted.length}`);
     
-  }, [availablePlayers, playerData, searchQuery, selectedPosition, selectedTeam, applyValueFiltering, sortByValueScore]);
+  }, [availablePlayers, searchQuery, selectedPosition, selectedTeam, applyValueFiltering, sortByValueScore]);
 
   // ===== UPDATED LOAD DATA ON MOUNT =====
   useEffect(() => {
-    const init = async () => {
-      logScreenView('FantasyHubScreen');
-      console.log('🚀 FantasyHubScreen mounted, initializing...');
-      
-      // Check if we've already initialized
-      if (fantasyTeams.length > 0 && playerData.length > 0) {
-        console.log('✅ Already initialized, skipping...');
-        return;
-      }
-      
-      await initializeData();
-      
-      // Check for initial search params
-      const params = new URLSearchParams(location.search);
-      const initialSearch = params.get('search');
-      if (initialSearch) {
-        setSearchInput(initialSearch);
-        setSearchQuery(initialSearch);
-      }
-    };
+    logScreenView('FantasyHubScreen');
+    console.log('🚀 FantasyHubScreen mounted, initializing...');
     
-    init();
-  }, [location]); // Remove initializeData from dependencies to prevent loops
+    // Initialize data when playerData is available
+    if (playerData.length > 0) {
+      initializeData();
+    }
+    
+    // Check for initial search params
+    const params = new URLSearchParams(location.search);
+    const initialSearch = params.get('search');
+    if (initialSearch) {
+      setSearchInput(initialSearch);
+      setSearchQuery(initialSearch);
+    }
+  }, [playerData, location]);
+
+  // ===== REFRESH HANDLER =====
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setSearchQuery('');
+    setSearchInput('');
+    
+    try {
+      // Refetch both queries
+      await Promise.all([
+        refetchPlayers(),
+        refetchTeams()
+      ]);
+      
+      setSnackbar({ 
+        open: true, 
+        message: 'Data refreshed successfully', 
+        severity: 'success' 
+      });
+    } catch (error) {
+      setSnackbar({ 
+        open: true, 
+        message: 'Failed to refresh data', 
+        severity: 'error' 
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // ===== CALCULATE TEAM STATS =====
   const calculateTeamStats = useCallback((teamData: Player[]) => {
@@ -1092,31 +775,6 @@ const FantasyHubScreen = () => {
     setSnackbar({ open: true, message: `Removed ${player.name} from your team`, severity: 'success' });
   }, [activePlatform.name, budget, team, availablePlayers, calculateTeamStats]);
 
-  // ===== REFRESH HANDLER =====
-  const onRefresh = async () => {
-    setRefreshing(true);
-    setSearchQuery('');
-    setSearchInput('');
-    
-    try {
-      await initializeData();
-      
-      setSnackbar({ 
-        open: true, 
-        message: 'Data refreshed successfully', 
-        severity: 'success' 
-      });
-    } catch (error) {
-      setSnackbar({ 
-        open: true, 
-        message: 'Failed to refresh data', 
-        severity: 'error' 
-      });
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   // ===== DRAFT FUNCTIONS =====
   const fetchSnakeDraft = async (position: number) => {
     setIsGeneratingDraft(true);
@@ -1125,7 +783,7 @@ const FantasyHubScreen = () => {
       const result: DraftResult = {
         success: true,
         draftPosition: position,
-        sport: selectedSport,
+        sport: selectedSportDisplay,
         platform: activePlatform.name,
         results: {
           picks: ['Stephen Curry', 'Nikola Jokic', 'Luka Doncic', 'Jayson Tatum', 'Giannis Antetokounmpo'],
@@ -1152,7 +810,7 @@ const FantasyHubScreen = () => {
       const result: DraftResult = {
         success: true,
         draftPosition: position,
-        sport: selectedSport,
+        sport: selectedSportDisplay,
         platform: activePlatform.name,
         results: {
           picks: ['Jayson Tatum', 'Donovan Mitchell', 'Bam Adebayo', 'Tyrese Haliburton', 'Anthony Davis'],
@@ -1182,6 +840,22 @@ const FantasyHubScreen = () => {
       'C': '#ef4444'
     };
     return colors[position] || '#64748b';
+  };
+
+  // ===== UPDATE SPORT CHANGE HANDLER =====
+  const handleSportChange = (sportValue: string) => {
+    // Find the sport object
+    const sportObj = sports.find(s => s.value === sportValue);
+    if (sportObj) {
+      setSelectedSportDisplay(sportValue);
+      setSelectedSport(sportObj.apiValue); // This will trigger the hooks to refetch
+      
+      setSnackbar({
+        open: true,
+        message: `Loading ${sportValue} data...`,
+        severity: 'info'
+      });
+    }
   };
 
   // ===== RENDER FUNCTIONS =====
@@ -1245,14 +919,14 @@ const FantasyHubScreen = () => {
               color={team.length === 9 ? "success" : "default"}
             />
             <Chip 
-              label={`${selectedSport}`} 
+              label={`${selectedSportDisplay}`} 
               sx={{ 
-                bgcolor: selectedSport === 'NBA' ? '#ef444420' : 
-                        selectedSport === 'NFL' ? '#3b82f620' : 
-                        selectedSport === 'NHL' ? '#0ea5e920' : '#8b5cf620',
-                color: selectedSport === 'NBA' ? '#ef4444' : 
-                       selectedSport === 'NFL' ? '#3b82f6' : 
-                       selectedSport === 'NHL' ? '#0ea5e9' : '#8b5cf6'
+                bgcolor: selectedSportDisplay === 'NBA' ? '#ef444420' : 
+                        selectedSportDisplay === 'NFL' ? '#3b82f620' : 
+                        selectedSportDisplay === 'NHL' ? '#0ea5e920' : '#8b5cf620',
+                color: selectedSportDisplay === 'NBA' ? '#ef4444' : 
+                       selectedSportDisplay === 'NFL' ? '#3b82f6' : 
+                       selectedSportDisplay === 'NHL' ? '#0ea5e9' : '#8b5cf6'
               }}
             />
             <Chip 
@@ -1277,8 +951,8 @@ const FantasyHubScreen = () => {
         <FormControl sx={{ minWidth: 120 }} size="small">
           <InputLabel>Sport</InputLabel>
           <Select
-            value={selectedSport}
-            onChange={(e) => setSelectedSport(e.target.value)}
+            value={selectedSportDisplay}
+            onChange={(e) => handleSportChange(e.target.value)}
             label="Sport"
           >
             {sports.map((sport) => (
@@ -1631,15 +1305,15 @@ const FantasyHubScreen = () => {
               🏆 Your Fantasy Teams
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {fantasyTeams.length} teams loaded from {activeEndpoint === 'mock' ? 'sample data' : 'API'}
+              {fantasyTeams.length} teams loaded from React Query hooks
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Tooltip title="Data Source">
               <Chip 
-                label={`Source: ${activeEndpoint === 'mock' ? 'Sample Data' : activeEndpoint}`}
+                label={`Sport: ${selectedSportDisplay}`}
                 size="small"
-                color={activeEndpoint === 'mock' ? 'warning' : 'success'}
+                color="primary"
               />
             </Tooltip>
             <IconButton onClick={onRefresh} disabled={refreshing}>
@@ -1903,6 +1577,46 @@ const FantasyHubScreen = () => {
     );
   };
 
+  // ===== UPDATE DEBUG INFO =====
+  const renderDebugInfo = () => (
+    <Box sx={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', borderRadius: '4px' }}>
+      <Typography variant="subtitle2" fontWeight="bold">FantasyHub Debug:</Typography>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
+        <Chip 
+          label={teamsError ? '⚠️ Teams Error' : '✅ Teams Loaded'}
+          color={teamsError ? 'warning' : 'success'}
+        />
+        <Chip 
+          label={playersError ? '⚠️ Players Error' : '✅ Players Loaded'}
+          color={playersError ? 'warning' : 'success'}
+        />
+        <Typography variant="caption">
+          Teams: {fantasyTeams.length} | Players: {playerData.length}
+        </Typography>
+        <Button 
+          variant="outlined" 
+          size="small"
+          onClick={onRefresh}
+          disabled={refreshing}
+          startIcon={<RefreshIcon />}
+        >
+          Refresh All
+        </Button>
+      </Box>
+      <Box sx={{ mt: 1 }}>
+        <Typography variant="caption" display="block">
+          Current Sport: {selectedSport} | Display: {selectedSportDisplay}
+        </Typography>
+        <Typography variant="caption" display="block">
+          Players with projections: {playerData.filter(p => p.projection && p.projection > 0).length} / {playerData.length}
+        </Typography>
+        <Typography variant="caption" display="block">
+          Filtered players: {filteredPlayers.length} | Sorted players: {sortedPlayers.length}
+        </Typography>
+      </Box>
+    </Box>
+  );
+
   const renderAddPlayerModal = () => (
     <Dialog open={showAddPlayer} onClose={() => setShowAddPlayer(false)} maxWidth="md" fullWidth>
       <DialogTitle>
@@ -2051,38 +1765,36 @@ const FantasyHubScreen = () => {
   );
 
   // ===== LOADING STATE =====
-  if (loading || playersLoading) {
+  if (loading) {
     return (
       <Container maxWidth="lg">
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', flexDirection: 'column' }}>
           <CircularProgress />
           <Typography sx={{ ml: 2, mt: 2 }}>Loading Fantasy Hub...</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Loading fantasy teams and player data from API...
+            Loading {selectedSportDisplay} data from API...
           </Typography>
         </Box>
       </Container>
     );
   }
 
-  // ===== ADD PLAYER ERROR DISPLAY =====
-  if (playersError && playerData.length === 0) {
+  // ===== ERROR STATES =====
+  if (teamsError || playersError) {
     return (
       <Container maxWidth="lg">
         <Alert 
-          severity="warning" 
+          severity="error" 
           sx={{ mb: 3, mt: 4 }}
           action={
-            <Button color="inherit" size="small" onClick={fetchPlayerData}>
-              RETRY PLAYER DATA
+            <Button color="inherit" size="small" onClick={onRefresh}>
+              RETRY
             </Button>
           }
         >
-          <AlertTitle>Using Sample Player Data</AlertTitle>
-          Could not load real player data: {playersError}
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            Using sample data for demonstration. Try the "Test API Connection" button below.
-          </Typography>
+          <AlertTitle>API Error</AlertTitle>
+          {teamsError && `Teams: ${teamsError.message || teamsError}`}
+          {playersError && `Players: ${playersError.message || playersError}`}
         </Alert>
       </Container>
     );
@@ -2090,39 +1802,12 @@ const FantasyHubScreen = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
-      {/* Header - fix: pass navigate function */}
+      {/* Header */}
       {renderHeader(navigate)}
       
       <Container maxWidth="lg">
-        {/* UPDATED Debug Info with Test API Button */}
-        <Box sx={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', borderRadius: '4px' }}>
-          <Typography variant="subtitle2" fontWeight="bold">FantasyHub Debug:</Typography>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
-            <Chip 
-              label={activeEndpoint === 'mock' ? '⚠️ Using MOCK Teams' : '✅ Using REAL Teams'}
-              color={activeEndpoint === 'mock' ? 'warning' : 'success'}
-            />
-            <Chip 
-              label={playerData.length > 1 ? '✅ REAL Players' : '⚠️ MOCK Players'}
-              color={playerData.length > 1 ? 'success' : 'warning'}
-            />
-            <Typography variant="caption">
-              Teams: {fantasyTeams.length} | Players: {playerData.length}
-            </Typography>
-            <TestAPIConnection />
-          </Box>
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="caption" display="block">
-              Projection Filtering: {enableProjectionFiltering ? 'ON' : 'OFF'}
-            </Typography>
-            <Typography variant="caption" display="block">
-              Players with projections: {playerData.filter(p => p.projection && p.projection > 0).length} / {playerData.length}
-            </Typography>
-            <Typography variant="caption" display="block">
-              Filtered players: {filteredPlayers.length} | Sorted players: {sortedPlayers.length}
-            </Typography>
-          </Box>
-        </Box>
+        {/* Debug Info */}
+        {renderDebugInfo()}
 
         {/* Fantasy Teams Section */}
         {renderFantasyTeamsSection()}
@@ -2131,12 +1816,7 @@ const FantasyHubScreen = () => {
         {playerData.length === 0 && (
           <Alert severity="info" sx={{ mb: 3 }}>
             <AlertTitle>No Player Data Loaded</AlertTitle>
-            Player data is not available. The system is trying to fetch real player statistics from the API.
-            {playersError && (
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                Error: {playersError}
-              </Typography>
-            )}
+            No player data available for {selectedSportDisplay}.
           </Alert>
         )}
         
@@ -2211,14 +1891,12 @@ const FantasyHubScreen = () => {
         <Box sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>
           <Typography variant="body2">
             Salaries based on FanDuel & DraftKings pricing • {activePlatform.name} budget: ${activePlatform.budget.toLocaleString()}
-            {activeEndpoint && (
-              <Chip 
-                label={`Data from: ${activeEndpoint === 'mock' ? 'Sample' : activeEndpoint}`}
-                size="small"
-                color={activeEndpoint === 'mock' ? 'warning' : 'success'}
-                sx={{ ml: 2 }}
-              />
-            )}
+            <Chip 
+              label={`Sport: ${selectedSportDisplay}`}
+              size="small"
+              color="primary"
+              sx={{ ml: 2 }}
+            />
           </Typography>
           <Typography variant="caption">
             Data updates manually • Last refreshed: {new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}

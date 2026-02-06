@@ -70,9 +70,15 @@ import {
   School as SchoolIcon,
   Notifications as NotificationsIcon,
   AddCircle as AddIcon,
-  TrendingUp as TrendingIcon
+  TrendingUp as TrendingIcon,
+  Update as UpdateIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
 import { Link, useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
+
+// Import React Query hook
+import { useSportsWire } from '../hooks/useBackendAPI';
 
 // Mock data and hooks
 import { useSearch } from '../providers/SearchProvider';
@@ -149,13 +155,24 @@ const NewsDeskScreen = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   
+  // Use React Query hook
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
+  
+  const { 
+    data: newsData, 
+    isLoading, 
+    error, 
+    refetch,
+    isRefetching 
+  } = useSportsWire(selectedSport);
+  
+  // Extract news from hook response
+  const newsFromApi = newsData?.news || [];
+  
   // State management
-  // const { searchHistory, addToSearchHistory, clearSearchHistory } = useSearch();
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchHistory, setShowSearchHistory] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('updates');
   const [updates, setUpdates] = useState<UpdateItem[]>([]);
   const [winningPosts, setWinningPosts] = useState<WinPost[]>([]);
@@ -190,45 +207,44 @@ const NewsDeskScreen = () => {
     { value: 'NCAAF', label: 'NCAAF', icon: <TrendingIcon fontSize="small" /> },
   ];
 
-  // NEW: Fetch news from API
-  const fetchNews = async () => {
-    try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:5001';
-      console.log(`🎯 Fetching news from: ${apiBaseUrl}/api/news`);
+  // Transform API news to UpdateItem format
+  const transformApiNewsToUpdates = React.useCallback((apiNews: any[]): UpdateItem[] => {
+    if (!apiNews || apiNews.length === 0) {
+      return MOCK_ARTICLES;
+    }
+    
+    console.log(`✅ Using REAL news: ${apiNews.length} articles`);
+    
+    return apiNews.map((article: any, index: number) => {
+      const publishedAt = article.publishedAt ? new Date(article.publishedAt) : new Date();
+      const timeAgo = formatTimeAgo(publishedAt);
       
-      const response = await fetch(`${apiBaseUrl}/api/news`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const result = await response.json();
-      console.log('✅ News data received:', result);
-      
-      if (result && result.success && Array.isArray(result.news)) {
-        console.log(`✅ Using REAL news: ${result.news.length} articles`);
-        
-        // Convert API news to UpdateItem format
-        const apiUpdates: UpdateItem[] = result.news.map((article: any, index: number) => ({
-          id: article.id || `api-${index}`,
-          title: article.title || 'News Update',
-          description: article.description || article.content || 'No description available',
-          date: article.date || article.createdAt || 'Recently',
-          category: 'announcement'
-        }));
-        
-        setUpdates(apiUpdates);
-        setFilteredUpdates(apiUpdates);
-      } else {
-        throw new Error('Invalid news data structure');
-      }
-      
-    } catch (error) {
-      console.error('❌ Failed to fetch news, using mock data:', error);
-      // Fallback to mock
-      setUpdates(MOCK_ARTICLES);
-      setFilteredUpdates(MOCK_ARTICLES);
+      return {
+        id: article.id || `api-${index}`,
+        title: article.title || 'News Update',
+        description: article.description || article.content || 'No description available',
+        date: timeAgo,
+        category: mapCategory(article.category || 'news')
+      };
+    });
+  }, []);
+
+  // Helper function to format time ago
+  const formatTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) {
+      return `${diffDays}d ago`;
+    } else if (diffHours > 0) {
+      return `${diffHours}h ago`;
+    } else if (diffMins > 0) {
+      return `${diffMins}m ago`;
+    } else {
+      return 'Just now';
     }
   };
 
@@ -242,20 +258,20 @@ const NewsDeskScreen = () => {
       'performance': 'performance',
       'tip': 'tip',
       'news': 'announcement',
-      'improvement': 'update'
+      'improvement': 'update',
+      'sports': 'announcement',
+      'nba': 'announcement',
+      'nfl': 'announcement',
+      'mlb': 'announcement'
     };
     
-    return categoryMap[category.toLowerCase()] || 'announcement';
+    const lowerCategory = category.toLowerCase();
+    return categoryMap[lowerCategory] || 'announcement';
   };
 
   // Fetch all data including news from API and mock wins
-  const fetchAllData = async (isRefresh = false) => {
+  const fetchAllData = React.useCallback(async (isRefresh = false) => {
     try {
-      setLoading(true);
-      
-      // Fetch news from API
-      await fetchNews();
-      
       // Fetch winning posts (mock data for now)
       const winsData = getSampleWins();
       setWinningPosts(winsData);
@@ -264,30 +280,34 @@ const NewsDeskScreen = () => {
       setLastRefresh(new Date());
 
       // Mock read status
-      const mockReadStatus: Record<string, boolean> = {};
-      // This will be populated after updates are set
-      setTimeout(() => {
-        const currentUpdates = updates.length > 0 ? updates : MOCK_ARTICLES;
-        const updatedReadStatus: Record<string, boolean> = {};
-        currentUpdates.forEach(update => {
-          updatedReadStatus[update.id] = Math.random() > 0.5;
-        });
-        setReadStatus(updatedReadStatus);
-      }, 100);
+      const currentUpdates = updates.length > 0 ? updates : MOCK_ARTICLES;
+      const updatedReadStatus: Record<string, boolean> = {};
+      currentUpdates.forEach(update => {
+        updatedReadStatus[update.id] = Math.random() > 0.5;
+      });
+      setReadStatus(updatedReadStatus);
 
     } catch (error) {
       console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
-  };
+  }, [updates]);
 
-  // Update useEffect to use fetchAllData
+  // Update effect to transform API news
   useEffect(() => {
     logScreenView('NewsDeskScreen');
+    
+    if (newsFromApi.length > 0) {
+      const transformedUpdates = transformApiNewsToUpdates(newsFromApi);
+      setUpdates(transformedUpdates);
+      setFilteredUpdates(transformedUpdates);
+    } else {
+      setUpdates(MOCK_ARTICLES);
+      setFilteredUpdates(MOCK_ARTICLES);
+    }
+    
+    // Fetch other data
     fetchAllData();
-  }, []);
+  }, [newsFromApi, transformApiNewsToUpdates, fetchAllData]);
 
   const handleSearchSubmit = async () => {
     const query = searchInput.trim();
@@ -334,8 +354,8 @@ const NewsDeskScreen = () => {
   };
 
   const handleRefresh = () => {
-    setRefreshing(true);
-    fetchAllData(true);
+    refetch();
+    setLastRefresh(new Date());
   };
 
   const markAsRead = (id: string) => {
@@ -474,7 +494,7 @@ const NewsDeskScreen = () => {
                 <NotificationsIcon />
               </Badge>
             )}
-            <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white' }}>
+            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching} sx={{ color: 'white' }}>
               <RefreshIcon />
             </IconButton>
           </Box>
@@ -747,7 +767,7 @@ const NewsDeskScreen = () => {
     </Card>
   );
 
-  if (loading && updates.length === 0) {
+  if (isLoading && updates.length === 0) {
     return (
       <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
         {renderHeader()}
@@ -766,8 +786,28 @@ const NewsDeskScreen = () => {
       {renderHeader()}
       
       <Container maxWidth="lg">
+        {/* Error State */}
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            <Typography variant="body1" fontWeight="bold">
+              Failed to load news updates
+            </Typography>
+            <Typography variant="body2">
+              {error instanceof Error ? error.message : 'Unknown error'}
+            </Typography>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={handleRefresh}
+              sx={{ mt: 1 }}
+            >
+              Try Again
+            </Button>
+          </Alert>
+        )}
+
         {/* Loading/Refreshing Indicator */}
-        {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+        {(isLoading || isRefetching) && <LinearProgress sx={{ mb: 2 }} />}
         
         {/* Search Results Info */}
         {searchQuery && (
