@@ -34,7 +34,7 @@ import {
   TableRow
 } from '@mui/material';
 import { Refresh as RefreshIcon, SportsBasketball, SportsFootball, SportsBaseball, Info as InfoIcon, FilterList as FilterIcon, TrendingUp, ShowChart, AttachMoney } from '@mui/icons-material';
-import { usePrizePicksSelections, usePlayerProps, usePrizePicksAnalytics } from '../hooks/useBackendAPI';
+import { usePrizePicksSelections, usePlayerProps, useAnalytics } from '../hooks/useBackendAPI';
 
 // Fix for Chip size prop
 const Chip = (props: any) => <MuiChip size="small" {...props} />;
@@ -155,7 +155,7 @@ const PrizePicksScreen: React.FC = () => {
   const {
     data: analyticsData,
     isLoading: analyticsLoading
-  } = usePrizePicksAnalytics();
+  } = useAnalytics();  // Instead of usePrizePicksAnalytics()
 
   // Original states from File 2 (keep for compatibility)
   const [analytics, setAnalytics] = useState<any[]>([]);
@@ -163,10 +163,10 @@ const PrizePicksScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeEndpoint, setActiveEndpoint] = useState<string>('');
 
-  // ===== ADDED: Projection Filtering State =====
-  const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
-  const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0);
-  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(true);
+  // ===== ADDED: Projection Filtering State - FIXED VALUES =====
+  const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);  // Changed from true
+  const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(0.5);  // Changed from 1.0
+  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(false);  // Changed from true
   const [sortByProjectionValue, setSortByProjectionValue] = useState(true);
 
   // ===== ADDED: Kelly Criterion State =====
@@ -590,40 +590,69 @@ const PrizePicksScreen: React.FC = () => {
     return [];
   };
 
-  // ===== ADDED: Enhanced Value-Based Filtering and Sorting (FROM FILE 2) =====
+  // ===== ADDED: Enhanced Value-Based Filtering and Sorting (FROM FILE 2) - WITH DEBUG LOGGING =====
   const applyValueFiltering = (props: CombinedPlayerProp[]): CombinedPlayerProp[] => {
+    console.log('🔍 FILTER DEBUG: Starting with', props.length, 'props');
+    
     let filtered = [...props];
+    
+    // Log each prop before filtering
+    props.forEach((prop, i) => {
+      console.log(`  Prop ${i}: ${prop.player_name}`, {
+        projection: prop.projection,
+        line: prop.line,
+        projection_diff: prop.projection_diff,
+        projectionEdge: prop.projectionEdge,
+        value_side: prop.value_side
+      });
+    });
     
     // Apply projection filter (if enabled)
     if (enableProjectionFiltering) {
+      const before = filtered.length;
       filtered = filtered.filter(p => {
-        if (p.projection === undefined) return false;
+        if (p.projection === undefined) {
+          console.log(`  ❌ Filtered ${p.player_name}: No projection`);
+          return false;
+        }
         const diff = Math.abs(p.projection_diff || 0);
-        return diff >= projectionDifferenceThreshold;
+        const passes = diff >= projectionDifferenceThreshold;
+        if (!passes) {
+          console.log(`  ❌ Filtered ${p.player_name}: diff ${diff} < threshold ${projectionDifferenceThreshold}`);
+        }
+        return passes;
       });
+      console.log(`  Projection filter: ${before} → ${filtered.length}`);
     }
     
     // Apply edge threshold filter
     if (minEdgeThreshold > 0) {
-      filtered = filtered.filter(p => (p.projectionEdge || 0) >= minEdgeThreshold);
+      const before = filtered.length;
+      filtered = filtered.filter(p => {
+        const passes = (p.projectionEdge || 0) >= minEdgeThreshold;
+        if (!passes) {
+          console.log(`  ❌ Filtered ${p.player_name}: edge ${p.projectionEdge} < min ${minEdgeThreshold}`);
+        }
+        return passes;
+      });
+      console.log(`  Edge filter: ${before} → ${filtered.length}`);
     }
     
     // Apply projection-edge agreement filter (if enabled)
     if (onlyShowProjectionEdges) {
+      const before = filtered.length;
       filtered = filtered.filter(prop => {
         const projectionDirection = (prop.projection || 0) > prop.line ? 'over' : 'under';
-        
-        // Check if edge analysis agrees with projection
-        if (prop.value_side === projectionDirection) {
-          return true;
-        } else if (prop.value_side === 'arbitrage-both') {
-          return true;
-        } else {
-          return false;
+        const passes = prop.value_side === projectionDirection || prop.value_side === 'arbitrage-both';
+        if (!passes) {
+          console.log(`  ❌ Filtered ${prop.player_name}: projection ${projectionDirection} ≠ value ${prop.value_side}`);
         }
+        return passes;
       });
+      console.log(`  Agreement filter: ${before} → ${filtered.length}`);
     }
     
+    console.log('🔍 FILTER DEBUG: Ending with', filtered.length, 'props');
     return filtered;
   };
 
@@ -1330,6 +1359,38 @@ const PrizePicksScreen: React.FC = () => {
     });
   };
 
+  // ===== ADDED: Diagnostic Test Button =====
+  const handleDiagnosticTest = () => {
+    console.log('🧪 DIAGNOSTIC TEST:');
+    console.log('1. Raw selections:', selections);
+    console.log('2. Raw props:', props);
+    console.log('3. Combined data:', combinedData);
+    console.log('4. Filter settings:', {
+      enableProjectionFiltering,
+      projectionDifferenceThreshold,
+      minEdgeThreshold,
+      onlyShowProjectionEdges
+    });
+    
+    // Test each filter individually
+    if (combinedData && combinedData.length > 0) {
+      combinedData.forEach((p, i) => {
+        const diff = Math.abs(p.projection_diff || 0);
+        console.log(`Player ${i}: ${p.player_name}`);
+        console.log(`  Projection: ${p.projection}, Line: ${p.line}, Diff: ${diff}`);
+        console.log(`  ProjectionEdge: ${p.projectionEdge}`);
+        console.log(`  Value side: ${p.value_side}`);
+        
+        // Check if it would pass filters
+        const hasProjection = p.projection !== undefined;
+        const passesDiff = diff >= projectionDifferenceThreshold;
+        const passesEdge = (p.projectionEdge || 0) >= minEdgeThreshold;
+        
+        console.log(`  Would pass? Projection: ${hasProjection}, Diff: ${passesDiff}, Edge: ${passesEdge}`);
+      });
+    }
+  };
+
   // Loading state
   if (loading) {
     return (
@@ -1359,6 +1420,16 @@ const PrizePicksScreen: React.FC = () => {
           <Typography variant="caption">sortByProjectionValue: {sortByProjectionValue ? 'YES' : 'NO'}</Typography>
           <Typography variant="caption">minEdgeThreshold: {(minEdgeThreshold * 100).toFixed(1)}%</Typography>
         </Box>
+        {/* Add diagnostic test button */}
+        <Button 
+          variant="outlined" 
+          color="error"
+          onClick={handleDiagnosticTest}
+          sx={{ mt: 1 }}
+          size="small"
+        >
+          Run Diagnostic Test
+        </Button>
       </Box>
 
       {/* Header */}
@@ -1495,8 +1566,9 @@ const PrizePicksScreen: React.FC = () => {
                 value={projectionDifferenceThreshold}
                 onChange={(e) => setProjectionDifferenceThreshold(parseFloat(e.target.value))}
               >
-                <MenuItem value={0.5}>0.5+ points</MenuItem>
-                <MenuItem value={1.0}>1.0+ points (Default)</MenuItem>
+                <MenuItem value={0.1}>0.1+ points</MenuItem>
+                <MenuItem value={0.5}>0.5+ points (Default)</MenuItem>
+                <MenuItem value={1.0}>1.0+ points</MenuItem>
                 <MenuItem value={1.5}>1.5+ points</MenuItem>
                 <MenuItem value={2.0}>2.0+ points</MenuItem>
                 <MenuItem value={3.0}>3.0+ points</MenuItem>

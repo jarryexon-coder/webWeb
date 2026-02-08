@@ -1,5 +1,5 @@
 // src/pages/PredictionsOutcomeScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -69,45 +69,32 @@ import {
 import { alpha } from '@mui/material/styles';
 import { format } from 'date-fns';
 
-// Import scraper hook
-import { usePredictionOutcomes } from '../hooks/useSportsQueries';
-
 // Mock data for fallback (updated to match scraper format)
 const MOCK_PREDICTIONS_HISTORY = Array.from({ length: 8 }, (_, i) => {
-  const types = ['Game Outcome', 'Player Prop', 'Team Total', 'Over/Under'];
-  const leagues = ['NBA', 'NFL', 'MLB'];
+  const sports = ['nba', 'nfl', 'mlb', 'nhl'];
   const outcomes = ['correct', 'incorrect', 'pending'];
-  const randomType = types[i % types.length];
-  const randomLeague = leagues[i % leagues.length].toLowerCase();
+  const randomSport = sports[i % sports.length];
   const randomOutcome = outcomes[i % outcomes.length];
   
   return {
     id: `prediction-${i + 1}`,
-    type: randomType,
-    league: randomLeague,
-    sport: randomLeague,
-    game: `${randomLeague.toUpperCase()} Game ${i + 1}`,
+    game: `${randomSport.toUpperCase()} Game ${i + 1}`,
     prediction: `Team A ${i % 2 === 0 ? 'wins' : 'covers'} by ${Math.floor(Math.random() * 10) + 1} points`,
     confidence_pre_game: Math.floor(Math.random() * 30) + 70,
     confidence: Math.floor(Math.random() * 30) + 70,
     odds: i % 3 === 0 ? '-150' : i % 3 === 1 ? '+120' : '-110',
     outcome: randomOutcome,
     actual_result: randomOutcome === 'correct' ? 'Win' : randomOutcome === 'incorrect' ? 'Loss' : 'Pending',
-    result: randomOutcome === 'correct' ? 'Correct' : randomOutcome === 'incorrect' ? 'Incorrect' : 'Pending',
-    units: randomOutcome === 'correct' ? `+${(Math.random() * 2 + 0.5).toFixed(1)}` : 
-            randomOutcome === 'incorrect' ? `-${(Math.random() + 0.5).toFixed(1)}` : '0',
     accuracy: Math.floor(Math.random() * 30) + 70,
     timestamp: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
     scraped_at: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
-    analysis: `${randomLeague.toUpperCase()} analysis based on statistical models and historical data`,
-    modelAccuracy: `${Math.floor(Math.random() * 20) + 75}%`,
     key_factors: [
       'Statistical trends',
       'Player injuries',
       'Weather conditions'
     ],
-    ai_analysis: 'AI analysis indicates favorable conditions for this prediction',
-    source: 'espn'
+    sport: randomSport,
+    source: 'Statistical Analysis'
   };
 });
 
@@ -115,8 +102,70 @@ const leagueData = [
   { id: 'all', name: 'All Leagues', icon: <AnalyticsIcon />, color: '#059669' },
   { id: 'nba', name: 'NBA', icon: <BasketballIcon />, color: '#ef4444' },
   { id: 'nfl', name: 'NFL', icon: <FootballIcon />, color: '#3b82f6' },
-  { id: 'mlb', name: 'MLB', icon: <BaseballIcon />, color: '#f59e0b' }
+  { id: 'mlb', name: 'MLB', icon: <BaseballIcon />, color: '#f59e0b' },
+  { id: 'nhl', name: 'NHL', icon: <HockeyIcon />, color: '#0ea5e9' }
 ];
+
+// Custom hook for fetching prediction outcomes
+const usePredictionOutcomes = (sport: string) => {
+  const [data, setData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isRefetching, setIsRefetching] = useState(false);
+
+  const fetchOutcomes = async (isRefetch = false) => {
+    if (isRefetch) {
+      setIsRefetching(true);
+    } else {
+      setIsLoading(true);
+    }
+    
+    try {
+      const API_BASE = process.env.REACT_APP_API_BASE || 'https://pleasing-determination-production.up.railway.app';
+      const response = await fetch(`${API_BASE}/api/predictions/outcome?sport=${sport}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setData(result);
+      } else {
+        throw new Error(result.error || 'Failed to fetch outcomes');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      console.error('Error fetching prediction outcomes:', err);
+      
+      // Fallback to mock data
+      setData({
+        success: true,
+        outcomes: MOCK_PREDICTIONS_HISTORY,
+        count: MOCK_PREDICTIONS_HISTORY.length,
+        sport: sport,
+        timestamp: new Date().toISOString(),
+        scraped: false
+      });
+    } finally {
+      setIsLoading(false);
+      setIsRefetching(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOutcomes();
+  }, [sport]);
+
+  return {
+    data,
+    isLoading,
+    error,
+    refetch: () => fetchOutcomes(true),
+    isRefetching
+  };
+};
 
 const PredictionsOutcomeScreen = () => {
   const navigate = useNavigate();
@@ -127,7 +176,7 @@ const PredictionsOutcomeScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   
-  // Use scraper hook
+  // Use custom hook
   const {
     data: outcomesData,
     isLoading,
@@ -136,7 +185,7 @@ const PredictionsOutcomeScreen = () => {
     isRefetching
   } = usePredictionOutcomes(selectedSport);
 
-  const outcomes = outcomesData?.outcomes || MOCK_PREDICTIONS_HISTORY;
+  const outcomes = outcomesData?.outcomes || [];
 
   // Filter outcomes
   const filteredByOutcome = filterOutcome === 'all'
@@ -146,9 +195,9 @@ const PredictionsOutcomeScreen = () => {
   // Filter by search
   const filteredOutcomes = searchQuery
     ? filteredByOutcome.filter((item: any) =>
-        item.game?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.prediction?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.type?.toLowerCase().includes(searchQuery.toLowerCase())
+        (item.game?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (item.prediction?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (item.sport?.toLowerCase() || '').includes(searchQuery.toLowerCase())
       )
     : filteredByOutcome;
 
@@ -175,6 +224,7 @@ const PredictionsOutcomeScreen = () => {
       case 'nba': return <BasketballIcon />;
       case 'nfl': return <FootballIcon />;
       case 'mlb': return <BaseballIcon />;
+      case 'nhl': return <HockeyIcon />;
       default: return <BasketballIcon />;
     }
   };
@@ -195,23 +245,14 @@ const PredictionsOutcomeScreen = () => {
 
   const getOutcomeIcon = (outcome: string) => {
     switch(outcome) {
-      case 'correct': return '✓';
-      case 'incorrect': return '✗';
-      case 'pending': return '⏱';
-      default: return '?';
+      case 'correct': return <CheckCircleIcon />;
+      case 'incorrect': return <CancelIcon />;
+      case 'pending': return <TrendingUpIcon />;
+      default: return <TrendingUpIcon />;
     }
   };
 
   const AnalyticsDashboard = () => {
-    const totalUnits = filteredOutcomes.reduce((sum: number, pred: any) => {
-      if (pred.outcome === 'correct') {
-        return sum + (parseFloat(pred.units?.replace('+', '') || '0') || 1.0);
-      } else if (pred.outcome === 'incorrect') {
-        return sum - (parseFloat(pred.units?.replace('-', '') || '0') || 1.0);
-      }
-      return sum;
-    }, 0);
-    
     return (
       <Modal
         open={showAnalyticsModal}
@@ -252,7 +293,7 @@ const PredictionsOutcomeScreen = () => {
                   { label: 'Total Predictions', value: totalPredictions, color: '#059669' },
                   { label: 'Win Rate', value: `${winRate}%`, color: '#10b981' },
                   { label: 'Avg Confidence', value: `${avgConfidence}%`, color: '#3b82f6' },
-                  { label: 'Total Units', value: totalUnits > 0 ? `+${totalUnits.toFixed(1)}` : totalUnits.toFixed(1), color: totalUnits >= 0 ? '#10b981' : '#ef4444' }
+                  { label: 'Correct', value: correctPredictions, color: '#10b981' }
                 ].map((stat, idx) => (
                   <Grid item xs={6} key={idx}>
                     <Box textAlign="center" p={2} sx={{ bgcolor: alpha(stat.color, 0.1), borderRadius: 2 }}>
@@ -351,14 +392,14 @@ const PredictionsOutcomeScreen = () => {
                       </Avatar>
                     </ListItemAvatar>
                     <ListItemText
-                      primary={prediction.game || prediction.title || 'Prediction'}
+                      primary={prediction.game || 'Prediction'}
                       secondary={`${prediction.sport?.toUpperCase() || 'NBA'} • ${prediction.timestamp ? format(new Date(prediction.timestamp), 'MMM d') : 'Unknown date'}`}
                       primaryTypographyProps={{ variant: 'body2', fontWeight: 'medium' }}
                       secondaryTypographyProps={{ variant: 'caption' }}
                     />
                     <ListItemSecondaryAction>
                       <Typography variant="caption" fontWeight="bold" color={getOutcomeColor(prediction.outcome)}>
-                        {prediction.units || '0'}
+                        {prediction.outcome === 'correct' ? '✓' : prediction.outcome === 'incorrect' ? '✗' : '⏱'}
                       </Typography>
                     </ListItemSecondaryAction>
                   </ListItem>
@@ -377,19 +418,19 @@ const PredictionsOutcomeScreen = () => {
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
           <CircularProgress />
           <Typography sx={{ ml: 2 }}>
-            {outcomesData?.scraped === false ? 'Loading historical data...' : 'Scraping latest outcomes...'}
+            Loading prediction outcomes...
           </Typography>
         </Box>
       </Container>
     );
   }
 
-  if (error) {
+  if (error && !outcomesData) {
     return (
       <Container>
         <Alert severity="error" sx={{ mb: 3 }}>
           <AlertTitle>Error Loading Prediction Outcomes</AlertTitle>
-          {error instanceof Error ? error.message : 'Failed to load prediction outcomes'}
+          {error}
           <Button onClick={handleRefresh} sx={{ mt: 1 }}>Retry</Button>
         </Alert>
       </Container>
@@ -432,7 +473,7 @@ const PredictionsOutcomeScreen = () => {
               disabled={isLoading || isRefetching}
               sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
             >
-              {isRefetching ? 'Scraping...' : 'Refresh'}
+              {isRefetching ? 'Refreshing...' : 'Refresh'}
             </Button>
           </Box>
         </Box>
@@ -446,7 +487,7 @@ const PredictionsOutcomeScreen = () => {
               Prediction Outcomes ({filteredOutcomes.length} predictions)
             </Typography>
             <Typography variant="h6" sx={{ opacity: 0.9 }}>
-              Track prediction accuracy with scraped results
+              Track prediction accuracy with {outcomesData?.scraped ? 'live scraped' : 'historical'} results
             </Typography>
           </Box>
         </Box>
@@ -461,7 +502,7 @@ const PredictionsOutcomeScreen = () => {
           <Typography variant="body2">
             {outcomesData.scraped 
               ? `✅ Live outcomes scraped for ${selectedSport.toUpperCase()}`
-              : '⚠️ Using historical data (live scraping unavailable)'}
+              : 'ℹ️ Using historical data'}
             {outcomesData.timestamp && ` • Updated ${format(new Date(outcomesData.timestamp), 'PPpp')}`}
           </Typography>
         </Alert>
@@ -614,42 +655,37 @@ const PredictionsOutcomeScreen = () => {
                 <TableCell><strong>Accuracy</strong></TableCell>
                 <TableCell><strong>Confidence</strong></TableCell>
                 <TableCell><strong>Date</strong></TableCell>
-                <TableCell><strong>Details</strong></TableCell>
+                <TableCell><strong>Sport</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filteredOutcomes.map((outcome: any) => (
-                <TableRow key={outcome.id}>
+                <TableRow key={outcome.id || Math.random()}>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
-                      {outcome.game || outcome.title || 'Unknown Game'}
+                      {outcome.game || 'Unknown Game'}
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2">
-                      {outcome.prediction}
+                      {outcome.prediction || 'No prediction details'}
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Chip
-                        icon={outcome.outcome === 'correct' ? <CheckCircleIcon /> : 
-                              outcome.outcome === 'incorrect' ? <CancelIcon /> : <TrendingUpIcon />}
-                        label={outcome.outcome === 'correct' ? 'Correct' : 
-                               outcome.outcome === 'incorrect' ? 'Incorrect' : 'Pending'}
+                        icon={getOutcomeIcon(outcome.outcome)}
+                        label={outcome.outcome?.charAt(0).toUpperCase() + outcome.outcome?.slice(1) || 'Pending'}
                         color={outcome.outcome === 'correct' ? 'success' : 
                                outcome.outcome === 'incorrect' ? 'error' : 'warning'}
                         size="small"
                       />
-                      <Typography variant="body2" color="text.secondary">
-                        {outcome.actual_result || outcome.result || 'N/A'}
-                      </Typography>
                     </Box>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography variant="body2">
-                        {outcome.accuracy || 'N/A'}%
+                        {outcome.accuracy ? `${outcome.accuracy}%` : 'N/A'}
                       </Typography>
                       {outcome.accuracy && (
                         <Box
@@ -663,7 +699,7 @@ const PredictionsOutcomeScreen = () => {
                         >
                           <Box
                             sx={{
-                              width: `${outcome.accuracy}%`,
+                              width: `${Math.min(100, outcome.accuracy)}%`,
                               height: '100%',
                               backgroundColor: outcome.accuracy >= 70 ? '#4caf50' :
                                              outcome.accuracy >= 50 ? '#ff9800' : '#f44336'
@@ -678,28 +714,22 @@ const PredictionsOutcomeScreen = () => {
                       label={`${outcome.confidence_pre_game || outcome.confidence || 70}%`}
                       size="small"
                       variant="outlined"
-                      color={outcome.confidence_pre_game >= 80 ? 'success' : 
-                             outcome.confidence_pre_game >= 60 ? 'warning' : 'error'}
+                      color={(outcome.confidence_pre_game || outcome.confidence) >= 80 ? 'success' : 
+                             (outcome.confidence_pre_game || outcome.confidence) >= 60 ? 'warning' : 'error'}
                     />
                   </TableCell>
                   <TableCell>
                     {outcome.timestamp && format(new Date(outcome.timestamp), 'MMM d')}
                   </TableCell>
                   <TableCell>
-                    {outcome.key_factors && outcome.key_factors.length > 0 && (
-                      <Tooltip title={
-                        <Box>
-                          <Typography variant="body2" fontWeight="bold">Key Factors:</Typography>
-                          {outcome.key_factors.map((factor: string, i: number) => (
-                            <Typography key={i} variant="body2">• {factor}</Typography>
-                          ))}
-                        </Box>
-                      }>
-                        <IconButton size="small">
-                          <ExpandMoreIcon />
-                        </IconButton>
-                      </Tooltip>
-                    )}
+                    <Chip
+                      label={outcome.sport?.toUpperCase() || 'NBA'}
+                      size="small"
+                      sx={{
+                        bgcolor: alpha(getLeagueColor(outcome.sport || 'nba'), 0.1),
+                        color: getLeagueColor(outcome.sport || 'nba')
+                      }}
+                    />
                   </TableCell>
                 </TableRow>
               ))}
@@ -710,30 +740,22 @@ const PredictionsOutcomeScreen = () => {
         /* Card View */
         <Grid container spacing={3} sx={{ mb: 4 }}>
           {filteredOutcomes.map((outcome: any) => {
-            const leagueColor = getLeagueColor(outcome.sport || outcome.league || 'nba');
+            const leagueColor = getLeagueColor(outcome.sport || 'nba');
             const outcomeColor = getOutcomeColor(outcome.outcome);
             
             return (
-              <Grid item xs={12} md={6} key={outcome.id}>
+              <Grid item xs={12} md={6} key={outcome.id || Math.random()}>
                 <Card>
                   <CardContent>
                     {/* Header */}
                     <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
                       <Box>
                         <Typography variant="h6" fontWeight="bold" gutterBottom>
-                          {outcome.game || outcome.title || 'Prediction'}
+                          {outcome.game || 'Prediction'}
                         </Typography>
                         <Box display="flex" gap={1} alignItems="center">
                           <Chip
-                            label={outcome.type || 'Game Outcome'}
-                            size="small"
-                            sx={{ 
-                              bgcolor: alpha('#8b5cf6', 0.1),
-                              color: '#8b5cf6'
-                            }}
-                          />
-                          <Chip
-                            label={(outcome.sport || outcome.league || 'nba').toUpperCase()}
+                            label={(outcome.sport || 'nba').toUpperCase()}
                             size="small"
                             sx={{ 
                               bgcolor: alpha(leagueColor, 0.1),
@@ -755,7 +777,7 @@ const PredictionsOutcomeScreen = () => {
                     
                     {/* Prediction */}
                     <Typography variant="body1" fontWeight="medium" color="primary" mb={2}>
-                      {outcome.prediction}
+                      {outcome.prediction || 'No prediction details available'}
                     </Typography>
                     
                     {/* Stats */}
@@ -774,8 +796,8 @@ const PredictionsOutcomeScreen = () => {
                               mt: 0.5,
                               bgcolor: '#e2e8f0',
                               '& .MuiLinearProgress-bar': {
-                                bgcolor: outcome.confidence_pre_game >= 80 ? '#10b981' : 
-                                        outcome.confidence_pre_game >= 70 ? '#f59e0b' : '#ef4444'
+                                bgcolor: (outcome.confidence_pre_game || outcome.confidence) >= 80 ? '#10b981' : 
+                                        (outcome.confidence_pre_game || outcome.confidence) >= 70 ? '#f59e0b' : '#ef4444'
                               }
                             }}
                           />
@@ -790,7 +812,7 @@ const PredictionsOutcomeScreen = () => {
                             Accuracy
                           </Typography>
                           <Typography variant="body1" fontWeight="bold">
-                            {outcome.accuracy || 'N/A'}%
+                            {outcome.accuracy ? `${outcome.accuracy}%` : 'N/A'}
                           </Typography>
                         </Box>
                       </Grid>
@@ -800,7 +822,7 @@ const PredictionsOutcomeScreen = () => {
                             Result
                           </Typography>
                           <Typography variant="body1" fontWeight="bold" color={outcomeColor}>
-                            {outcome.actual_result || outcome.result || 'Pending'}
+                            {outcome.actual_result || outcome.outcome?.charAt(0).toUpperCase() + outcome.outcome?.slice(1) || 'Pending'}
                           </Typography>
                         </Box>
                       </Grid>
@@ -824,35 +846,17 @@ const PredictionsOutcomeScreen = () => {
                       </Accordion>
                     )}
                     
-                    {/* Analysis */}
-                    {outcome.ai_analysis && (
-                      <Accordion>
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography variant="body2">AI Analysis</Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Typography variant="body2" color="text.secondary">
-                            {outcome.ai_analysis}
-                          </Typography>
-                        </AccordionDetails>
-                      </Accordion>
-                    )}
-                    
                     {/* Footer */}
                     <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mt: 2 }}>
                       <Typography variant="caption" color="text.secondary">
                         {outcome.timestamp ? format(new Date(outcome.timestamp), 'PPpp') : 'Unknown date'}
                         {outcome.source && ` • Source: ${outcome.source}`}
                       </Typography>
-                      <Chip
-                        icon={<SparklesIcon />}
-                        label={`Model: ${outcome.modelAccuracy || '75%'}`}
-                        size="small"
-                        sx={{ 
-                          bgcolor: alpha('#3b82f6', 0.1),
-                          color: '#3b82f6'
-                        }}
-                      />
+                      <Typography variant="caption" color="text.secondary">
+                        {outcome.outcome === 'correct' && '✓ Correct'}
+                        {outcome.outcome === 'incorrect' && '✗ Incorrect'}
+                        {outcome.outcome === 'pending' && '⏱ Pending'}
+                      </Typography>
                     </Box>
                   </CardContent>
                 </Card>

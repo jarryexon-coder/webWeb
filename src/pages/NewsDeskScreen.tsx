@@ -1,5 +1,5 @@
 // src/pages/NewsDeskScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -39,7 +39,6 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  OutlinedInput,
   SelectChangeEvent
 } from '@mui/material';
 import {
@@ -69,7 +68,6 @@ import {
   SportsBaseball as BaseballIcon,
   School as SchoolIcon,
   Notifications as NotificationsIcon,
-  AddCircle as AddIcon,
   TrendingUp as TrendingIcon,
   Update as UpdateIcon,
   Error as ErrorIcon
@@ -77,11 +75,8 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 
-// Import React Query hook
+// Custom hooks
 import { useSportsWire } from '../hooks/useBackendAPI';
-
-// Mock data and hooks
-import { useSearch } from '../providers/SearchProvider';
 import { logEvent, logScreenView } from '../utils/analytics';
 
 interface UpdateItem {
@@ -155,8 +150,8 @@ const NewsDeskScreen = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   
-  // Use React Query hook
-  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
+  // Use React Query hook with improved caching
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   
   const { 
     data: newsData, 
@@ -164,29 +159,38 @@ const NewsDeskScreen = () => {
     error, 
     refetch,
     isRefetching 
-  } = useSportsWire(selectedSport);
+  } = useSportsWire(selectedSport, {
+    // Add query options to prevent excessive calls
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    staleTime: 300000, // 5 minutes
+    cacheTime: 600000, // 10 minutes
+  });
   
   // Extract news from hook response
-  const newsFromApi = newsData?.news || [];
-  
+  const newsFromApi = useMemo(() => {
+    if (!newsData) return [];
+    if (newsData.success === false) return [];
+    return newsData.news || [];
+  }, [newsData]);
+
   // State management
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchHistory, setShowSearchHistory] = useState(false);
   const [activeTab, setActiveTab] = useState('updates');
-  const [updates, setUpdates] = useState<UpdateItem[]>([]);
+  const [updates, setUpdates] = useState<UpdateItem[]>(MOCK_ARTICLES);
   const [winningPosts, setWinningPosts] = useState<WinPost[]>([]);
-  const [filteredUpdates, setFilteredUpdates] = useState<UpdateItem[]>([]);
+  const [filteredUpdates, setFilteredUpdates] = useState<UpdateItem[]>(MOCK_ARTICLES);
   const [filteredWinningPosts, setFilteredWinningPosts] = useState<WinPost[]>([]);
   const [readStatus, setReadStatus] = useState<Record<string, boolean>>({});
-  const [user] = useState(null); // Mock user state
-  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [showPostModal, setShowPostModal] = useState(false);
   const [posting, setPosting] = useState(false);
   const [postTitle, setPostTitle] = useState('');
   const [postDescription, setPostDescription] = useState('');
   const [postAmount, setPostAmount] = useState('');
-  const [postSport, setPostSport] = useState('NFL');
+  const [postSport, setPostSport] = useState('NBA');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
   const updateCategories = {
@@ -204,12 +208,12 @@ const NewsDeskScreen = () => {
     { value: 'NHL', label: 'NHL', icon: <HockeyIcon fontSize="small" /> },
     { value: 'MLB', label: 'MLB', icon: <BaseballIcon fontSize="small" /> },
     { value: 'NCAAB', label: 'NCAAB', icon: <SchoolIcon fontSize="small" /> },
-    { value: 'NCAAF', label: 'NCAAF', icon: <TrendingIcon fontSize="small" /> },
   ];
 
   // Transform API news to UpdateItem format
-  const transformApiNewsToUpdates = React.useCallback((apiNews: any[]): UpdateItem[] => {
+  const transformApiNewsToUpdates = useCallback((apiNews: any[]): UpdateItem[] => {
     if (!apiNews || apiNews.length === 0) {
+      console.log('No API news found, using mock articles');
       return MOCK_ARTICLES;
     }
     
@@ -219,12 +223,22 @@ const NewsDeskScreen = () => {
       const publishedAt = article.publishedAt ? new Date(article.publishedAt) : new Date();
       const timeAgo = formatTimeAgo(publishedAt);
       
+      // Extract category from source or content
+      let category: UpdateItem['category'] = 'announcement';
+      if (article.source?.name?.includes('ESPN') || article.category === 'sports') {
+        category = 'announcement';
+      } else if (article.category === 'tip' || article.description?.includes('tip')) {
+        category = 'tip';
+      } else if (article.category === 'feature') {
+        category = 'feature';
+      }
+      
       return {
         id: article.id || `api-${index}`,
-        title: article.title || 'News Update',
+        title: article.title || 'Sports Update',
         description: article.description || article.content || 'No description available',
         date: timeAgo,
-        category: mapCategory(article.category || 'news')
+        category: category
       };
     });
   }, []);
@@ -248,132 +262,122 @@ const NewsDeskScreen = () => {
     }
   };
 
-  // Helper function to map API categories to our categories
-  const mapCategory = (category: string): UpdateItem['category'] => {
-    const categoryMap: Record<string, UpdateItem['category']> = {
-      'feature': 'feature',
-      'update': 'update',
-      'bug': 'fix',
-      'announcement': 'announcement',
-      'performance': 'performance',
-      'tip': 'tip',
-      'news': 'announcement',
-      'improvement': 'update',
-      'sports': 'announcement',
-      'nba': 'announcement',
-      'nfl': 'announcement',
-      'mlb': 'announcement'
-    };
-    
-    const lowerCategory = category.toLowerCase();
-    return categoryMap[lowerCategory] || 'announcement';
-  };
+  // Fetch winning posts data
+  const fetchWinningPosts = useCallback(() => {
+    const winsData = getSampleWins();
+    setWinningPosts(winsData);
+    setFilteredWinningPosts(winsData);
+  }, []);
 
-  // Fetch all data including news from API and mock wins
-  const fetchAllData = React.useCallback(async (isRefresh = false) => {
-    try {
-      // Fetch winning posts (mock data for now)
-      const winsData = getSampleWins();
-      setWinningPosts(winsData);
-      setFilteredWinningPosts(winsData);
-      
-      setLastRefresh(new Date());
-
-      // Mock read status
-      const currentUpdates = updates.length > 0 ? updates : MOCK_ARTICLES;
-      const updatedReadStatus: Record<string, boolean> = {};
-      currentUpdates.forEach(update => {
-        updatedReadStatus[update.id] = Math.random() > 0.5;
-      });
-      setReadStatus(updatedReadStatus);
-
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    }
-  }, [updates]);
-
-  // Update effect to transform API news
+  // Initial data fetch
   useEffect(() => {
     logScreenView('NewsDeskScreen');
+    fetchWinningPosts();
+    setLastRefresh(new Date());
     
+    // Initialize read status
+    const initialReadStatus: Record<string, boolean> = {};
+    MOCK_ARTICLES.forEach(update => {
+      initialReadStatus[update.id] = Math.random() > 0.5;
+    });
+    setReadStatus(initialReadStatus);
+  }, [fetchWinningPosts]);
+
+  // Update effect to transform API news when data arrives
+  useEffect(() => {
     if (newsFromApi.length > 0) {
+      console.log('Processing API news:', newsFromApi.length, 'articles');
       const transformedUpdates = transformApiNewsToUpdates(newsFromApi);
       setUpdates(transformedUpdates);
       setFilteredUpdates(transformedUpdates);
-    } else {
+      
+      // Update read status for new updates
+      const updatedReadStatus = { ...readStatus };
+      transformedUpdates.forEach(update => {
+        if (!(update.id in updatedReadStatus)) {
+          updatedReadStatus[update.id] = false;
+        }
+      });
+      setReadStatus(updatedReadStatus);
+    } else if (newsData?.success === false) {
+      // API returned error, use mock data
+      console.log('API error, using mock data');
       setUpdates(MOCK_ARTICLES);
       setFilteredUpdates(MOCK_ARTICLES);
     }
-    
-    // Fetch other data
-    fetchAllData();
-  }, [newsFromApi, transformApiNewsToUpdates, fetchAllData]);
+  }, [newsFromApi, newsData, transformApiNewsToUpdates, readStatus]);
 
-  const handleSearchSubmit = async () => {
+  // Filter updates based on search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredUpdates(updates);
+      return;
+    }
+    
+    const searchLower = searchQuery.toLowerCase().trim();
+    const filtered = updates.filter(update => 
+      update.title.toLowerCase().includes(searchLower) ||
+      update.description.toLowerCase().includes(searchLower) ||
+      updateCategories[update.category]?.label.toLowerCase().includes(searchLower)
+    );
+    setFilteredUpdates(filtered);
+  }, [searchQuery, updates, updateCategories]);
+
+  // Filter winning posts based on search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredWinningPosts(winningPosts);
+      return;
+    }
+    
+    const searchLower = searchQuery.toLowerCase().trim();
+    const filtered = winningPosts.filter(post =>
+      post.title.toLowerCase().includes(searchLower) ||
+      post.description.toLowerCase().includes(searchLower) ||
+      post.sport.toLowerCase().includes(searchLower) ||
+      post.userName.toLowerCase().includes(searchLower)
+    );
+    setFilteredWinningPosts(filtered);
+  }, [searchQuery, winningPosts]);
+
+  const handleSearchSubmit = useCallback(() => {
     const query = searchInput.trim();
     
     if (query) {
-      // await addToSearchHistory(query);
       setSearchQuery(query);
       setShowSearchHistory(false);
-      filterContent(query);
     } else {
       setSearchQuery('');
-      setFilteredUpdates(updates);
-      setFilteredWinningPosts(winningPosts);
+      setShowSearchHistory(false);
     }
-  };
+  }, [searchInput]);
 
-  const filterContent = (query: string) => {
-    const searchLower = query.toLowerCase().trim();
-    
-    if (activeTab === 'updates') {
-      const filtered = updates.filter(update => 
-        update.title.toLowerCase().includes(searchLower) ||
-        update.description.toLowerCase().includes(searchLower) ||
-        updateCategories[update.category]?.label.toLowerCase().includes(searchLower)
-      );
-      setFilteredUpdates(filtered);
-    } else {
-      const filtered = winningPosts.filter(post =>
-        post.title.toLowerCase().includes(searchLower) ||
-        post.description.toLowerCase().includes(searchLower) ||
-        post.sport.toLowerCase().includes(searchLower) ||
-        post.userName.toLowerCase().includes(searchLower)
-      );
-      setFilteredWinningPosts(filtered);
-    }
-  };
-
-  const handleClearSearch = () => {
+  const handleClearSearch = useCallback(() => {
     setSearchInput('');
     setSearchQuery('');
-    setFilteredUpdates(updates);
-    setFilteredWinningPosts(winningPosts);
     setShowSearchHistory(false);
-  };
+  }, []);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     refetch();
     setLastRefresh(new Date());
-  };
+  }, [refetch]);
 
-  const markAsRead = (id: string) => {
-    const updatedReadStatus = { ...readStatus, [id]: true };
-    setReadStatus(updatedReadStatus);
-  };
+  const markAsRead = useCallback((id: string) => {
+    setReadStatus(prev => ({ ...prev, [id]: true }));
+  }, []);
 
-  const likePost = (postId: string) => {
-    const updatedPosts = winningPosts.map(post => 
-      post.id === postId 
-        ? { ...post, likes: (post.likes || 0) + 1 }
-        : post
+  const likePost = useCallback((postId: string) => {
+    setWinningPosts(prev => 
+      prev.map(post => 
+        post.id === postId 
+          ? { ...post, likes: (post.likes || 0) + 1 }
+          : post
+      )
     );
-    setWinningPosts(updatedPosts);
-    setFilteredWinningPosts(updatedPosts);
-  };
+  }, []);
 
-  const postWin = async () => {
+  const postWin = useCallback(async () => {
     if (!postTitle.trim() || !postDescription.trim()) {
       setSnackbar({ open: true, message: 'Please provide a title and description', severity: 'error' });
       return;
@@ -396,14 +400,13 @@ const NewsDeskScreen = () => {
 
       const newWinningPosts = [winData, ...winningPosts];
       setWinningPosts(newWinningPosts);
-      setFilteredWinningPosts(newWinningPosts);
 
       setSnackbar({ open: true, message: 'Your winning result has been posted!', severity: 'success' });
       
       setPostTitle('');
       setPostDescription('');
       setPostAmount('');
-      setPostSport('NFL');
+      setPostSport('NBA');
       setShowPostModal(false);
       
     } catch (error) {
@@ -411,23 +414,25 @@ const NewsDeskScreen = () => {
     } finally {
       setPosting(false);
     }
-  };
+  }, [postTitle, postDescription, postAmount, postSport, winningPosts]);
 
-  const unreadCount = updates.filter(update => !readStatus[update.id]).length;
+  const unreadCount = useMemo(() => 
+    updates.filter(update => !readStatus[update.id]).length, 
+    [updates, readStatus]
+  );
 
-  const getSportColor = (sport: string) => {
+  const getSportColor = useCallback((sport: string) => {
     const colors: Record<string, string> = {
       'NFL': '#3b82f6',
       'NBA': '#ef4444',
       'NHL': '#0ea5e9',
       'MLB': '#f59e0b',
       'NCAAB': '#10b981',
-      'NCAAF': '#8b5cf6',
     };
     return colors[sport] || '#6b7280';
-  };
+  }, []);
 
-  const getSampleWins = (): WinPost[] => [
+  const getSampleWins = useCallback((): WinPost[] => [
     {
       id: 'win-1',
       title: 'Perfect Parlay Hit!',
@@ -461,9 +466,9 @@ const NewsDeskScreen = () => {
       comments: 12,
       date: '1d ago',
     },
-  ];
+  ], []);
 
-  const renderHeader = () => (
+  const renderHeader = useMemo(() => (
     <Box sx={{
       background: 'linear-gradient(135deg, #7c3aed, #8b5cf6)',
       color: 'white',
@@ -535,43 +540,6 @@ const NewsDeskScreen = () => {
               ),
             }}
           />
-
-          {/* Search History Dropdown */}
-          {showSearchHistory && [].length > 0 && (
-            <Paper sx={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: 0,
-              mt: 1,
-              zIndex: 10,
-              maxHeight: 300,
-              overflow: 'auto',
-            }}>
-              <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="subtitle1" fontWeight="bold">
-                  Recent Searches
-                </Typography>
-                <Button size="small" color="error">
-                  Clear All
-                </Button>
-              </Box>
-              <List>
-                {[].map((item, index) => (
-                  <ListItemButton
-                    key={index}
-                    onClick={() => {
-                      setSearchInput(item);
-                      handleSearchSubmit();
-                    }}
-                  >
-                    <TimeIcon fontSize="small" sx={{ mr: 2, color: 'text.secondary' }} />
-                    <ListItemText primary={item} />
-                  </ListItemButton>
-                ))}
-              </List>
-            </Paper>
-          )}
         </Box>
 
         {/* Tabs */}
@@ -633,9 +601,9 @@ const NewsDeskScreen = () => {
         </Paper>
       </Container>
     </Box>
-  );
+  ), [unreadCount, handleRefresh, isLoading, isRefetching, searchInput, handleSearchSubmit, handleClearSearch, activeTab, searchQuery, filteredUpdates.length, updates.length, filteredWinningPosts.length, winningPosts.length]);
 
-  const renderUpdateCard = (update: UpdateItem) => {
+  const renderUpdateCard = useCallback((update: UpdateItem) => {
     const isRead = readStatus[update.id] || false;
     const category = updateCategories[update.category] || updateCategories.announcement;
     
@@ -690,9 +658,9 @@ const NewsDeskScreen = () => {
         )}
       </Card>
     );
-  };
+  }, [readStatus, updateCategories, markAsRead]);
 
-  const renderWinningPost = (post: WinPost) => (
+  const renderWinningPost = useCallback((post: WinPost) => (
     <Card key={post.id} sx={{ mb: 2 }}>
       <CardContent>
         {/* Header */}
@@ -765,12 +733,12 @@ const NewsDeskScreen = () => {
         </Box>
       </CardContent>
     </Card>
-  );
+  ), [getSportColor, likePost]);
 
-  if (isLoading && updates.length === 0) {
+  if (isLoading && updates.length === MOCK_ARTICLES.length) {
     return (
       <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
-        {renderHeader()}
+        {renderHeader}
         <Container maxWidth="lg">
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
             <CircularProgress />
@@ -783,7 +751,7 @@ const NewsDeskScreen = () => {
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
-      {renderHeader()}
+      {renderHeader}
       
       <Container maxWidth="lg">
         {/* Error State */}
@@ -800,8 +768,9 @@ const NewsDeskScreen = () => {
               size="small" 
               onClick={handleRefresh}
               sx={{ mt: 1 }}
+              disabled={isRefetching}
             >
-              Try Again
+              {isRefetching ? 'Retrying...' : 'Try Again'}
             </Button>
           </Alert>
         )}
@@ -950,7 +919,7 @@ const NewsDeskScreen = () => {
             Community Hub • v1.3.0
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Last updated: {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {lastRefresh ? `Last updated: ${lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Loading...'}
           </Typography>
         </Box>
       </Container>

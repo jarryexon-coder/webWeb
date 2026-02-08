@@ -203,17 +203,20 @@ const transformApiData = (apiPredictions: any[]): Prediction[] => {
     return MOCK_KALSHI_PREDICTIONS;
   }
 
-  return apiPredictions.map((pred: any, index: number) => {
-    // Try to extract market data or use prediction data
-    const isKalshiMarket = pred.marketType === 'kalshi' || pred.platform === 'kalshi';
+  console.log(`🔄 Transforming ${apiPredictions.length} API predictions`);
+  
+  const transformed = apiPredictions.map((pred: any, index: number) => {
+    // Extract data with better fallbacks
+    const isKalshi = pred.platform === 'kalshi' || pred.marketType === 'binary' || 
+                    (pred.source && pred.source.toLowerCase().includes('kalshi'));
     
-    // Extract yes/no prices if available
+    // Extract yes/no prices
     let yesPrice = '0.50';
     let noPrice = '0.50';
     
     if (pred.yesPrice !== undefined) {
-      yesPrice = pred.yesPrice.toString();
-      noPrice = (1 - pred.yesPrice).toFixed(2);
+      yesPrice = typeof pred.yesPrice === 'number' ? pred.yesPrice.toFixed(2) : pred.yesPrice.toString();
+      noPrice = (1 - parseFloat(yesPrice)).toFixed(2);
     } else if (pred.probability !== undefined) {
       const prob = parseFloat(pred.probability) / 100;
       yesPrice = prob.toFixed(2);
@@ -224,22 +227,43 @@ const transformApiData = (apiPredictions: any[]): Prediction[] => {
       const prob = odds > 0 ? 1 / (1 + odds) : 1 / (1 + Math.abs(odds));
       yesPrice = prob.toFixed(2);
       noPrice = (1 - prob).toFixed(2);
+    } else {
+      // Default random probability
+      const randomProb = 0.45 + Math.random() * 0.3;
+      yesPrice = randomProb.toFixed(2);
+      noPrice = (1 - randomProb).toFixed(2);
     }
     
-    return {
-      id: pred.id || pred._id || pred.marketId || `kalshi-${index + 1}`,
+    // Extract confidence with fallback
+    let confidence = 65;
+    if (pred.confidence !== undefined) {
+      confidence = typeof pred.confidence === 'number' ? pred.confidence : parseInt(pred.confidence);
+    } else if (pred.probability !== undefined) {
+      confidence = Math.min(95, Math.max(50, parseFloat(pred.probability)));
+    }
+    
+    // Create transformed prediction
+    const transformedPred: Prediction = {
+      id: pred.id || pred._id || pred.marketId || `kalshi-${index + 1}-${Date.now()}`,
       question: pred.question || pred.title || pred.name || `Kalshi Market ${index + 1}`,
-      category: pred.category || pred.type || (isKalshiMarket ? 'Kalshi' : 'General'),
+      category: pred.category || pred.type || (isKalshi ? 'Kalshi' : 'General'),
       yesPrice: yesPrice,
       noPrice: noPrice,
       volume: pred.volume || pred.tradingVolume || (Math.random() > 0.5 ? 'High' : 'Medium'),
-      analysis: pred.analysis || pred.description || pred.summary || 'No analysis available for this market.',
-      expires: pred.expires || pred.expirationDate || pred.endDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(),
-      confidence: pred.confidence || pred.probability || Math.floor(Math.random() * 30) + 60,
+      analysis: pred.analysis || pred.description || pred.summary || 
+                `Market analysis based on current trends and probability models.`,
+      expires: pred.expires || pred.expirationDate || pred.endDate || 
+               new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+      confidence: Math.min(95, Math.max(50, confidence)), // Clamp between 50-95
       edge: pred.edge || pred.expectedValue || `+${(Math.random() * 5).toFixed(1)}%`,
       aiGenerated: pred.aiGenerated || false
     };
+    
+    return transformedPred;
   });
+
+  console.log(`✅ Successfully transformed ${transformed.length} predictions`);
+  return transformed.length > 0 ? transformed : MOCK_KALSHI_PREDICTIONS;
 };
 
 // ✅ Kalshi Analytics Box Component (keep existing)
@@ -594,67 +618,45 @@ const KalshiPredictionsScreen = () => {
     recordDay: '$466M',
   });
 
-  // ✅ TRANSFORM API DATA WHEN HOOK RETURNS IT
-  useEffect(() => {
-    console.log('🔄 Predictions hook data:', { 
-      data: predictionsData, 
-      loading: predictionsLoading, 
-      error: predictionsError 
+// ✅ TRANSFORM API DATA WHEN HOOK RETURNS IT
+useEffect(() => {
+  console.log('🔄 Predictions hook data:', { 
+    data: predictionsData, 
+    loading: predictionsLoading, 
+    error: predictionsError 
+  });
+  
+  if (predictionsLoading) {
+    setLoading(true);
+    return;
+  }
+  
+  // Check for API response structure
+  if (predictionsData) {
+    console.log('📊 API Response structure:', {
+      success: predictionsData.success,
+      count: predictionsData.count,
+      has_data: predictionsData.has_data,
+      predictions_length: predictionsData.predictions?.length
     });
     
-    if (predictionsLoading) {
-      setLoading(true);
-      return;
-    }
-    
-    if (predictionsError) {
-      console.error('❌ Predictions API Error:', predictionsError);
-      setError(`API Error: ${predictionsError.message || predictionsError}`);
-      
-      // Fallback to mock data when error occurs
-      console.log('🔄 Falling back to mock Kalshi data');
-      setPredictions(MOCK_KALSHI_PREDICTIONS);
-      setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
-      setLoading(false);
-      
-      // Store for debugging
-      window[`_kalshipredictionsscreenDebug`] = {
-        rawApiResponse: null,
-        error: predictionsError,
-        usingMockData: true,
-        timestamp: new Date().toISOString()
-      };
-      return;
-    }
-    
-    if (predictionsData && predictionsData.predictions) {
+    if (predictionsData.success && predictionsData.predictions && Array.isArray(predictionsData.predictions)) {
       const apiPredictions = predictionsData.predictions;
-      console.log(`✅ Using API predictions: ${apiPredictions.length} predictions`);
+      console.log(`✅ API returned ${apiPredictions.length} predictions`);
       
-      // Filter for Kalshi predictions or transform all predictions
-      const kalshiPredictions = apiPredictions.filter((pred: any) => 
-        pred.platform === 'kalshi' || 
-        pred.marketType === 'kalshi' ||
-        (pred.source && pred.source.toLowerCase().includes('kalshi'))
-      );
+      // Always transform all predictions since we now ensure they're Kalshi-style
+      const predictionsToUse = transformApiData(apiPredictions);
       
-      let predictionsToUse;
-      if (kalshiPredictions.length > 0) {
-        console.log(`✅ Found ${kalshiPredictions.length} Kalshi-specific predictions`);
-        predictionsToUse = transformApiData(kalshiPredictions);
-      } else {
-        console.log('⚠️ No Kalshi-specific predictions found, using all predictions');
-        predictionsToUse = transformApiData(apiPredictions);
-      }
-      
-      // If no predictions after transformation, use mock data
       if (predictionsToUse.length === 0) {
-        console.log('⚠️ No valid predictions after transformation, using mock data');
-        predictionsToUse = MOCK_KALSHI_PREDICTIONS;
+        console.warn('⚠️ No predictions after transformation, using mock data');
+        setPredictions(MOCK_KALSHI_PREDICTIONS);
+        setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
+      } else {
+        console.log(`✅ Setting ${predictionsToUse.length} predictions`);
+        setPredictions(predictionsToUse);
+        setFilteredPredictions(predictionsToUse);
       }
       
-      setPredictions(predictionsToUse);
-      setFilteredPredictions(predictionsToUse);
       setLoading(false);
       setError(null);
       
@@ -665,13 +667,30 @@ const KalshiPredictionsScreen = () => {
         timestamp: new Date().toISOString()
       };
     } else {
-      // No data from API, use mock data
-      console.log('⚠️ No predictions data from API, using mock data');
+      // API returned success but no predictions or empty array
+      console.warn('⚠️ API returned no predictions data:', predictionsData);
       setPredictions(MOCK_KALSHI_PREDICTIONS);
       setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
       setLoading(false);
     }
-  }, [predictionsData, predictionsLoading, predictionsError]);
+  } else if (predictionsError) {
+    // Handle API error
+    console.error('❌ Predictions API Error:', predictionsError);
+    setError(`API Error: ${predictionsError.message || predictionsError}`);
+    
+    // Fallback to mock data
+    console.log('🔄 Falling back to mock Kalshi data due to error');
+    setPredictions(MOCK_KALSHI_PREDICTIONS);
+    setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
+    setLoading(false);
+  } else {
+    // No data or error - should not happen but handle gracefully
+    console.warn('⚠️ No predictions data and no error - using mock data');
+    setPredictions(MOCK_KALSHI_PREDICTIONS);
+    setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
+    setLoading(false);
+  }
+}, [predictionsData, predictionsLoading, predictionsError]);
 
   // ✅ Handle sport filter
   useEffect(() => {
@@ -834,25 +853,25 @@ const KalshiPredictionsScreen = () => {
     },
   ];
 
-  // ✅ KEEP YOUR ENTIRE EXISTING RETURN STATEMENT
+ // ✅ KEEP YOUR ENTIRE EXISTING RETURN STATEMENT
   return (
     <>
       <Container maxWidth="lg">
         {/* Debug Info Banner (only in development) */}
         {import.meta.env.DEV && (
-          <Alert 
-            severity={displayError ? "warning" : "info"} 
+          <Alert
+            severity={displayError ? "warning" : "info"}
             sx={{ mb: 2 }}
             action={
               <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button 
-                  size="small" 
+                <Button
+                  size="small"
                   onClick={() => console.log('Current predictions:', predictions)}
                 >
                   Log Data
                 </Button>
-                <Button 
-                  size="small" 
+                <Button
+                  size="small"
                   onClick={handleRefresh}
                   disabled={refreshing}
                 >
@@ -862,8 +881,8 @@ const KalshiPredictionsScreen = () => {
             }
           >
             <Typography variant="caption">
-              🔍 Debug: Showing {predictions.length} predictions • 
-              Source: {displayError ? 'MOCK DATA' : 'API Data'} • 
+              🔍 Debug: Showing {predictions.length} predictions •
+              Source: {displayError ? 'MOCK DATA' : 'API Data'} •
               Filtered: {filteredPredictions.length}
             </Typography>
             {displayError && (

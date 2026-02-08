@@ -1,5 +1,5 @@
 // src/pages/SecretPhraseScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Typography,
@@ -40,26 +40,78 @@ import {
   SportsBasketball as BasketballIcon,
   SportsFootball as FootballIcon,
   ContentCopy as ContentCopyIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  SportsSoccer as SoccerIcon,
+  Casino as CasinoIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
+import axios from 'axios';
 
-// Import the scraper hook
-import { useSecretPhrases } from '../hooks/useSportsQueries';
+// Define types for our data
+interface SecretPhrase {
+  id: string;
+  text: string;
+  source: string;
+  category: string;
+  confidence: number;
+  scraped_at?: string;
+  url?: string;
+}
+
+interface SecretPhrasesResponse {
+  success: boolean;
+  phrases: SecretPhrase[];
+  count: number;
+  timestamp: string;
+  sources: string[];
+  scraped: boolean;
+  message?: string;
+}
+
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://pleasing-determination-production.up.railway.app';
 
 const SecretPhraseScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [phrasesData, setPhrasesData] = useState<SecretPhrasesResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefetching, setIsRefetching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Use the scraper hook
-  const {
-    data: phrasesData,
-    isLoading,
-    error,
-    refetch,
-    isRefetching
-  } = useSecretPhrases();
+  const fetchSecretPhrases = async (isRefetch = false) => {
+    if (isRefetch) {
+      setIsRefetching(true);
+    } else {
+      setIsLoading(true);
+    }
+    setError(null);
+
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/secret-phrases`);
+      setPhrasesData(response.data);
+    } catch (err: any) {
+      console.error('Error fetching secret phrases:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to load insights');
+      // Set mock data as fallback
+      setPhrasesData({
+        success: true,
+        phrases: generateMockPhrases(),
+        count: 10,
+        timestamp: new Date().toISOString(),
+        sources: ['mock'],
+        scraped: false,
+        message: 'Using demo data due to API error'
+      });
+    } finally {
+      setIsLoading(false);
+      setIsRefetching(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSecretPhrases();
+  }, []);
 
   const phrases = phrasesData?.phrases || [];
   const sources = phrasesData?.sources || ['mock'];
@@ -67,17 +119,17 @@ const SecretPhraseScreen = () => {
   // Filter and search logic
   const filteredByCategory = selectedCategory === 'all'
     ? phrases
-    : phrases.filter((phrase: any) => phrase.category === selectedCategory);
+    : phrases.filter((phrase) => phrase.category === selectedCategory);
 
   const filteredPhrases = searchQuery
-    ? filteredByCategory.filter((phrase: any) =>
+    ? filteredByCategory.filter((phrase) =>
         phrase.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
         phrase.source.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : filteredByCategory;
 
   const handleRefresh = () => {
-    refetch();
+    fetchSecretPhrases(true);
   };
 
   const handleCopyPhrase = (text: string, id: string) => {
@@ -91,6 +143,8 @@ const SecretPhraseScreen = () => {
       case 'insider_tip': return <VisibilityIcon />;
       case 'expert_prediction': return <TrendingUpIcon />;
       case 'ai_insight': return <LockIcon />;
+      case 'trend': return <CasinoIcon />;
+      case 'player_trend': return <SoccerIcon />;
       default: return <LightbulbIcon />;
     }
   };
@@ -100,6 +154,8 @@ const SecretPhraseScreen = () => {
       case 'insider_tip': return 'primary';
       case 'expert_prediction': return 'success';
       case 'ai_insight': return 'warning';
+      case 'trend': return 'info';
+      case 'player_trend': return 'secondary';
       default: return 'default';
     }
   };
@@ -111,8 +167,54 @@ const SecretPhraseScreen = () => {
   };
 
   const getCategories = () => {
-    const categories = new Set(phrases.map((p: any) => p.category));
+    const categories = new Set(phrases.map((p) => p.category));
     return ['all', ...Array.from(categories)];
+  };
+
+  // Generate mock phrases for fallback
+  const generateMockPhrases = (): SecretPhrase[] => {
+    return [
+      {
+        id: 'mock-1',
+        text: 'Home teams have covered 62% of spreads in division games this season',
+        source: 'Statistical Analysis',
+        category: 'trend',
+        confidence: 78,
+        scraped_at: new Date().toISOString()
+      },
+      {
+        id: 'mock-2',
+        text: 'Player X averages 28% more fantasy points in primetime games',
+        source: 'Player Analytics',
+        category: 'player_trend',
+        confidence: 82,
+        scraped_at: new Date().toISOString()
+      },
+      {
+        id: 'mock-3',
+        text: 'Over has hit in 8 of last 10 meetings between these teams',
+        source: 'Historical Data',
+        category: 'trend',
+        confidence: 80,
+        scraped_at: new Date().toISOString()
+      },
+      {
+        id: 'mock-4',
+        text: 'Unders are 7-1 when these teams play in temperatures below 40°F',
+        source: 'Weather Analysis',
+        category: 'insider_tip',
+        confidence: 85,
+        scraped_at: new Date().toISOString()
+      },
+      {
+        id: 'mock-5',
+        text: 'Teams coming off back-to-back road games are 3-12 ATS this month',
+        source: 'Schedule Analysis',
+        category: 'expert_prediction',
+        confidence: 88,
+        scraped_at: new Date().toISOString()
+      }
+    ];
   };
 
   if (isLoading) {
@@ -121,21 +223,9 @@ const SecretPhraseScreen = () => {
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
           <CircularProgress />
           <Typography sx={{ ml: 2 }}>
-            {phrasesData?.scraped === false ? 'Loading demo data...' : 'Scraping insights...'}
+            {phrasesData?.scraped === false ? 'Loading demo data...' : 'Loading insights...'}
           </Typography>
         </Box>
-      </Container>
-    );
-  }
-
-  if (error) {
-    return (
-      <Container>
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <AlertTitle>Error Loading Secret Phrases</AlertTitle>
-          {error instanceof Error ? error.message : 'Failed to load insights'}
-          <Button onClick={handleRefresh} sx={{ mt: 1 }}>Retry</Button>
-        </Alert>
       </Container>
     );
   }
@@ -172,12 +262,24 @@ const SecretPhraseScreen = () => {
             severity={phrasesData.scraped ? "success" : "info"}
             sx={{ mb: 3 }}
           >
+            <AlertTitle>
+              {phrasesData.scraped ? '✅ Live Insights' : '⚠️ Demo Data'}
+            </AlertTitle>
             <Typography variant="body2">
               {phrasesData.scraped 
-                ? `✅ Live insights scraped from ${sources.join(', ')}`
-                : '⚠️ Using demo data (scraping unavailable)'}
+                ? `Scraped from ${sources.join(', ')}`
+                : 'Using sample data (scraping unavailable)'}
               {phrasesData.timestamp && ` • Updated ${format(new Date(phrasesData.timestamp), 'PPpp')}`}
+              {phrasesData.message && ` • ${phrasesData.message}`}
             </Typography>
+          </Alert>
+        )}
+
+        {error && !phrasesData?.success && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            <AlertTitle>API Error</AlertTitle>
+            {error}
+            <Button onClick={handleRefresh} sx={{ mt: 1 }}>Retry</Button>
           </Alert>
         )}
 
@@ -209,7 +311,7 @@ const SecretPhraseScreen = () => {
                 >
                   {getCategories().map((category) => (
                     <MenuItem key={category} value={category}>
-                      {category === 'all' ? 'All Categories' : category.replace('_', ' ').toUpperCase()}
+                      {category === 'all' ? 'All Categories' : category.replace(/_/g, ' ').toUpperCase()}
                     </MenuItem>
                   ))}
                 </Select>
@@ -304,7 +406,7 @@ const SecretPhraseScreen = () => {
           </Paper>
         ) : (
           <Grid container spacing={3}>
-            {filteredPhrases.map((phrase: any) => (
+            {filteredPhrases.map((phrase) => (
               <Grid item xs={12} sm={6} md={4} key={phrase.id}>
                 <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                   <CardContent sx={{ flexGrow: 1 }}>
@@ -313,8 +415,8 @@ const SecretPhraseScreen = () => {
                       <Box>
                         <Chip
                           icon={getCategoryIcon(phrase.category)}
-                          label={phrase.category.replace('_', ' ').toUpperCase()}
-                          color={getCategoryColor(phrase.category)}
+                          label={phrase.category.replace(/_/g, ' ').toUpperCase()}
+                          color={getCategoryColor(phrase.category) as any}
                           size="small"
                           sx={{ mb: 1 }}
                         />
@@ -326,7 +428,7 @@ const SecretPhraseScreen = () => {
                       <Box sx={{ textAlign: 'right' }}>
                         <Chip
                           label={`${phrase.confidence}%`}
-                          color={getConfidenceColor(phrase.confidence)}
+                          color={getConfidenceColor(phrase.confidence) as any}
                           size="small"
                           variant="outlined"
                         />
@@ -406,7 +508,7 @@ const SecretPhraseScreen = () => {
               <Card>
                 <CardContent sx={{ textAlign: 'center' }}>
                   <Typography variant="h3" color="success" gutterBottom>
-                    {Math.round(phrases.reduce((acc: number, p: any) => acc + p.confidence, 0) / phrases.length)}%
+                    {Math.round(phrases.reduce((acc, p) => acc + p.confidence, 0) / phrases.length)}%
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Avg Confidence
@@ -418,7 +520,7 @@ const SecretPhraseScreen = () => {
               <Card>
                 <CardContent sx={{ textAlign: 'center' }}>
                   <Typography variant="h3" color="warning" gutterBottom>
-                    {new Set(phrases.map((p: any) => p.source)).size}
+                    {new Set(phrases.map((p) => p.source)).size}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Sources
@@ -430,7 +532,7 @@ const SecretPhraseScreen = () => {
               <Card>
                 <CardContent sx={{ textAlign: 'center' }}>
                   <Typography variant="h3" color="info" gutterBottom>
-                    {new Set(phrases.map((p: any) => p.category)).size}
+                    {new Set(phrases.map((p) => p.category)).size}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Categories

@@ -14,6 +14,7 @@ import {
   Chip,
   LinearProgress,
   Alert,
+  AlertTitle,
   Avatar,
   Paper,
   Dialog,
@@ -28,7 +29,10 @@ import {
   Collapse,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  FormControl,
+  Select,
+  MenuItem
 } from '@mui/material';
 import {
   Shield as ShieldIcon,
@@ -412,12 +416,16 @@ const DailyPicksScreen = () => {
 
   // Confidence Meter Component (same as ParlayArchitectScreen)
   const ConfidenceMeter = ({ score, level }: { score: number; level: string }) => {
-    const colors = {
-      'very-high': '#10b981',
-      'high': '#3b82f6',
-      'medium': '#f59e0b',
-      'low': '#ef4444',
-      'very-low': '#dc2626'
+    const getLevelColor = (levelStr: string) => {
+      const colors = {
+        'very-high': '#10b981',
+        'high': '#3b82f6',
+        'medium': '#f59e0b',
+        'low': '#ef4444',
+        'very-low': '#dc2626'
+      };
+      
+      return colors[levelStr as keyof typeof colors] || '#64748b';
     };
     
     return (
@@ -427,11 +435,11 @@ const DailyPicksScreen = () => {
             sx={{ 
               width: `${Math.min(score, 100)}%`,
               height: 8,
-              bgcolor: colors[level as keyof typeof colors] || '#64748b'
+              bgcolor: getLevelColor(level)
             }}
           />
         </Box>
-        <Typography variant="caption" fontWeight="bold" color={colors[level as keyof typeof colors]}>
+        <Typography variant="caption" fontWeight="bold" color={getLevelColor(level)}>
           {score}%
         </Typography>
       </Box>
@@ -582,7 +590,7 @@ const DailyPicksScreen = () => {
               <Grid item xs={4}>
                 <Box sx={{ textAlign: 'center' }}>
                   <EmojiEvents sx={{ color: '#f59e0b', mb: 0.5 }} />
-                  <Typography variant="caption" color="text-secondary">Units</Typography>
+                  <Typography variant="caption" color="text.secondary">Units</Typography>
                   <Typography variant="body1" fontWeight="bold">{pick.units}</Typography>
                 </Box>
               </Grid>
@@ -798,19 +806,18 @@ const DailyPicksScreen = () => {
           </Grid>
           <Grid item xs={12} sm={3}>
             <FormControl fullWidth size="small">
-              <TextField
-                select
+              <Select
                 value={selectedSport}
                 onChange={(e) => setSelectedSport(e.target.value)}
-                label="Sport"
-                variant="outlined"
+                displayEmpty
+                inputProps={{ 'aria-label': 'Sport filter' }}
               >
                 {['All', 'NBA', 'NFL', 'NHL', 'MLB'].map((sport) => (
-                  <option key={sport} value={sport}>
+                  <MenuItem key={sport} value={sport}>
                     {sport}
-                  </option>
+                  </MenuItem>
                 ))}
-              </TextField>
+              </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={3}>

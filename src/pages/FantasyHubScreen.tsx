@@ -392,9 +392,9 @@ const FantasyHubScreen = () => {
     { value: 'MLB', label: 'MLB', icon: <BaseballIcon />, apiValue: 'mlb' }
   ];
 
-  // ===== PROJECTION VALUE CALCULATION =====
+  // ===== UPDATED PROJECTION VALUE CALCULATION (Update 2) =====
   const calculateProjectionValue = useCallback((player: Player): ProjectionValueResult => {
-    if (!player.projection || player.projection === 0) {
+    if (!player || typeof player !== 'object') {
       return { 
         edge: 0, 
         recommendedSide: 'none', 
@@ -405,7 +405,21 @@ const FantasyHubScreen = () => {
       };
     }
     
-    const projectionDiff = player.projection - player.fantasyScore;
+    const fantasyScore = player.fantasyScore || 0;
+    const projection = player.projection || 0;
+    
+    if (!projection || projection === 0) {
+      return { 
+        edge: 0, 
+        recommendedSide: 'none', 
+        confidence: 'low',
+        marketImplied: 0,
+        estimatedTrueProb: 0.5,
+        projectionDiff: 0 
+      };
+    }
+    
+    const projectionDiff = projection - fantasyScore;
     const isOverProjection = projectionDiff > 0;
     
     // Convert to probability estimate
@@ -562,7 +576,7 @@ const FantasyHubScreen = () => {
     }
   }, [playerData, applyValueFiltering, sortByValueScore]);
 
-  // ===== UPDATE FILTER EFFECT =====
+  // ===== UPDATED FILTER EFFECT (Update 1) =====
   useEffect(() => {
     console.log('🔄 FantasyHub filter useEffect triggered');
     console.log('Available players count:', availablePlayers.length);
@@ -574,29 +588,38 @@ const FantasyHubScreen = () => {
       return;
     }
     
-    // Basic filters
+    // Basic filters with safe property access
     let filtered = availablePlayers.filter(player => {
-      if (!player.name) {
-        console.log('Skipping player without name:', player);
+      if (!player || typeof player !== 'object') {
+        console.log('Skipping invalid player object:', player);
         return false;
       }
       
+      if (!player.name || typeof player.name !== 'string') {
+        console.log('Skipping player without valid name:', player);
+        return false;
+      }
+      
+      const playerName = player.name || '';
+      const playerTeam = player.team || '';
+      const playerPosition = player.position || '';
+      
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        const nameMatch = player.name?.toLowerCase().includes(query);
-        const teamMatch = player.team?.toLowerCase().includes(query);
-        const positionMatch = player.position?.toLowerCase().includes(query);
+        const nameMatch = playerName.toLowerCase().includes(query);
+        const teamMatch = playerTeam.toLowerCase().includes(query);
+        const positionMatch = playerPosition.toLowerCase().includes(query);
         
         if (!nameMatch && !teamMatch && !positionMatch) {
           return false;
         }
       }
       
-      if (selectedPosition !== 'ALL' && player.position !== selectedPosition) {
+      if (selectedPosition !== 'ALL' && playerPosition !== selectedPosition) {
         return false;
       }
       
-      if (selectedTeam !== 'all' && player.team !== selectedTeam) {
+      if (selectedTeam !== 'all' && playerTeam !== selectedTeam) {
         return false;
       }
       
@@ -1454,9 +1477,13 @@ const FantasyHubScreen = () => {
     );
   };
 
+  // ===== UPDATED RENDER TOP VALUE PICKS (Update 4) =====
   const renderTopValuePicks = () => {
+    if (!sortedPlayers || sortedPlayers.length === 0) return null;
+    
     const topPicks = sortedPlayers
       .filter(p => {
+        if (!p || typeof p !== 'object') return false;
         const value = calculateProjectionValue(p);
         return value.edge > 0;
       })
@@ -1486,50 +1513,54 @@ const FantasyHubScreen = () => {
             </TableHead>
             <TableBody>
               {topPicks.map((player, index) => {
+                if (!player || typeof player !== 'object') return null;
+                
                 const value = calculateProjectionValue(player);
-                const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
+                const playerSalary = activePlatform.name === 'FanDuel' ? 
+                  (player.fanDuelSalary || 0) : 
+                  (player.draftKingsSalary || 0);
                 const canAdd = budget >= playerSalary && team.length < 9;
                 
                 return (
-                  <TableRow key={player.id} hover>
+                  <TableRow key={player.id || `player-${index}`} hover>
                     <TableCell>
                       <Typography variant="body2" fontWeight="bold">
-                        {player.name}
+                        {player.name || 'Unknown Player'}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {player.team}
+                        {player.team || 'Unknown Team'}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Chip 
-                        label={player.position}
+                        label={player.position || 'N/A'}
                         size="small"
                         sx={{ 
-                          bgcolor: `${getPositionColor(player.position)}20`,
-                          color: getPositionColor(player.position),
+                          bgcolor: `${getPositionColor(player.position || '')}20`,
+                          color: getPositionColor(player.position || ''),
                           fontWeight: 'bold'
                         }}
                       />
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" fontWeight="bold">
-                        {player.fantasyScore.toFixed(1)}
+                        {(player.fantasyScore || 0).toFixed(1)}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         <Typography variant="body2" fontWeight="bold" 
-                          color={player.projection && player.projection > player.fantasyScore ? '#059669' : '#ef4444'}>
-                          {player.projection?.toFixed(1)}
+                          color={player.projection && player.projection > (player.fantasyScore || 0) ? '#059669' : '#ef4444'}>
+                          {(player.projection || 0).toFixed(1)}
                         </Typography>
                         {player.projection && (
                           <Chip 
-                            label={`${(player.projection - player.fantasyScore).toFixed(1)}`}
+                            label={`${((player.projection || 0) - (player.fantasyScore || 0)).toFixed(1)}`}
                             size="small"
                             sx={{ 
                               ml: 1,
-                              bgcolor: player.projection > player.fantasyScore ? '#bbf7d0' : '#fecaca',
-                              color: player.projection > player.fantasyScore ? '#059669' : '#ef4444',
+                              bgcolor: (player.projection || 0) > (player.fantasyScore || 0) ? '#bbf7d0' : '#fecaca',
+                              color: (player.projection || 0) > (player.fantasyScore || 0) ? '#059669' : '#ef4444',
                               fontSize: '0.6rem'
                             }}
                           />
@@ -1542,8 +1573,8 @@ const FantasyHubScreen = () => {
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color={player.value > 1.3 ? '#10b981' : '#f59e0b'}>
-                        {player.value.toFixed(2)}x
+                      <Typography variant="body2" color={(player.value || 0) > 1.3 ? '#10b981' : '#f59e0b'}>
+                        {(player.value || 0).toFixed(2)}x
                       </Typography>
                     </TableCell>
                     <TableCell>

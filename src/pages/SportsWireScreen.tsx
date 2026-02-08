@@ -99,7 +99,12 @@ const CATEGORY_COLORS = {
   'draft': '#ec4899',
   'free-agency': '#6366f1',
   'advanced-stats': '#14b8a6',
-  'beat-writers': '#3b82f6'
+  'beat-writers': '#3b82f6',
+  'injury': '#ef4444',
+  'performance': '#10b981',
+  'value': '#8b5cf6',
+  'preview': '#f59e0b',
+  'news': '#3b82f6'
 };
 
 // MOCK_PLAYER_PROPS for fallback
@@ -196,6 +201,10 @@ interface PlayerProp {
   confidence: number;
   isBookmarked: boolean;
   aiInsights?: string[];
+  category?: string;
+  url?: string;
+  image?: string;
+  originalArticle?: any;
 }
 
 interface TrendingProp {
@@ -215,66 +224,6 @@ interface TrendingProp {
   type?: string;
   aiInsights?: string[];
 }
-
-// Helper function to safely extract array from hook response
-const extractArrayFromHook = (hookData: any): any[] => {
-  if (!hookData) return [];
-  
-  // If hookData is an array of news articles (from the new API structure)
-  if (Array.isArray(hookData)) {
-    return hookData;
-  }
-  
-  // If hookData has a 'news' property with array (from the new API structure)
-  if (hookData.news && Array.isArray(hookData.news)) {
-    return hookData.news;
-  }
-  
-  // Legacy API structure support
-  if (hookData.selections && Array.isArray(hookData.selections)) {
-    return hookData.selections;
-  }
-  
-  if (hookData.data && Array.isArray(hookData.data)) {
-    return hookData.data;
-  }
-  
-  if (hookData.results && Array.isArray(hookData.results)) {
-    return hookData.results;
-  }
-  
-  if (hookData.items && Array.isArray(hookData.items)) {
-    return hookData.items;
-  }
-  
-  return [];
-};
-
-// Helper function to convert confidence string to number
-const convertConfidenceToNumber = (confidence: any): number => {
-  if (typeof confidence === 'number') return confidence;
-  if (typeof confidence === 'string') {
-    switch (confidence.toLowerCase()) {
-      case 'high': return 85;
-      case 'medium': return 65;
-      case 'low': return 45;
-      default:
-        const num = parseInt(confidence);
-        return isNaN(num) ? 50 : Math.min(Math.max(num, 0), 100);
-    }
-  }
-  return 50;
-};
-
-// Helper function to parse odds
-const parseOdds = (odds: any): string => {
-  if (!odds) return '+100';
-  if (typeof odds === 'string') return odds;
-  if (typeof odds === 'number') {
-    return odds > 0 ? `+${odds}` : odds.toString();
-  }
-  return '+100';
-};
 
 // Inside your component, replace fetch logic with:
 const SportsWireScreen = () => {
@@ -308,37 +257,50 @@ const SportsWireScreen = () => {
   
   // Transform news data to player props format for compatibility with existing UI
   useEffect(() => {
-    if (newsData && Array.isArray(newsData)) {
+    if (newsData && Array.isArray(newsData) && newsData.length > 0) {
       const transformedProps = newsData.map((article: any, index: number) => {
-        // Extract relevant data from news article
-        const title = article.title || '';
-        const description = article.description || '';
-        const source = article.source?.name || 'Sports News';
-        const publishedAt = article.publishedAt || new Date().toISOString();
+        // Extract data from the actual news article structure
+        const title = article.title || 'Sports News';
+        const description = article.description || article.summary || '';
+        const source = article.source?.name || article.source || 'Sports Wire';
+        const publishedAt = article.publishedAt || article.timestamp || new Date().toISOString();
+        const category = article.category || 'news';
+        const url = article.url || `#${index}`;
+        const image = article.urlToImage || article.image || `https://picsum.photos/400/300?random=${index}&sport=${selectedSport}`;
+        const playerName = article.player || source;
+        const team = article.team || source;
         
-        // Create a player prop from news data
-        // This is a transformation to maintain compatibility with the existing UI
+        // Create confidence based on article data
+        let confidence = 75;
+        if (article.confidence) confidence = article.confidence;
+        if (article.category === 'injury') confidence = 85;
+        if (article.valueScore > 90) confidence = 90;
+        
         return {
           id: article.id || `news-${index}`,
-          playerName: source,
-          team: source,
-          sport: selectedSport.toUpperCase(),
+          playerName: playerName,
+          team: team,
+          sport: article.sport || selectedSport.toUpperCase(),
           propType: 'News',
-          line: title.substring(0, 50) + (title.length > 50 ? '...' : ''),
+          line: title.substring(0, 60) + (title.length > 60 ? '...' : ''),
           odds: '+100',
           impliedProbability: 65,
-          matchup: description.substring(0, 60) + (description.length > 60 ? '...' : ''),
-          time: publishedAt ? format(new Date(publishedAt), 'MMM d') : 'Just now',
-          confidence: 75,
+          matchup: description.substring(0, 80) + (description.length > 80 ? '...' : ''),
+          time: publishedAt ? format(new Date(publishedAt), 'MMM d, h:mm a') : 'Just now',
+          confidence: confidence,
           isBookmarked: false,
-          aiInsights: [description],
-          article: article // Keep original article data
+          aiInsights: [description.substring(0, 120) + (description.length > 120 ? '...' : '')],
+          category: category,
+          url: url,
+          image: image,
+          originalArticle: article // Keep original data
         };
       });
       
       setProcessedPlayerProps(transformedProps);
     } else {
-      // Fallback to mock data if no news
+      // Fallback to mock data only if there's no real data
+      console.log('No news data available, using mock data');
       setProcessedPlayerProps(MOCK_PLAYER_PROPS);
     }
   }, [newsData, selectedSport]);
@@ -354,18 +316,14 @@ const SportsWireScreen = () => {
     // Filter by category
     if (selectedCategory !== 'all') {
       if (selectedCategory === 'value') {
-        filtered = filtered.filter(prop => {
-          try {
-            const oddsString = prop.odds.toString();
-            const oddsValue = parseInt(oddsString.replace(/[+-]/, ''));
-            const isPositive = oddsString.startsWith('+');
-            return isPositive || prop.impliedProbability > 60;
-          } catch (error) {
-            return false;
-          }
-        });
+        filtered = filtered.filter(prop => prop.confidence > 75);
       } else if (selectedCategory === 'high-confidence') {
         filtered = filtered.filter(prop => prop.confidence > 80);
+      } else if (selectedCategory === 'live') {
+        // For live news, filter by recent time
+        filtered = filtered.filter(prop => 
+          prop.time.includes('min') || prop.time.includes('Just now') || prop.time.includes('1h')
+        );
       } else {
         filtered = filtered.filter(prop => prop.sport === selectedCategory);
       }
@@ -377,7 +335,8 @@ const SportsWireScreen = () => {
       filtered = filtered.filter(prop => 
         prop.playerName.toLowerCase().includes(searchQueryLower) ||
         prop.team.toLowerCase().includes(searchQueryLower) ||
-        prop.propType.toLowerCase().includes(searchQueryLower)
+        prop.line.toLowerCase().includes(searchQueryLower) ||
+        (prop.originalArticle?.description?.toLowerCase() || '').includes(searchQueryLower)
       );
     }
     
@@ -389,9 +348,9 @@ const SportsWireScreen = () => {
     { id: 'NBA', name: 'NBA', icon: <SportsBasketball />, color: '#ef4444' },
     { id: 'NFL', name: 'NFL', icon: <SportsFootball />, color: '#3b82f6' },
     { id: 'MLB', name: 'MLB', icon: <SportsBaseball />, color: '#10b981' },
-    { id: 'NHL', name: 'NHL', icon: <SportsHockey />, color: '#1e40af' },
-    { id: 'value', name: 'Value Bets', icon: <ShowChart />, color: '#10b981' },
-    { id: 'live', name: 'Live Now', icon: <Bolt />, color: '#f59e0b' }
+    { id: 'value', name: 'High Value', icon: <ShowChart />, color: '#10b981' },
+    { id: 'high-confidence', name: 'High Confidence', icon: <SparklesIcon />, color: '#8b5cf6' },
+    { id: 'live', name: 'Recent', icon: <Bolt />, color: '#f59e0b' }
   ];  
   
   const trendingFilters = [
@@ -399,7 +358,6 @@ const SportsWireScreen = () => {
     { id: 'NBA', name: 'NBA' },
     { id: 'NFL', name: 'NFL' },
     { id: 'MLB', name: 'MLB' },
-    { id: 'NHL', name: 'NHL' },
     { id: 'high-confidence', name: 'High Confidence' },
   ];
 
@@ -452,7 +410,7 @@ const SportsWireScreen = () => {
       'TENNIS': '🎾'
     };
     
-    return emojiMap[sport] || '🎯';
+    return emojiMap[sport] || '📰';
   };
 
   const handleBookmark = (propId: string | number) => {
@@ -468,25 +426,25 @@ const SportsWireScreen = () => {
   const handleShare = (prop: PlayerProp) => {
     if (navigator.share) {
       navigator.share({
-        title: `${prop.playerName} ${prop.propType} Prop`,
-        text: `${prop.playerName} ${prop.line} ${prop.odds}`,
-        url: window.location.href,
+        title: `${prop.playerName} - ${prop.line}`,
+        text: `${prop.playerName}: ${prop.line} - ${prop.matchup}`,
+        url: prop.url || window.location.href,
       }).catch((err) => {
-        navigator.clipboard.writeText(`${prop.playerName} ${prop.propType}: ${prop.line} ${prop.odds}`)
+        navigator.clipboard.writeText(`${prop.playerName}: ${prop.line} - ${prop.matchup}`)
           .then(() => {
-            alert('Prop copied to clipboard!');
+            alert('News copied to clipboard!');
           })
           .catch(() => {
-            alert('Prop information available for sharing');
+            alert('News information available for sharing');
           });
       });
     } else {
-      navigator.clipboard.writeText(`${prop.playerName} ${prop.propType}: ${prop.line} ${prop.odds}`)
+      navigator.clipboard.writeText(`${prop.playerName}: ${prop.line} - ${prop.matchup}`)
         .then(() => {
-          alert('Prop copied to clipboard!');
+          alert('News copied to clipboard!');
         })
         .catch(() => {
-          alert('Prop information available for sharing');
+          alert('News information available for sharing');
         });
     }
   };
@@ -582,7 +540,7 @@ const SportsWireScreen = () => {
             {prop.matchup}
           </Typography>
           
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ display: '-flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="caption" color="text.secondary">
               {prop.time}
             </Typography>
@@ -614,16 +572,26 @@ const SportsWireScreen = () => {
   };
 
   const renderPropCard = (prop: PlayerProp) => {
-    const oddsColor = getOddsColor(prop.odds);
     const confidenceColor = getConfidenceColor(prop.confidence);
     const sportColor = (SPORT_COLORS as Record<string, string>)[prop.sport] || theme.palette.primary.main;
     const isBookmarked = bookmarked.includes(typeof prop.id === 'string' ? parseInt(prop.id) : prop.id);
+    const categoryColor = (CATEGORY_COLORS as Record<string, string>)[prop.category || 'news'] || '#3b82f6';
     
     return (
       <Card key={prop.id} sx={{ mb: 3 }}>
         <CardContent>
+          {/* Header with category */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                label={prop.category || 'News'}
+                size="small"
+                sx={{ 
+                  bgcolor: categoryColor,
+                  color: 'white',
+                  fontWeight: 'bold'
+                }}
+              />
               <Chip 
                 label={prop.sport}
                 size="small"
@@ -633,157 +601,97 @@ const SportsWireScreen = () => {
                   fontWeight: 'bold'
                 }}
               />
-              <Chip 
-                label={prop.propType}
-                size="small"
-                sx={{ 
-                  bgcolor: '#f8fafc',
-                  color: '#64748b'
-                }}
-              />
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
               <Typography variant="caption" color="text.secondary">
                 {prop.time}
               </Typography>
             </Box>
           </Box>
           
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <Avatar sx={{ bgcolor: sportColor, mr: 2, width: 40, height: 40 }}>
-              {prop.playerName.charAt(0)}
-            </Avatar>
-            <Box>
-              <Typography variant="h6" fontWeight="bold">
+          {/* News content */}
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2, gap: 2 }}>
+            {prop.image && (
+              <CardMedia
+                component="img"
+                image={prop.image}
+                alt={prop.playerName}
+                sx={{ width: 80, height: 80, borderRadius: 1, objectFit: 'cover' }}
+              />
+            )}
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="h6" fontWeight="bold" gutterBottom>
                 {prop.playerName}
               </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                {prop.team} • {prop.sport}
+              </Typography>
+              <Typography variant="body1" paragraph>
+                {prop.line}
+              </Typography>
+            </Box>
+          </Box>
+          
+          {/* Full description if available */}
+          {prop.originalArticle?.description && (
+            <Box sx={{ mb: 2 }}>
               <Typography variant="body2" color="text.secondary">
-                {prop.team} • {prop.matchup}
+                {prop.originalArticle.description}
               </Typography>
-            </Box>
-          </Box>
-          
-          <Box sx={{ bgcolor: '#f8fafc', p: 2, borderRadius: 1, mb: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Prop Line
-                </Typography>
-                <Typography variant="h5" fontWeight="bold">
-                  {prop.line}
-                </Typography>
-              </Box>
-              <Box sx={{ textAlign: 'right' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Odds
-                </Typography>
-                <Typography variant="h5" fontWeight="bold" color={oddsColor}>
-                  {prop.odds}
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-          
-          <Divider sx={{ my: 2 }} />
-          
-          <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 2 }}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Box sx={{ position: 'relative', width: 60, height: 60, mx: 'auto', mb: 1 }}>
-                <CircularProgress 
-                  variant="determinate" 
-                  value={prop.confidence} 
-                  size={60}
-                  sx={{ color: confidenceColor }}
-                />
-                <Box sx={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)'
-                }}>
-                  <Typography variant="caption" fontWeight="bold">
-                    {prop.confidence}%
-                  </Typography>
-                </Box>
-              </Box>
-              <Typography variant="caption" color="text.secondary">Confidence</Typography>
-            </Box>
-            
-            <Box sx={{ textAlign: 'center' }}>
-              <Box sx={{ position: 'relative', width: 60, height: 60, mx: 'auto', mb: 1 }}>
-                <CircularProgress 
-                  variant="determinate" 
-                  value={prop.impliedProbability} 
-                  size={60}
-                  sx={{ color: '#8b5cf6' }}
-                />
-                <Box sx={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)'
-                }}>
-                  <Typography variant="caption" fontWeight="bold">
-                    {prop.impliedProbability}%
-                  </Typography>
-                </Box>
-              </Box>
-              <Typography variant="caption" color="text.secondary">Implied Prob</Typography>
-            </Box>
-            
-            <Box sx={{ textAlign: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 60, mb: 1 }}>
-                <Box sx={{ 
-                  width: 24, 
-                  height: 24, 
-                  borderRadius: '50%', 
-                  bgcolor: sportColor,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  mr: 1
-                }}>
-                  <Typography variant="caption" sx={{ color: 'white' }}>
-                    {getEmoji(prop.sport)}
-                  </Typography>
-                </Box>
-                <Typography variant="body2" fontWeight="bold">
-                  {prop.sport}
-                </Typography>
-              </Box>
-              <Typography variant="caption" color="text.secondary">Sport</Typography>
-            </Box>
-          </Box>
-          
-          {prop.aiInsights && prop.aiInsights.length > 0 && (
-            <Box sx={{ bgcolor: '#f0f9ff', p: 2, borderRadius: 1, mb: 2 }}>
-              <Typography variant="caption" fontWeight="bold" color="#3b82f6" gutterBottom>
-                AI Insights
-              </Typography>
-              {prop.aiInsights.map((insight, idx) => (
-                <Box key={idx} sx={{ display: 'flex', alignItems: 'flex-start', mb: 0.5 }}>
-                  <SparklesIcon sx={{ fontSize: 12, color: '#8b5cf6', mt: 0.5, mr: 1 }} />
-                  <Typography variant="caption" color="#1e40af">
-                    {insight}
-                  </Typography>
-                </Box>
-              ))}
             </Box>
           )}
           
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button 
-                variant="contained" 
-                size="small"
-                sx={{ 
-                  bgcolor: oddsColor,
-                  '&:hover': { bgcolor: oddsColor, opacity: 0.9 }
-                }}
-              >
-                Track Prop
-              </Button>
+          {/* Confidence indicator */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                News Confidence
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={prop.confidence} 
+                  sx={{ 
+                    flex: 1, 
+                    height: 8,
+                    borderRadius: 4,
+                    bgcolor: `${confidenceColor}20`,
+                    '& .MuiLinearProgress-bar': { bgcolor: confidenceColor }
+                  }}
+                />
+                <Typography variant="body2" fontWeight="bold" color={confidenceColor}>
+                  {prop.confidence}%
+                </Typography>
+              </Box>
             </Box>
+          </Box>
+          
+          {/* AI Insights if available */}
+          {prop.aiInsights && prop.aiInsights.length > 0 && prop.aiInsights[0] && (
+            <Box sx={{ bgcolor: '#f0f9ff', p: 2, borderRadius: 1, mb: 2 }}>
+              <Typography variant="caption" fontWeight="bold" color="#3b82f6" gutterBottom>
+                📝 Summary
+              </Typography>
+              <Typography variant="caption" color="#1e40af">
+                {prop.aiInsights[0]}
+              </Typography>
+            </Box>
+          )}
+          
+          {/* Actions */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Button 
+              variant="contained" 
+              size="small"
+              onClick={() => prop.url && window.open(prop.url, '_blank')}
+              sx={{ 
+                bgcolor: '#3b82f6',
+                '&:hover': { bgcolor: '#2563eb' }
+              }}
+            >
+              Read Full Story
+            </Button>
             
             <Box sx={{ display: 'flex', gap: 1 }}>
               <IconButton size="small" onClick={() => handleShare(prop)}>
@@ -815,7 +723,7 @@ const SportsWireScreen = () => {
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
         <Typography variant="h6" gutterBottom>
-          📊 Prop Performance Metrics
+          📊 News Performance Metrics
         </Typography>
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} sm={3}>
@@ -836,7 +744,7 @@ const SportsWireScreen = () => {
               <Typography variant="h4" fontWeight="bold">
                 {analyticsMetrics.hitRate}%
               </Typography>
-              <Typography variant="caption" color="text.secondary">Hit Rate</Typography>
+              <Typography variant="caption" color="text.secondary">Relevance Score</Typography>
               <LinearProgress 
                 variant="determinate" 
                 value={analyticsMetrics.hitRate} 
@@ -873,42 +781,47 @@ const SportsWireScreen = () => {
         </Grid>
         
         <Typography variant="h6" gutterBottom>
-          🔥 Hot Sports
+          🔥 News by Category
         </Typography>
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          {analyticsMetrics.hotSports.map((sport, index) => {
-            const sportColor = (SPORT_COLORS as Record<string, string>)[sport.sport] || theme.palette.primary.main;
-            
-            return (
-              <Grid item xs={12} key={index}>
-                <Paper sx={{ p: 2 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: sportColor }} />
-                      <Typography variant="body2" fontWeight="bold">
-                        {sport.sport}
-                      </Typography>
-                    </Box>
-                    <Typography variant="body2" color="text.secondary">
-                      {sport.count} props
+          {processedPlayerProps.reduce((acc: any[], prop) => {
+            const category = prop.category || 'news';
+            const existing = acc.find(c => c.name === category);
+            if (existing) {
+              existing.count++;
+            } else {
+              acc.push({ name: category, count: 1, color: (CATEGORY_COLORS as Record<string, string>)[category] || '#3b82f6' });
+            }
+            return acc;
+          }, []).map((category, index) => (
+            <Grid item xs={12} key={index}>
+              <Paper sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: category.color }} />
+                    <Typography variant="body2" fontWeight="bold" textTransform="capitalize">
+                      {category.name}
                     </Typography>
                   </Box>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={(sport.count / analyticsMetrics.totalProps) * 100}
-                    sx={{ 
-                      height: 8,
-                      borderRadius: 4,
-                      bgcolor: `${sportColor}20`,
-                      '& .MuiLinearProgress-bar': { 
-                        bgcolor: sportColor
-                      }
-                    }}
-                  />
-                </Paper>
-              </Grid>
-            );
-          })}
+                  <Typography variant="body2" color="text.secondary">
+                    {category.count} items
+                  </Typography>
+                </Box>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={(category.count / newsCount) * 100}
+                  sx={{ 
+                    height: 8,
+                    borderRadius: 4,
+                    bgcolor: `${category.color}20`,
+                    '& .MuiLinearProgress-bar': { 
+                      bgcolor: category.color
+                    }
+                  }}
+                />
+              </Paper>
+            </Grid>
+          ))}
         </Grid>
       </DialogContent>
       <DialogActions>
@@ -970,7 +883,7 @@ const SportsWireScreen = () => {
               </Typography>
             </Box>
             <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching} sx={{ color: 'white' }}>
-              <AccessTime />
+              <UpdateIcon />
             </IconButton>
           </Box>
           
@@ -1068,7 +981,7 @@ const SportsWireScreen = () => {
           <TextField
             fullWidth
             variant="outlined"
-            placeholder="Search players, teams, props..."
+            placeholder="Search players, teams, or news..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             InputProps={{
@@ -1120,7 +1033,7 @@ const SportsWireScreen = () => {
         </Tabs>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="body2" fontWeight="bold">
-            {categories.find(c => c.id === selectedCategory)?.name} • {filteredProps.length} props
+            {categories.find(c => c.id === selectedCategory)?.name} • {filteredProps.length} items
           </Typography>
           <Badge 
             badgeContent={newsCount || 0} 
@@ -1137,10 +1050,10 @@ const SportsWireScreen = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Box>
             <Typography variant="h6" fontWeight="bold">
-              📈 Trending Props
+              📈 Trending News
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Most discussed props with AI insights
+              Most discussed sports news
             </Typography>
           </Box>
           <Button 
@@ -1172,7 +1085,7 @@ const SportsWireScreen = () => {
         </Box>
       </Paper>
 
-      {/* Player Props / News */}
+      {/* Sports News */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Box>
@@ -1192,30 +1105,52 @@ const SportsWireScreen = () => {
         </Box>
         
         {isLoading || isRefetching || refreshing ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-            <Typography sx={{ ml: 2 }}>Loading sports news...</Typography>
+          <Box sx={{ textAlign: 'center', py: 8 }}>
+            <CircularProgress size={60} />
+            <Typography variant="h6" sx={{ mt: 2 }}>
+              Loading {selectedSport.toUpperCase()} news...
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Fetching the latest sports updates
+            </Typography>
+          </Box>
+        ) : error ? (
+          <Box sx={{ textAlign: 'center', py: 8 }}>
+            <ErrorIcon sx={{ fontSize: 60, color: '#ef4444', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              Failed to load news
+            </Typography>
+            <Typography variant="body2" color="text-secondary" sx={{ mb: 3 }}>
+              {error instanceof Error ? error.message : 'Unable to fetch sports news'}
+            </Typography>
+            <Button 
+              variant="contained" 
+              onClick={() => refetch()}
+              startIcon={<UpdateIcon />}
+            >
+              Retry
+            </Button>
           </Box>
         ) : filteredProps.length > 0 ? (
           filteredProps.map(renderPropCard)
         ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Newspaper sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+          <Box sx={{ textAlign: 'center', py: 8 }}>
+            <Newspaper sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
               No news available
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {searchQuery ? 'Try a different search term' : `No news available for ${selectedSport.toUpperCase()}`}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              {searchQuery 
+                ? `No results found for "${searchQuery}"` 
+                : `No ${selectedSport.toUpperCase()} news available at the moment`}
             </Typography>
-            {searchQuery ? (
-              <Button onClick={() => setSearchQuery('')}>
-                Clear Search
-              </Button>
-            ) : (
-              <Button onClick={handleRefresh} startIcon={<UpdateIcon />}>
-                Refresh
-              </Button>
-            )}
+            <Button 
+              variant="outlined" 
+              onClick={handleRefresh}
+              startIcon={<UpdateIcon />}
+            >
+              Refresh News
+            </Button>
           </Box>
         )}
         

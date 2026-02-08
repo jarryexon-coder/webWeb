@@ -83,7 +83,8 @@ import {
   Timeline as TimelineIcon,
   CheckCircle as CheckCircleIcon,
   ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon
+  ExpandLess as ExpandLessIcon,
+  BugReport as BugReportIcon
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 
@@ -596,6 +597,8 @@ const PlayerStatsScreen = () => {
   
   // Use React Query hook instead of manual fetch
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
+  const [showApiDebug, setShowApiDebug] = useState(false);
+  const [apiEndpoint, setApiEndpoint] = useState<'players' | 'fantasy/players'>('players');
   
   const { 
     data: playersData, 
@@ -603,7 +606,7 @@ const PlayerStatsScreen = () => {
     error, 
     refetch,
     isRefetching 
-  } = useFantasyPlayers(selectedSport);
+  } = useFantasyPlayers(selectedSport, apiEndpoint);
   
   // Extract players from hook response
   const playersFromApi = playersData?.players || [];
@@ -617,42 +620,122 @@ const PlayerStatsScreen = () => {
   const [advancedMetrics, setAdvancedMetrics] = useState<any>({});
   
   const [searchHistory, setSearchHistory] = useState<string[]>(['Patrick Mahomes', 'Quarterbacks', 'Top receivers']);
-  
+
+  // Debug logging
+  useEffect(() => {
+    console.log('🔍 PlayerStatsScreen Debug:', {
+      selectedSport,
+      apiEndpoint,
+      playersFromApiCount: playersFromApi.length,
+      playersData: playersData,
+      isLoading,
+      error: error?.message
+    });
+    
+    if (playersFromApi.length > 0) {
+      console.log('✅ First player from API:', playersFromApi[0]);
+      console.log('📊 Players structure:', {
+        name: playersFromApi[0]?.name,
+        team: playersFromApi[0]?.team,
+        position: playersFromApi[0]?.position,
+        stats: playersFromApi[0]?.stats,
+        is_real_data: playersData?.is_real_data
+      });
+    }
+  }, [playersFromApi, playersData, selectedSport, apiEndpoint, isLoading, error]);
+
   // Transform API data to match expected format or use fallback
   const players = React.useMemo(() => {
-    if (playersFromApi && playersFromApi.length > 0) {
-      console.log(`✅ Using REAL player data: ${playersFromApi.length} players`);
-      // Transform API data to match our component's expected format
+    console.log('🔍 Processing player data:', {
+      fromAPI: playersFromApi?.length || 0,
+      sport: selectedSport,
+      hasRealData: playersData?.is_real_data || false,
+      isRealData: playersData?.is_real_data || false
+    });
+
+    // Use API data if available and valid
+    if (playersFromApi && playersFromApi.length > 0 && playersData?.is_real_data) {
+      console.log(`✅ Using REAL player data: ${playersFromApi.length} players from ${apiEndpoint}`);
+      
       return playersFromApi.map((player: any, index: number) => {
-        // Convert API player format to our component format
+        // Log each player for debugging
+        console.log(`Player ${index}:`, {
+          name: player.name,
+          team: player.team,
+          position: player.position,
+          hasStats: !!player.stats,
+          stats: player.stats
+        });
+
+        // Create a fallback mock player for missing data
         const sportUpper = selectedSport.toUpperCase();
         const mockSportData = mockPlayers[sportUpper as keyof typeof mockPlayers] || [];
         const mockPlayer = mockSportData[index] || mockSportData[0] || mockPlayers.NBA[0];
         
-        // Merge API data with mock structure for missing fields
+        // Extract stats from API or use mock
+        let stats = player.stats || mockPlayer.stats;
+        
+        // If stats is an object but empty, use mock stats
+        if (stats && typeof stats === 'object' && Object.keys(stats).length === 0) {
+          stats = mockPlayer.stats;
+        }
+        
+        // If stats is not an object (e.g., string or number), use mock stats
+        if (!stats || typeof stats !== 'object') {
+          stats = mockPlayer.stats;
+        }
+
+        // If API stats exist but have different structure, map them
+        if (player.stats && typeof player.stats === 'object') {
+          // Try to map API stats to expected format
+          if (selectedSport === 'nba') {
+            stats = {
+              points: player.stats.points || player.stats.pts || mockPlayer.stats.points,
+              rebounds: player.stats.rebounds || player.stats.reb || mockPlayer.stats.rebounds,
+              assists: player.stats.assists || player.stats.ast || mockPlayer.stats.assists,
+              steals: player.stats.steals || mockPlayer.stats.steals,
+              blocks: player.stats.blocks || mockPlayer.stats.blocks,
+              fgPct: player.stats.fgPct || player.stats.fg_percentage || mockPlayer.stats.fgPct,
+              threePtPct: player.stats.threePtPct || player.stats.three_pt_percentage || mockPlayer.stats.threePtPct,
+              turnovers: player.stats.turnovers || mockPlayer.stats.turnovers
+            };
+          } else if (selectedSport === 'nfl') {
+            stats = {
+              passingYards: player.stats.passingYards || mockPlayer.stats.passingYards,
+              passingTDs: player.stats.passingTDs || mockPlayer.stats.passingTDs,
+              interceptions: player.stats.interceptions || mockPlayer.stats.interceptions,
+              rushingYards: player.stats.rushingYards || mockPlayer.stats.rushingYards,
+              rushingTDs: player.stats.rushingTDs || mockPlayer.stats.rushingTDs,
+              completionPct: player.stats.completionPct || mockPlayer.stats.completionPct,
+              qbRating: player.stats.qbRating || mockPlayer.stats.qbRating,
+              fumbles: player.stats.fumbles || mockPlayer.stats.fumbles
+            };
+          }
+        }
+
         return {
-          id: player.id || player.player_id || index,
-          name: player.name || player.player_name || mockPlayer.name,
+          id: player.id || player.player_id || `player-${index}`,
+          name: player.name || player.playerName || `Player ${index + 1}`,
           team: player.team || player.team_name || mockPlayer.team,
           position: player.position || mockPlayer.position,
-          number: player.number || mockPlayer.number,
-          age: player.age || mockPlayer.age,
-          height: player.height || mockPlayer.height,
-          weight: player.weight || mockPlayer.weight,
-          salary: player.salary || mockPlayer.salary,
-          contract: player.contract || mockPlayer.contract,
-          trend: player.trend || mockPlayer.trend,
-          isPremium: player.is_premium || mockPlayer.isPremium,
-          stats: player.stats || mockPlayer.stats,
-          highlights: player.highlights || mockPlayer.highlights
+          number: player.number || mockPlayer.number || (index + 1),
+          age: player.age || mockPlayer.age || 25 + index,
+          height: player.height || mockPlayer.height || "6'0\"",
+          weight: player.weight || mockPlayer.weight || "200 lbs",
+          salary: player.salary || mockPlayer.salary || "$1M/yr",
+          contract: player.contract || mockPlayer.contract || "1 year",
+          trend: player.trend || mockPlayer.trend || 'neutral',
+          isPremium: player.isPremium || player.is_premium || mockPlayer.isPremium || false,
+          stats: stats,
+          highlights: player.highlights || mockPlayer.highlights || []
         };
       });
     } else {
-      console.log('⚠️ Using mock player data');
+      console.log('⚠️ Using mock player data (API returned empty or error)');
       const sportUpper = selectedSport.toUpperCase();
       return mockPlayers[sportUpper as keyof typeof mockPlayers] || mockPlayers.NBA;
     }
-  }, [playersFromApi, selectedSport]);
+  }, [playersFromApi, selectedSport, playersData, apiEndpoint]);
 
   // Filter players based on filters and search
   const filteredPlayers = React.useMemo(() => {
@@ -779,6 +862,12 @@ const PlayerStatsScreen = () => {
     setSelectedTeam('All Teams');
   };
 
+  const toggleApiEndpoint = () => {
+    const newEndpoint = apiEndpoint === 'players' ? 'fantasy/players' : 'players';
+    setApiEndpoint(newEndpoint);
+    console.log(`🔄 Switching to ${newEndpoint} endpoint`);
+  };
+
   const renderPlayerCard = (player: any) => {
     const metrics = calculateAdvancedMetrics(player);
     const TrendIcon = player.trend === 'up' ? TrendingUpIcon : 
@@ -802,6 +891,14 @@ const PlayerStatsScreen = () => {
                   </Typography>
                   {player.isPremium && (
                     <DiamondIcon sx={{ fontSize: 16, color: 'warning.main' }} />
+                  )}
+                  {playersData?.is_real_data && (
+                    <Chip 
+                      label="LIVE" 
+                      size="small" 
+                      color="success" 
+                      sx={{ height: 20, fontSize: '0.6rem' }}
+                    />
                   )}
                 </Box>
                 <Typography variant="body2" color="text.secondary">
@@ -904,6 +1001,14 @@ const PlayerStatsScreen = () => {
                   </Typography>
                   {selectedPlayer.isPremium && (
                     <Badge badgeContent="PREMIUM" color="warning" sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem' } }} />
+                  )}
+                  {playersData?.is_real_data && (
+                    <Chip 
+                      label="LIVE DATA" 
+                      size="small" 
+                      color="success" 
+                      sx={{ height: 20, fontSize: '0.6rem' }}
+                    />
                   )}
                 </Box>
                 <Typography variant="body2" color="text.secondary">
@@ -1129,6 +1234,14 @@ const PlayerStatsScreen = () => {
           </Typography>
           <Typography variant="h6" color="text.secondary">
             Advanced stats, metrics, and player insights
+            {playersData?.is_real_data && (
+              <Chip 
+                label="LIVE DATA" 
+                size="small" 
+                color="success" 
+                sx={{ ml: 2, verticalAlign: 'middle' }}
+              />
+            )}
           </Typography>
         </Box>
       </Box>
@@ -1142,14 +1255,23 @@ const PlayerStatsScreen = () => {
           <Typography variant="body2">
             {error instanceof Error ? error.message : 'Unknown error'}
           </Typography>
-          <Button 
-            variant="outlined" 
-            size="small" 
-            onClick={handleRefresh}
-            sx={{ mt: 1 }}
-          >
-            Try Again
-          </Button>
+          <Box sx={{ mt: 2 }}>
+            <Button 
+              variant="contained" 
+              size="small" 
+              onClick={handleRefresh}
+              sx={{ mr: 1 }}
+            >
+              Retry Loading
+            </Button>
+            <Button 
+              variant="outlined" 
+              size="small" 
+              onClick={toggleApiEndpoint}
+            >
+              Switch to {apiEndpoint === 'players' ? 'Fantasy Players' : 'Players'} Endpoint
+            </Button>
+          </Box>
         </Alert>
       )}
 
@@ -1176,6 +1298,38 @@ const PlayerStatsScreen = () => {
               }}
             />
           ))}
+        </Box>
+      </Paper>
+
+      {/* API Status */}
+      <Paper sx={{ p: 2, mb: 3, bgcolor: playersData?.is_real_data ? '#dcfce7' : '#fef3c7' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box>
+            <Typography variant="subtitle2" fontWeight="bold">
+              {playersData?.is_real_data ? '✅ REAL DATA CONNECTED' : '⚠️ USING MOCK DATA'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Endpoint: /api/{apiEndpoint} • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
+            </Typography>
+          </Box>
+          <Box display="flex" gap={1}>
+            <Button 
+              size="small" 
+              variant="outlined"
+              onClick={toggleApiEndpoint}
+              startIcon={<RefreshIcon />}
+            >
+              Switch Endpoint
+            </Button>
+            <Button 
+              size="small" 
+              variant="outlined"
+              onClick={() => setShowApiDebug(!showApiDebug)}
+              startIcon={<BugReportIcon />}
+            >
+              Debug
+            </Button>
+          </Box>
         </Box>
       </Paper>
 
@@ -1347,12 +1501,62 @@ const PlayerStatsScreen = () => {
       {/* Loading/Refreshing Indicator */}
       {(isLoading || isRefetching) && <LinearProgress sx={{ mb: 2 }} />}
 
+      {/* Debug Panel */}
+      {showApiDebug && (
+        <Paper sx={{ p: 2, mb: 3, bgcolor: '#f3f4f6' }}>
+          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+            API Debug Information
+          </Typography>
+          <Box sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>
+            <div><strong>Endpoint:</strong> {apiEndpoint}</div>
+            <div><strong>Sport:</strong> {selectedSport}</div>
+            <div><strong>API Players:</strong> {playersFromApi.length}</div>
+            <div><strong>Processed Players:</strong> {players.length}</div>
+            <div><strong>Filtered Players:</strong> {filteredPlayers.length}</div>
+            <div><strong>Using Real Data:</strong> {playersData?.is_real_data ? '✅ Yes' : '❌ No'}</div>
+            <div><strong>API Response:</strong></div>
+            <pre style={{ 
+              background: '#1e293b', 
+              color: '#f8fafc', 
+              padding: '10px', 
+              borderRadius: '4px',
+              overflow: 'auto',
+              maxHeight: '200px',
+              marginTop: '8px'
+            }}>
+              {JSON.stringify(playersData || {}, null, 2)}
+            </pre>
+            {playersFromApi[0] && (
+              <>
+                <div><strong>First Player Sample:</strong></div>
+                <pre style={{ 
+                  background: '#1e293b', 
+                  color: '#f8fafc', 
+                  padding: '10px', 
+                  borderRadius: '4px',
+                  overflow: 'auto',
+                  maxHeight: '200px',
+                  marginTop: '8px'
+                }}>
+                  {JSON.stringify(playersFromApi[0], null, 2)}
+                </pre>
+              </>
+            )}
+          </Box>
+        </Paper>
+      )}
+
       {/* Players Section */}
       <Box mb={4}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h4" fontWeight="bold">
-            Top Performers
-          </Typography>
+          <Box>
+            <Typography variant="h4" fontWeight="bold">
+              Top Performers
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {playersData?.is_real_data ? 'Live data from API' : 'Using mock data'}
+            </Typography>
+          </Box>
           <Box display="flex" alignItems="center" gap={1}>
             <Chip
               label={`${filteredPlayers.length} players`}
@@ -1379,19 +1583,29 @@ const PlayerStatsScreen = () => {
             <Typography variant="body2" color="text.secondary">
               Try adjusting your search or filters
             </Typography>
-            {error && (
-              <Button onClick={handleRefresh} sx={{ mt: 2 }} variant="outlined">
+            <Box mt={2}>
+              <Button onClick={handleRefresh} sx={{ mr: 1 }} variant="outlined">
                 Retry Loading
               </Button>
-            )}
+              <Button onClick={toggleApiEndpoint} variant="outlined">
+                Switch API Endpoint
+              </Button>
+            </Box>
           </Paper>
         )}
 
         {/* Footer Info */}
         <Box textAlign="center" mt={4}>
           <Typography variant="caption" color="text.secondary">
-            Stats update in real-time. Pull down to refresh. All advanced metrics available.
+            {playersData?.is_real_data 
+              ? '✅ Stats from real API data. Updates automatically.' 
+              : '⚠️ Using mock data. Check API connection.'}
           </Typography>
+          {!playersData?.is_real_data && (
+            <Typography variant="caption" display="block" color="warning.main">
+              Try switching API endpoints or check your backend connection
+            </Typography>
+          )}
         </Box>
       </Box>
 
