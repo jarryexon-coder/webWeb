@@ -1,76 +1,85 @@
-// components/PerformanceDashboard.tsx
-import React, { useState, useEffect } from 'react';
-import { getApiPerformance, debugApiState } from '../hooks/useUnifiedAPI';
+import React from 'react';
+import { Box, Paper, Typography, Chip, Button } from '@mui/material';
+import { getApiPerformance, clearApiCache, debugApiState } from '../hooks/useUnifiedAPI';
 
-export const PerformanceDashboard: React.FC = () => {
-  const [metrics, setMetrics] = useState(getApiPerformance());
-  const [showDetails, setShowDetails] = useState(false);
+const PerformanceDashboard: React.FC = () => {
+  const [performance, setPerformance] = React.useState(getApiPerformance());
 
-  useEffect(() => {
-    // Update metrics every 30 seconds
-    const interval = setInterval(() => {
-      setMetrics(getApiPerformance());
-    }, 30000);
+  const refresh = () => {
+    setPerformance(getApiPerformance());
+  };
 
-    return () => clearInterval(interval);
-  }, []);
+  const handleClearCache = () => {
+    clearApiCache();
+    refresh();
+  };
 
-  if (!import.meta.env.DEV) {
-    return null; // Only show in development
-  }
+  const handleDebug = () => {
+    debugApiState();
+  };
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 10,
-      right: 10,
-      background: 'rgba(0,0,0,0.8)',
-      color: 'white',
-      padding: '10px',
-      borderRadius: '8px',
-      fontSize: '12px',
-      zIndex: 9999,
-      maxWidth: '300px'
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>API Performance</strong>
-        <button 
-          onClick={() => setShowDetails(!showDetails)}
-          style={{ marginLeft: '10px', fontSize: '10px' }}
-        >
-          {showDetails ? '▲' : '▼'}
-        </button>
-      </div>
+    <Paper
+      sx={{
+        position: 'fixed',
+        top: 70,
+        right: 16,
+        zIndex: 9999,
+        p: 2,
+        maxWidth: 300,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid #ddd',
+        boxShadow: 3,
+      }}
+    >
+      <Typography variant="h6" gutterBottom>
+        🚀 Performance Dashboard
+      </Typography>
       
-      <div style={{ marginTop: '5px' }}>
-        <div>Avg Response: {metrics.averageResponseTime.toFixed(0)}ms</div>
-        <div>Total Requests: {metrics.totalRequests}</div>
-        <div>Cache Size: {metrics.cacheSize}</div>
-      </div>
-      
-      {showDetails && (
-        <div style={{ marginTop: '10px', borderTop: '1px solid #444', paddingTop: '5px' }}>
-          <button 
-            onClick={debugApiState}
-            style={{ fontSize: '10px', marginRight: '5px' }}
-          >
-            Debug State
-          </button>
-          <button 
-            onClick={() => {
-              localStorage.clear();
-              window.location.reload();
-            }}
-            style={{ fontSize: '10px' }}
-          >
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="body2">Avg Response:</Typography>
+          <Chip 
+            label={`\${performance.averageResponseTime?.toFixed(0) || 0}ms`}
+            size="small"
+            color={performance.averageResponseTime > 1000 ? 'error' : 'success'}
+          />
+        </Box>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="body2">Success Rate:</Typography>
+          <Chip 
+            label={`\${(performance.successRate * 100)?.toFixed(0) || 0}%`}
+            size="small"
+            color={performance.successRate > 0.9 ? 'success' : performance.successRate > 0.7 ? 'warning' : 'error'}
+          />
+        </Box>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="body2">Total Requests:</Typography>
+          <Chip label={performance.totalRequests?.toString() || '0'} size="small" />
+        </Box>
+        
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Typography variant="body2">Cache Size:</Typography>
+          <Chip label={performance.cacheSize?.toString() || '0'} size="small" />
+        </Box>
+        
+        <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+          <Button size="small" variant="outlined" onClick={refresh}>
+            Refresh
+          </Button>
+          <Button size="small" variant="outlined" onClick={handleClearCache}>
             Clear Cache
-          </button>
-        </div>
-      )}
-    </div>
+          </Button>
+          <Button size="small" variant="outlined" onClick={handleDebug}>
+            Debug
+          </Button>
+        </Box>
+      </Box>
+    </Paper>
   );
 };
 
-// Add to your main App.tsx
-// import { PerformanceDashboard } from './components/PerformanceDashboard';
-// In App.tsx: {import.meta.env.DEV && <PerformanceDashboard />}
+export default PerformanceDashboard;
