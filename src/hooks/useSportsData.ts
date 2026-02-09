@@ -157,9 +157,105 @@ export const useSportsWire = (sport: 'nba' | 'nfl' | 'mlb' = 'nba') =>
 export const useDailyPicks = () => 
   useApiData<any[]>(API_ENDPOINTS.dailyPicks, []);
 
-// ADVANCED ANALYTICS SCREEN
-export const useAdvancedAnalytics = () => 
-  useApiData<any[]>(API_ENDPOINTS.advancedAnalytics, []);
+// ADVANCED ANALYTICS SCREEN - Enhanced version with multi-endpoint support
+export const useAdvancedAnalytics = (sport: string = 'nba') => {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async (fetchSport: string = sport) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Try multiple endpoints to get actual data
+      const endpoints = [
+        `/api/prizepicks/selections?sport=${fetchSport}`,
+        `/api/advanced/analytics?sport=${fetchSport}`,
+        `/api/match/analytics?sport=${fetchSport}`
+      ];
+      
+      let responseData = null;
+      
+      // Try each endpoint until we get real data
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`🔍 [useAdvancedAnalytics] Trying endpoint: ${endpoint}`);
+          const response = await fetch(`${API_BASE_URL}${endpoint}`);
+          
+          if (!response.ok) {
+            console.log(`⚠️ [useAdvancedAnalytics] Endpoint ${endpoint} failed with status ${response.status}`);
+            continue;
+          }
+          
+          const result = await response.json();
+          console.log(`📊 [useAdvancedAnalytics] Response from ${endpoint}:`, {
+            success: result.success,
+            count: result.count,
+            hasSelections: !!result.selections,
+            selectionsCount: result.selections?.length || 0
+          });
+          
+          // Check if this is actual data (not just endpoint metadata)
+          if (result.success && result.selections && result.selections.length > 0) {
+            responseData = result;
+            console.log(`✅ [useAdvancedAnalytics] Got ${result.selections.length} selections from ${endpoint}`);
+            
+            // Log the first selection structure for debugging
+            if (result.selections[0]) {
+              const firstSel = result.selections[0];
+              console.log('🎯 First selection structure:', {
+                player: firstSel.player,
+                stat_type: firstSel.stat_type,
+                line: firstSel.line,
+                projection: firstSel.projection,
+                projection_diff: firstSel.projection_diff,
+                edge: firstSel.edge,
+                value_side: firstSel.value_side,
+                game: firstSel.game
+              });
+            }
+            break;
+          } else {
+            console.log(`⚠️ [useAdvancedAnalytics] ${endpoint} didn't have selections`);
+          }
+        } catch (err) {
+          console.log(`⚠️ [useAdvancedAnalytics] Failed for ${endpoint}:`, err);
+          continue;
+        }
+      }
+      
+      // If no real data found, use a fallback
+      if (!responseData) {
+        console.log('⚠️ [useAdvancedAnalytics] Using fallback data - no real analytics found');
+        responseData = {
+          success: true,
+          is_real_data: false,
+          selections: [],
+          analytics: [],
+          message: 'Using fallback data - no real analytics available'
+        };
+      }
+      
+      setData(responseData);
+    } catch (err: any) {
+      console.error('❌ [useAdvancedAnalytics] Error:', err);
+      setError(err.message || 'Failed to fetch analytics');
+    } finally {
+      setLoading(false);
+    }
+  }, [sport]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const refetch = useCallback((refetchSport?: string) => {
+    return fetchData(refetchSport || sport);
+  }, [fetchData, sport]);
+
+  return { data, loading, error, refetch };
+};
 
 // PARLAY ARCHITECT SCREEN
 export const useParlaySuggestions = () => 
@@ -173,10 +269,118 @@ export const useKalshiPredictions = () =>
 export const usePredictionsHistory = () => 
   useApiData<any[]>(API_ENDPOINTS.predictionsHistory, []);
 
-// PLAYER STATS TRENDS
-export const usePlayerTrends = (playerName?: string) => {
-  const params = playerName ? { player: playerName } : undefined;
-  return useApiData<any[]>(API_ENDPOINTS.playerTrends, [], params);
+// PLAYER STATS TRENDS - Enhanced version with multi-endpoint support
+export const usePlayerTrends = (sport: string = 'nba') => {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = useCallback(async (fetchSport: string = sport) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Try multiple endpoints for player trends
+      const endpoints = [
+        `/api/player/stats/trends?sport=${fetchSport}`,
+        `/api/fantasyhub/players?sport=${fetchSport}`,
+        `/api/players?sport=${fetchSport}`
+      ];
+      
+      let responseData = null;
+      
+      // Try each endpoint until we get real data
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`🔍 [usePlayerTrends] Trying endpoint: ${endpoint}`);
+          const response = await fetch(`${API_BASE_URL}${endpoint}`);
+          
+          if (!response.ok) {
+            console.log(`⚠️ [usePlayerTrends] Endpoint ${endpoint} failed with status ${response.status}`);
+            continue;
+          }
+          
+          const result = await response.json();
+          console.log(`📊 [usePlayerTrends] Response from ${endpoint}:`, {
+            hasTrends: !!result.trends,
+            trendsCount: result.trends?.length || 0,
+            hasPlayers: !!result.players,
+            playersCount: result.players?.length || 0
+          });
+          
+          // Check if this is actual data
+          if ((result.trends && result.trends.length > 0) || (result.players && result.players.length > 0)) {
+            responseData = result;
+            console.log(`✅ [usePlayerTrends] Got data from ${endpoint}`);
+            
+            // Log the first item structure for debugging
+            if (result.trends && result.trends[0]) {
+              console.log('📈 First trend structure:', result.trends[0]);
+            } else if (result.players && result.players[0]) {
+              console.log('👤 First player structure:', result.players[0]);
+            }
+            break;
+          } else {
+            console.log(`⚠️ [usePlayerTrends] ${endpoint} didn't have trends or players`);
+          }
+        } catch (err) {
+          console.log(`⚠️ [usePlayerTrends] Failed for ${endpoint}:`, err);
+          continue;
+        }
+      }
+      
+      // If no real data found, use a fallback
+      if (!responseData) {
+        console.log('⚠️ [usePlayerTrends] Using fallback data - no real trends found');
+        responseData = {
+          success: true,
+          is_real_data: false,
+          trends: [
+            {
+              id: '1',
+              player: 'LeBron James',
+              trend: 'up',
+              metric: 'Points',
+              value: 25.3,
+              change: '+2.1%',
+              analysis: 'Consistent scoring increase over last 5 games',
+              confidence: 0.85,
+              team: 'Lakers'
+            },
+            {
+              id: '2',
+              player: 'Stephen Curry',
+              trend: 'up',
+              metric: '3-Point %',
+              value: 42.8,
+              change: '+3.5%',
+              analysis: 'Shooting efficiency improved',
+              confidence: 0.78,
+              team: 'Warriors'
+            }
+          ],
+          message: 'Using fallback data - no real player trends available'
+        };
+      }
+      
+      setData(responseData);
+    } catch (err: any) {
+      console.error('❌ [usePlayerTrends] Error:', err);
+      setError(err.message || 'Failed to fetch player trends');
+    } finally {
+      setLoading(false);
+    }
+  }, [sport]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const refetch = useCallback((refetchSport?: string) => {
+    return fetchData(refetchSport || sport);
+  }, [fetchData, sport]);
+
+  return { data, loading, error, refetch };
 };
 
 // SYSTEM STATUS

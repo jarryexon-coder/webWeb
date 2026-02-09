@@ -1,5 +1,5 @@
 // src/pages/FantasyHubScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -106,7 +106,7 @@ import { useSearch } from '../providers/SearchProvider';
 import { logEvent, logScreenView } from '../utils/analytics';
 
 // ADD THESE IMPORTS
-import { useFantasyPlayers, useFantasyTeams } from '../hooks/useBackendAPI';
+import { useFantasyPlayers, useFantasyTeams } from '../hooks/useUnifiedAPI';
 
 // ===== ADD MISSING RENDERHEADER FUNCTION =====
 const renderHeader = (navigate: Function) => (
@@ -151,30 +151,52 @@ const renderHeader = (navigate: Function) => (
   </Box>
 );
 
-// ===== INTERFACES =====
+// ===== UPDATED INTERFACES =====
 interface Player {
   id: string;
   name: string;
   team: string;
   position: string;
-  fanDuelSalary: number;
-  draftKingsSalary: number;
-  salary: number;
-  fantasyScore: number;
-  value: number;
-  trend: 'up' | 'down' | 'stable';
-  points: number;
-  rebounds: number;
-  assists: number;
-  steals: number;
-  blocks: number;
-  ownership: number;
+  fanDuelSalary?: number;
+  draftKingsSalary?: number;
+  salary?: number;
+  fantasyScore?: number;
+  fantasy_points?: number;  // Add API field
+  projected_points?: number; // Add API field
+  value?: number;
+  trend?: 'up' | 'down' | 'stable';
+  points?: number;
+  rebounds?: number;
+  assists?: number;
+  steals?: number;
+  blocks?: number;
+  ownership?: number;
   threePointers?: number;
   projection?: number;
   projectionEdge?: number;
   projectionConfidence?: string;
   valueScore?: number;
   projectedFantasyScore?: number;
+  // Additional API fields
+  sport?: string;
+  stats?: {
+    points?: number;
+    rebounds?: number;
+    assists?: number;
+    steals?: number;
+    blocks?: number;
+    three_pointers_made?: number;
+    minutes?: number;
+  };
+  // Projection data
+  projections?: {
+    fantasy_points?: number;
+    points?: number;
+    rebounds?: number;
+    assists?: number;
+    value?: number;
+    confidence?: number;
+  };
 }
 
 interface TeamStats {
@@ -209,7 +231,7 @@ interface FantasyTeam {
   record: string;
   points: number;
   rank: number;
-  players: string[];
+  players: any[]; // Can be string[] or Player[]
   waiverPosition: number;
   movesThisWeek: number;
   lastUpdated: string;
@@ -228,45 +250,64 @@ interface ProjectionValueResult {
   projectionDiff: number;
 }
 
-// ===== MINIMAL MOCK DATA (FALLBACK ONLY) =====
-const MOCK_FANTASY_TEAMS: FantasyTeam[] = [
-  {
-    id: 'fallback-1',
-    name: 'Sample Team',
-    owner: 'Demo User',
-    sport: 'NBA',
-    league: 'Demo League',
-    record: '0-0-0',
-    points: 0,
-    rank: 1,
-    players: ['Player 1', 'Player 2', 'Player 3'],
-    waiverPosition: 1,
-    movesThisWeek: 0,
-    lastUpdated: new Date().toISOString(),
-  }
-];
-
-const MOCK_PLAYERS: Player[] = [
-  {
-    id: 'fallback-1',
-    name: 'Sample Player',
-    team: 'DEM',
-    position: 'PG',
-    fanDuelSalary: 5000,
-    draftKingsSalary: 5000,
-    salary: 5000,
-    fantasyScore: 25.0,
-    value: 1.0,
-    trend: 'stable',
-    points: 15.0,
-    rebounds: 5.0,
-    assists: 5.0,
-    steals: 1.0,
-    blocks: 0.5,
-    ownership: 10.0,
-    projection: 27.5,
-  }
-];
+// ===== API DATA TRANSFORMER =====
+const transformAPIPlayerData = (player: any): Player => {
+  if (!player) return {} as Player;
+  
+  // Map API fields to our Player interface
+  return {
+    id: player.id || player._id || `player-${Math.random()}`,
+    name: player.name || player.player_name || 'Unknown Player',
+    team: player.team || player.team_name || 'Unknown Team',
+    position: player.position || player.pos || 'N/A',
+    fanDuelSalary: player.fanDuelSalary || player.fanduel_salary || player.salary || 0,
+    draftKingsSalary: player.draftKingsSalary || player.draftkings_salary || player.salary || 0,
+    salary: player.salary || player.fanduel_salary || player.draftkings_salary || 0,
+    
+    // Map fantasy score from multiple possible fields
+    fantasyScore: player.fantasyScore || player.fantasy_points || player.avg_fantasy_points || 
+                  player.fppg || player.points || 0,
+    fantasy_points: player.fantasy_points || player.fantasyScore || player.avg_fantasy_points || 
+                    player.fppg || player.points || 0,
+    
+    // Map projection data
+    projected_points: player.projected_points || player.projection || player.proj_fantasy_points || 
+                     player.projected_fantasy || 0,
+    projection: player.projection || player.projected_points || player.proj_fantasy_points || 
+               player.projected_fantasy || 0,
+    
+    // Value calculation
+    value: player.value || player.value_score || 
+           (player.salary && player.fantasy_points ? player.fantasy_points / (player.salary / 1000) : 0),
+    
+    // Stats
+    points: player.points || player.stats?.points || 0,
+    rebounds: player.rebounds || player.stats?.rebounds || 0,
+    assists: player.assists || player.stats?.assists || 0,
+    steals: player.steals || player.stats?.steals || 0,
+    blocks: player.blocks || player.stats?.blocks || 0,
+    
+    // Other fields
+    sport: player.sport || 'NBA',
+    ownership: player.ownership || player.ownership_percentage || 0,
+    
+    // Projections object
+    projections: player.projections || {
+      fantasy_points: player.projected_points || player.projection || 0,
+      points: player.projected_stats?.points || 0,
+      rebounds: player.projected_stats?.rebounds || 0,
+      assists: player.projected_stats?.assists || 0,
+      value: player.projected_value || 0,
+      confidence: player.projection_confidence || 0.5
+    },
+    
+    // Additional mapped fields
+    trend: player.trend || 'stable',
+    threePointers: player.threePointers || player.stats?.three_pointers_made || 0,
+    valueScore: player.valueScore || player.value || 0,
+    projectedFantasyScore: player.projectedFantasyScore || player.projected_points || player.projection || 0
+  };
+};
 
 const FantasyHubScreen = () => {
   const theme = useTheme();
@@ -279,6 +320,11 @@ const FantasyHubScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   
+  // ===== ADD RATE LIMITING CODE HERE =====
+  const [isRateLimited, setIsRateLimited] = useState(false);
+  const apiCallCountRef = useRef(0);
+  const lastApiCallRef = useRef(Date.now());
+
   // ===== REPLACE FETCH LOGIC WITH HOOKS =====
   const [selectedSport, setSelectedSport] = useState('nba');
   
@@ -305,9 +351,18 @@ const FantasyHubScreen = () => {
     refetchInterval: 30 * 1000,
   });
   
-  // Extract data from hooks
-  const playerData = playersData?.players || [];
+  // Extract and transform data from hooks
+  const rawPlayerData = playersData?.players || [];
+  const transformedPlayerData = rawPlayerData.map(transformAPIPlayerData);
   const fantasyTeams = teamsData?.teams || [];
+  
+  // Transform team players if they're objects
+  const transformedFantasyTeams = fantasyTeams.map((team: any) => ({
+    ...team,
+    players: Array.isArray(team.players) 
+      ? team.players.map((p: any) => typeof p === 'string' ? p : p.name || p.id || 'Unknown Player')
+      : []
+  }));
   
   // Set loading state based on both queries
   const loading = playersLoading || teamsLoading;
@@ -318,10 +373,10 @@ const FantasyHubScreen = () => {
   // PLAYER DATA STATE (now managed by hook)
   const [playersErrorState, setPlayersErrorState] = useState<string | null>(null);
   
-  // PROJECTION FILTERING STATE
+  // PROJECTION FILTERING STATE - DISABLE BY DEFAULT
   const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
   const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0);
-  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(true);
+  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(false); // Changed to false
   const [sortByProjectionValue, setSortByProjectionValue] = useState(true);
   const [minEdgeThreshold, setMinEdgeThreshold] = useState(0);
   
@@ -372,9 +427,6 @@ const FantasyHubScreen = () => {
     severity: 'success' as 'success' | 'error' | 'info' | 'warning' 
   });
   
-  // ACTIVE ENDPOINT STATE (optional, can remove if not needed)
-  const [activeEndpoint, setActiveEndpoint] = useState<string>('');
-  
   // Positions
   const positions = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'];
   
@@ -392,7 +444,7 @@ const FantasyHubScreen = () => {
     { value: 'MLB', label: 'MLB', icon: <BaseballIcon />, apiValue: 'mlb' }
   ];
 
-  // ===== UPDATED PROJECTION VALUE CALCULATION (Update 2) =====
+  // ===== UPDATED PROJECTION VALUE CALCULATION =====
   const calculateProjectionValue = useCallback((player: Player): ProjectionValueResult => {
     if (!player || typeof player !== 'object') {
       return { 
@@ -405,10 +457,29 @@ const FantasyHubScreen = () => {
       };
     }
     
-    const fantasyScore = player.fantasyScore || 0;
-    const projection = player.projection || 0;
+    // Use multiple possible fields for fantasy score
+    const fantasyScore = player.fantasyScore || player.fantasy_points || 
+                        player.points || player.fppg || 0;
     
-    if (!projection || projection === 0) {
+    // Use multiple possible fields for projection
+    const projection = player.projection || player.projected_points || 
+                      player.projections?.fantasy_points || 
+                      player.proj_fantasy_points || 0;
+    
+    // If projection is missing or zero, calculate based on stats if available
+    let finalProjection = projection;
+    if (!finalProjection || finalProjection === 0) {
+      // Calculate a simple projection based on recent stats + trend
+      const basePoints = player.points || 0;
+      const trendMultiplier = player.trend === 'up' ? 1.1 : player.trend === 'down' ? 0.9 : 1.0;
+      finalProjection = basePoints * trendMultiplier;
+    }
+    
+    const projectionDiff = finalProjection - fantasyScore;
+    const isOverProjection = projectionDiff > 0;
+    
+    // Only calculate edge if we have both values
+    if (fantasyScore === 0 && finalProjection === 0) {
       return { 
         edge: 0, 
         recommendedSide: 'none', 
@@ -418,9 +489,6 @@ const FantasyHubScreen = () => {
         projectionDiff: 0 
       };
     }
-    
-    const projectionDiff = projection - fantasyScore;
-    const isOverProjection = projectionDiff > 0;
     
     // Convert to probability estimate
     const absDiff = Math.abs(projectionDiff);
@@ -456,7 +524,7 @@ const FantasyHubScreen = () => {
     };
   }, []);
 
-  // ===== UPDATED VALUE-BASED FILTERING =====
+  // ===== UPDATED VALUE-BASED FILTERING WITH MISSING DATA HANDLING =====
   const applyValueFiltering = useCallback((players: Player[]): Player[] => {
     console.log('🔍 [applyValueFiltering] Starting with', players.length, 'players');
     
@@ -465,7 +533,6 @@ const FantasyHubScreen = () => {
     // Log player data for debugging
     if (players.length > 0) {
       console.log('Sample player:', players[0]);
-      console.log('Player has projection?', players[0].projection !== undefined);
       console.log('Player projection value:', players[0].projection);
       console.log('Player fantasyScore:', players[0].fantasyScore);
     }
@@ -475,26 +542,37 @@ const FantasyHubScreen = () => {
       console.log('🔍 Projection filtering is ENABLED');
       const beforeCount = filtered.length;
       
-      filtered = filtered.filter(p => {
-        if (!p.projection) {
-          console.log(`Player ${p.name} has no projection, filtering out`);
-          return false;
-        }
-        const diff = Math.abs(p.projection - p.fantasyScore);
-        const passes = diff >= projectionDifferenceThreshold;
-        if (!passes) {
-          console.log(`Player ${p.name} fails projection diff: ${diff} < ${projectionDifferenceThreshold}`);
-        }
-        return passes;
-      });
+      // Only filter if players actually have projection data
+      const playersWithProjections = filtered.filter(p => p.projection && p.projection > 0);
       
-      console.log(`🔍 After projection filter: ${beforeCount} -> ${filtered.length} players`);
+      if (playersWithProjections.length > 0) {
+        filtered = filtered.filter(p => {
+          const projectionValue = p.projection || p.projected_points || 0;
+          const fantasyValue = p.fantasyScore || p.fantasy_points || 0;
+          
+          if (!projectionValue || projectionValue === 0) {
+            console.log(`Player ${p.name} has no projection, including anyway`);
+            return true; // Include players without projections when filtering is on
+          }
+          
+          const diff = Math.abs(projectionValue - fantasyValue);
+          const passes = diff >= projectionDifferenceThreshold;
+          if (!passes) {
+            console.log(`Player ${p.name} fails projection diff: ${diff} < ${projectionDifferenceThreshold}`);
+          }
+          return passes;
+        });
+        
+        console.log(`🔍 After projection filter: ${beforeCount} -> ${filtered.length} players`);
+      } else {
+        console.log('🔍 No players have projection data, skipping projection filter');
+      }
     } else {
       console.log('🔍 Projection filtering is DISABLED');
     }
     
-    // Apply edge threshold filter
-    if (minEdgeThreshold > 0) {
+    // Apply edge threshold filter (only if we're filtering by edges)
+    if (minEdgeThreshold > 0 && onlyShowProjectionEdges) {
       console.log('🔍 Applying edge threshold filter:', minEdgeThreshold);
       const beforeCount = filtered.length;
       
@@ -510,7 +588,7 @@ const FantasyHubScreen = () => {
       console.log(`🔍 After edge filter: ${beforeCount} -> ${filtered.length} players`);
     }
     
-    // Apply "only show positive edges" filter
+    // Apply "only show positive edges" filter (only if enabled)
     if (onlyShowProjectionEdges) {
       console.log('🔍 Applying positive edges filter');
       const beforeCount = filtered.length;
@@ -533,15 +611,16 @@ const FantasyHubScreen = () => {
 
   const sortByValueScore = useCallback((players: Player[]): Player[] => {
     return [...players].sort((a, b) => {
-      const valueA = calculateProjectionValue(a);
-      const valueB = calculateProjectionValue(b);
-      
       if (sortByProjectionValue) {
         // Sort by projection edge (highest to lowest)
+        const valueA = calculateProjectionValue(a);
+        const valueB = calculateProjectionValue(b);
         return valueB.edge - valueA.edge;
       } else {
-        // Sort by value score (highest to lowest)
-        return (b.valueScore || b.value) - (a.valueScore || a.value);
+        // Sort by value score (highest to lowest) or fantasy points as fallback
+        const scoreA = a.valueScore || a.value || a.fantasyScore || a.fantasy_points || 0;
+        const scoreB = b.valueScore || b.value || b.fantasyScore || b.fantasy_points || 0;
+        return scoreB - scoreA;
       }
     });
   }, [calculateProjectionValue, sortByProjectionValue]);
@@ -551,20 +630,17 @@ const FantasyHubScreen = () => {
     try {
       console.log('🔍 Initializing data with React Query hooks...');
       
-      // Data is automatically fetched by hooks
-      // Just process the data once it's loaded
-      
-      if (playerData.length > 0) {
+      if (transformedPlayerData.length > 0) {
         // Apply filtering and sorting
-        const valueFiltered = applyValueFiltering(playerData);
+        const valueFiltered = applyValueFiltering(transformedPlayerData);
         const sortedByValue = sortByValueScore(valueFiltered);
         
-        setAvailablePlayers(playerData);
+        setAvailablePlayers(transformedPlayerData);
         setFilteredPlayers(valueFiltered);
         setSortedPlayers(sortedByValue);
         
         console.log('✅ Data processed:', {
-          players: playerData.length,
+          players: transformedPlayerData.length,
           filtered: valueFiltered.length,
           sorted: sortedByValue.length
         });
@@ -574,9 +650,9 @@ const FantasyHubScreen = () => {
       console.error('Error processing data:', error);
       setSnackbar({ open: true, message: 'Failed to process data', severity: 'error' });
     }
-  }, [playerData, applyValueFiltering, sortByValueScore]);
+  }, [transformedPlayerData, applyValueFiltering, sortByValueScore]);
 
-  // ===== UPDATED FILTER EFFECT (Update 1) =====
+  // ===== UPDATED FILTER EFFECT =====
   useEffect(() => {
     console.log('🔄 FantasyHub filter useEffect triggered');
     console.log('Available players count:', availablePlayers.length);
@@ -645,7 +721,7 @@ const FantasyHubScreen = () => {
     console.log('🚀 FantasyHubScreen mounted, initializing...');
     
     // Initialize data when playerData is available
-    if (playerData.length > 0) {
+    if (transformedPlayerData.length > 0) {
       initializeData();
     }
     
@@ -656,7 +732,40 @@ const FantasyHubScreen = () => {
       setSearchInput(initialSearch);
       setSearchQuery(initialSearch);
     }
-  }, [playerData, location]);
+  }, [transformedPlayerData, location]);
+
+  // ===== RATE LIMITING EFFECT =====
+  useEffect(() => {
+    const now = Date.now();
+    apiCallCountRef.current++;
+    
+    // Block calls if too frequent (less than 3 seconds apart)
+    if (now - lastApiCallRef.current < 3000) {
+      console.log(`🚫 Blocking API call #${apiCallCountRef.current} - too frequent`);
+      setIsRateLimited(true);
+      return;
+    }
+    
+    // Block calls if too many in last minute (more than 20)
+    if (apiCallCountRef.current > 20) {
+      console.log(`🚫 Blocking API call #${apiCallCountRef.current} - rate limit exceeded`);
+      setIsRateLimited(true);
+      
+      // Reset counter after 1 minute
+      setTimeout(() => {
+        apiCallCountRef.current = 0;
+        setIsRateLimited(false);
+        console.log('✅ Rate limit reset');
+      }, 60000);
+      
+      return;
+    }
+    
+    setIsRateLimited(false);
+    lastApiCallRef.current = now;
+    
+    console.log(`📊 API Call #${apiCallCountRef.current} at ${new Date().toLocaleTimeString()}`);
+  }, [availablePlayers, searchQuery, selectedPosition, selectedTeam]);
 
   // ===== REFRESH HANDLER =====
   const onRefresh = async () => {
@@ -702,11 +811,11 @@ const FantasyHubScreen = () => {
     }
 
     const totals = teamData.reduce((acc, player) => ({
-      points: acc.points + player.points,
-      rebounds: acc.rebounds + player.rebounds,
-      assists: acc.assists + player.assists,
-      salary: acc.salary + player.salary,
-      fantasyScore: acc.fantasyScore + player.fantasyScore,
+      points: acc.points + (player.points || 0),
+      rebounds: acc.rebounds + (player.rebounds || 0),
+      assists: acc.assists + (player.assists || 0),
+      salary: acc.salary + (player.salary || 0),
+      fantasyScore: acc.fantasyScore + (player.fantasyScore || player.fantasy_points || 0),
     }), { points: 0, rebounds: 0, assists: 0, salary: 0, fantasyScore: 0 });
     
     const avgPoints = totals.points / teamData.length;
@@ -761,7 +870,9 @@ const FantasyHubScreen = () => {
 
   // ===== PLAYER MANAGEMENT =====
   const addPlayer = useCallback((player: Player) => {
-    const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
+    const playerSalary = activePlatform.name === 'FanDuel' 
+      ? (player.fanDuelSalary || 0)
+      : (player.draftKingsSalary || 0);
     
     if (budget - playerSalary >= 0 && team.length < 9) {
       const newTeam = [...team, player];
@@ -787,7 +898,9 @@ const FantasyHubScreen = () => {
   }, [activePlatform.name, budget, team, availablePlayers, calculateTeamStats]);
 
   const removePlayer = useCallback((player: Player) => {
-    const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
+    const playerSalary = activePlatform.name === 'FanDuel' 
+      ? (player.fanDuelSalary || 0)
+      : (player.draftKingsSalary || 0);
     
     const newTeam = team.filter(p => p.id !== player.id);
     setTeam(newTeam);
@@ -798,90 +911,244 @@ const FantasyHubScreen = () => {
     setSnackbar({ open: true, message: `Removed ${player.name} from your team`, severity: 'success' });
   }, [activePlatform.name, budget, team, availablePlayers, calculateTeamStats]);
 
-  // ===== DRAFT FUNCTIONS =====
-  const fetchSnakeDraft = async (position: number) => {
-    setIsGeneratingDraft(true);
-    try {
-      // Mock draft result
-      const result: DraftResult = {
-        success: true,
-        draftPosition: position,
-        sport: selectedSportDisplay,
-        platform: activePlatform.name,
-        results: {
-          picks: ['Stephen Curry', 'Nikola Jokic', 'Luka Doncic', 'Jayson Tatum', 'Giannis Antetokounmpo'],
-          strategy: 'Stars and Scrubs',
-          projectedPoints: 312.5,
-          budgetUsed: 45000,
-          remainingBudget: 15000
-        }
-      };
-      setDraftResults(result);
-      setShowDraftResults(true);
-      setSnackbar({ open: true, message: `Snake draft generated for position ${position}`, severity: 'success' });
-    } catch (error) {
-      setSnackbar({ open: true, message: 'Failed to generate draft', severity: 'error' });
-    } finally {
-      setIsGeneratingDraft(false);
+// ===== API FETCH FUNCTIONS =====
+const fetchFantasyPlayers = async (sport: string) => {
+  try {
+    const response = await fetch(
+      `https://python-api-fresh-production.up.railway.app/api/fantasy/players?sport=${sport}`
+    );
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
     }
-  };
+    return response.json();
+  } catch (error) {
+    console.error('Failed to fetch fantasy players:', error);
+    // Return fallback data or throw depending on your error handling strategy
+    throw error;
+  }
+};
 
-  const fetchTurnDraft = async (position: number) => {
-    setIsGeneratingDraft(true);
-    try {
-      // Mock draft result
-      const result: DraftResult = {
-        success: true,
-        draftPosition: position,
-        sport: selectedSportDisplay,
-        platform: activePlatform.name,
-        results: {
-          picks: ['Jayson Tatum', 'Donovan Mitchell', 'Bam Adebayo', 'Tyrese Haliburton', 'Anthony Davis'],
-          strategy: 'Balanced Build',
-          projectedPoints: 298.7,
-          budgetUsed: 48000,
-          remainingBudget: 12000
-        }
-      };
-      setDraftResults(result);
-      setShowDraftResults(true);
-      setSnackbar({ open: true, message: `Turn draft generated for position ${position}`, severity: 'success' });
-    } catch (error) {
-      setSnackbar({ open: true, message: 'Failed to generate draft', severity: 'error' });
-    } finally {
-      setIsGeneratingDraft(false);
+const fetchOdds = async (sport: string) => {
+  try {
+    const response = await fetch(
+      `https://python-api-fresh-production.up.railway.app/api/odds/games?sport=${sport}`
+    );
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
     }
-  };
+    return response.json();
+  } catch (error) {
+    console.error('Failed to fetch odds:', error);
+    throw error;
+  }
+};
 
-  // ===== HELPER FUNCTIONS =====
-  const getPositionColor = (position: string) => {
-    const colors: Record<string, string> = {
-      'PG': '#3b82f6',
-      'SG': '#8b5cf6',
-      'SF': '#10b981',
-      'PF': '#f59e0b',
-      'C': '#ef4444'
+const fetchParlays = async () => {
+  try {
+    const response = await fetch(
+      'https://python-api-fresh-production.up.railway.app/api/parlay/suggestions'
+    );
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+    return response.json();
+  } catch (error) {
+    console.error('Failed to fetch parlays:', error);
+    throw error;
+  }
+};
+
+// ===== DRAFT FUNCTIONS =====
+const fetchSnakeDraft = async (position: number) => {
+  setIsGeneratingDraft(true);
+  try {
+    // You could enhance this to use the new fetchOdds or fetchFantasyPlayers functions
+    // For now, keeping the mock data but adding API integration potential
+    
+    // Example: Fetch real data before falling back to mock
+    try {
+      // Try to fetch real draft data if API endpoint exists
+      // const realDraftData = await fetchFromUnifiedAPI('/api/draft/snake', { position, sport: selectedSportDisplay });
+      // if (realDraftData.success) {
+      //   setDraftResults(realDraftData);
+      //   setShowDraftResults(true);
+      //   setSnackbar({ open: true, message: `Snake draft generated for position ${position}`, severity: 'success' });
+      //   return;
+      // }
+    } catch (apiError) {
+      console.log('Using mock draft data, API not available:', apiError);
+    }
+    
+    // Mock draft result (fallback)
+    const result: DraftResult = {
+      success: true,
+      draftPosition: position,
+      sport: selectedSportDisplay,
+      platform: activePlatform.name,
+      results: {
+        picks: ['Stephen Curry', 'Nikola Jokic', 'Luka Doncic', 'Jayson Tatum', 'Giannis Antetokounmpo'],
+        strategy: 'Stars and Scrubs',
+        projectedPoints: 312.5,
+        budgetUsed: 45000,
+        remainingBudget: 15000
+      }
     };
-    return colors[position] || '#64748b';
-  };
+    setDraftResults(result);
+    setShowDraftResults(true);
+    setSnackbar({ open: true, message: `Snake draft generated for position ${position}`, severity: 'success' });
+  } catch (error) {
+    setSnackbar({ open: true, message: 'Failed to generate draft', severity: 'error' });
+  } finally {
+    setIsGeneratingDraft(false);
+  }
+};
 
-  // ===== UPDATE SPORT CHANGE HANDLER =====
-  const handleSportChange = (sportValue: string) => {
-    // Find the sport object
-    const sportObj = sports.find(s => s.value === sportValue);
-    if (sportObj) {
-      setSelectedSportDisplay(sportValue);
-      setSelectedSport(sportObj.apiValue); // This will trigger the hooks to refetch
+const fetchTurnDraft = async (position: number) => {
+  setIsGeneratingDraft(true);
+  try {
+    // Try to fetch real data if available
+    // const realDraftData = await fetchFromUnifiedAPI('/api/draft/turn', { position, sport: selectedSportDisplay });
+    
+    // Mock draft result
+    const result: DraftResult = {
+      success: true,
+      draftPosition: position,
+      sport: selectedSportDisplay,
+      platform: activePlatform.name,
+      results: {
+        picks: ['Jayson Tatum', 'Donovan Mitchell', 'Bam Adebayo', 'Tyrese Haliburton', 'Anthony Davis'],
+        strategy: 'Balanced Build',
+        projectedPoints: 298.7,
+        budgetUsed: 48000,
+        remainingBudget: 12000
+      }
+    };
+    setDraftResults(result);
+    setShowDraftResults(true);
+    setSnackbar({ open: true, message: `Turn draft generated for position ${position}`, severity: 'success' });
+  } catch (error) {
+    setSnackbar({ open: true, message: 'Failed to generate draft', severity: 'error' });
+  } finally {
+    setIsGeneratingDraft(false);
+  }
+};
+
+// ===== ENHANCED FETCH FUNCTIONS USING UNIFIED API =====
+const fetchFantasyData = async (sport: string) => {
+  try {
+    // Use the unified API hook if available, otherwise fall back to direct fetch
+    if (typeof fetchFromUnifiedAPI === 'function') {
+      const [playersData, oddsData, parlaysData] = await Promise.all([
+        fetchFromUnifiedAPI('/api/fantasy/players', { sport }),
+        fetchFromUnifiedAPI('/api/odds/games', { sport }),
+        fetchFromUnifiedAPI('/api/parlay/suggestions')
+      ]);
       
-      setSnackbar({
-        open: true,
-        message: `Loading ${sportValue} data...`,
-        severity: 'info'
-      });
+      return {
+        players: playersData,
+        odds: oddsData,
+        parlays: parlaysData
+      };
+    } else {
+      // Fallback to direct API calls
+      const [playersData, oddsData, parlaysData] = await Promise.all([
+        fetchFantasyPlayers(sport),
+        fetchOdds(sport),
+        fetchParlays()
+      ]);
+      
+      return {
+        players: playersData,
+        odds: oddsData,
+        parlays: parlaysData
+      };
     }
-  };
+  } catch (error) {
+    console.error('Failed to fetch fantasy data:', error);
+    // Return fallback data
+    return {
+      players: { success: false, players: [], message: 'Failed to fetch players' },
+      odds: { success: false, games: [], message: 'Failed to fetch odds' },
+      parlays: { success: false, suggestions: [], message: 'Failed to fetch parlays' }
+    };
+  }
+};
 
-  // ===== RENDER FUNCTIONS =====
+// ===== HELPER FUNCTIONS =====
+const getPositionColor = (position: string) => {
+  const colors: Record<string, string> = {
+    'PG': '#3b82f6',
+    'SG': '#8b5cf6',
+    'SF': '#10b981',
+    'PF': '#f59e0b',
+    'C': '#ef4444'
+  };
+  return colors[position] || '#64748b';
+};
+
+// ===== SPORT DATA FETCHING =====
+const fetchSportData = async (sport: string) => {
+  try {
+    setSnackbar({
+      open: true,
+      message: `Loading ${sport} data...`,
+      severity: 'info'
+    });
+    
+    // Fetch all data for the selected sport
+    const data = await fetchFantasyData(sport);
+    
+    // Update state with fetched data
+    if (data.players.success && data.players.players) {
+      // Update player data in state
+    }
+    
+    if (data.odds.success && data.odds.games) {
+      // Update odds data in state
+    }
+    
+    if (data.parlays.success && data.parlays.suggestions) {
+      // Update parlay data in state
+    }
+    
+    setSnackbar({
+      open: true,
+      message: `${sport} data loaded successfully`,
+      severity: 'success'
+    });
+    
+  } catch (error) {
+    console.error(`Failed to load ${sport} data:`, error);
+    setSnackbar({
+      open: true,
+      message: `Failed to load ${sport} data`,
+      severity: 'error'
+    });
+  }
+};
+
+// ===== UPDATE SPORT CHANGE HANDLER =====
+const handleSportChange = (sportValue: string) => {
+  // Find the sport object
+  const sportObj = sports.find(s => s.value === sportValue);
+  if (sportObj) {
+    setSelectedSportDisplay(sportValue);
+    setSelectedSport(sportObj.apiValue); // This will trigger the hooks to refetch
+    
+    // Also fetch data using the new fetch functions
+    fetchSportData(sportObj.apiValue);
+  }
+};
+
+// ===== USE EFFECT FOR INITIAL DATA LOAD =====
+// Add this to your component if not already present
+useEffect(() => {
+  if (selectedSport) {
+    fetchSportData(selectedSport);
+  }
+}, [selectedSport]);
+
+// ===== RENDER FUNCTIONS =====
   const renderPlatformSelector = () => (
     <Paper sx={{ p: 2, mb: 3 }}>
       <Typography variant="h6" gutterBottom>
@@ -1143,40 +1410,40 @@ const FantasyHubScreen = () => {
                     <Box>
                       <Typography variant="caption" color="text.secondary">Salary</Typography>
                       <Typography variant="body2" fontWeight="bold">
-                        ${(activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary).toLocaleString()}
+                        ${(activePlatform.name === 'FanDuel' ? (player.fanDuelSalary || 0) : (player.draftKingsSalary || 0)).toLocaleString()}
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'center' }}>
                       <Typography variant="caption" color="text.secondary">Fantasy Score</Typography>
                       <Typography variant="body2" fontWeight="bold" color="#10b981">
-                        {player.fantasyScore.toFixed(1)}
+                        {(player.fantasyScore || player.fantasy_points || 0).toFixed(1)}
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>
                       <Typography variant="caption" color="text.secondary">Value</Typography>
                       <Typography variant="body2" fontWeight="bold" color="#f59e0b">
-                        {player.value.toFixed(2)}x
+                        {(player.value || 0).toFixed(2)}x
                       </Typography>
                     </Box>
                   </Box>
                   
-                  {player.projection && (
+                  {(player.projection || player.projected_points) && (
                     <Box sx={{ 
                       mt: 1, 
                       p: 1, 
-                      bgcolor: player.projection > player.fantasyScore ? '#f0fdf4' : '#fef2f2',
+                      bgcolor: (player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '#f0fdf4' : '#fef2f2',
                       borderRadius: 1,
-                      border: `1px solid ${player.projection > player.fantasyScore ? '#bbf7d0' : '#fecaca'}`
+                      border: `1px solid ${(player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '#bbf7d0' : '#fecaca'}`
                     }}>
                       <Typography variant="caption" display="block" color="text.secondary">
-                        Projection: {player.projection.toFixed(1)} 
+                        Projection: {(player.projection || player.projected_points || 0).toFixed(1)} 
                         <Typography 
                           component="span" 
                           variant="caption" 
-                          color={player.projection > player.fantasyScore ? '#059669' : '#ef4444'}
+                          color={(player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '#059669' : '#ef4444'}
                           sx={{ ml: 1 }}
                         >
-                          ({player.projection > player.fantasyScore ? '+' : ''}{(player.projection - player.fantasyScore).toFixed(1)})
+                          ({(player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '+' : ''}{((player.projection || player.projected_points || 0) - (player.fantasyScore || player.fantasy_points || 0)).toFixed(1)})
                         </Typography>
                       </Typography>
                     </Box>
@@ -1191,34 +1458,47 @@ const FantasyHubScreen = () => {
   );
 
   // ===== UPDATED RENDER PROJECTION FILTERING CONTROLS =====
-  const renderProjectionFilteringControls = () => (
-    <Paper sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <FilterIcon sx={{ mr: 1, color: '#3b82f6' }} />
-        <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 'bold' }}>
-          Projection-Based Analysis
-        </Typography>
-        <FormControlLabel
-          control={
-            <Switch
-              checked={enableProjectionFiltering}
-              onChange={(e) => {
-                console.log('🔍 Projection filtering changed to:', e.target.checked);
-                setEnableProjectionFiltering(e.target.checked);
-              }}
-              color="primary"
-            />
-          }
-          label="Enable Projection Filtering"
-          sx={{ ml: 'auto' }}
-        />
-      </Box>
+  const renderProjectionFilteringControls = () => {
+    const playersWithProjections = transformedPlayerData.filter(p => 
+      p.projection || p.projected_points || p.projections?.fantasy_points
+    ).length;
+    
+    return (
+      <Paper sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <FilterIcon sx={{ mr: 1, color: '#3b82f6' }} />
+          <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 'bold' }}>
+            Projection-Based Analysis
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={enableProjectionFiltering}
+                onChange={(e) => {
+                  console.log('🔍 Projection filtering changed to:', e.target.checked);
+                  setEnableProjectionFiltering(e.target.checked);
+                }}
+                color="primary"
+                disabled={playersWithProjections === 0}
+              />
+            }
+            label={`Enable Projection Filtering (${playersWithProjections} players have projections)`}
+            sx={{ ml: 'auto' }}
+          />
+        </Box>
 
-      {enableProjectionFiltering && (
-        <>
+        {playersWithProjections === 0 && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <AlertTitle>No Projection Data Available</AlertTitle>
+            Your API doesn't include projection data yet. Enable mock projections in API or disable projection filtering.
+          </Alert>
+        )}
+
+        {enableProjectionFiltering && playersWithProjections > 0 && (
+          <>
           <Alert severity="info" sx={{ mb: 2 }}>
             <AlertTitle>Projection Filtering Active</AlertTitle>
-            Showing players with projections. If no players appear, they may not have projection data.
+            Showing {playersWithProjections} players with projection data out of {transformedPlayerData.length} total players.
           </Alert>
           
           <Grid container spacing={2} alignItems="center">
@@ -1252,6 +1532,7 @@ const FantasyHubScreen = () => {
                       setOnlyShowProjectionEdges(e.target.checked);
                     }}
                     color="primary"
+                    disabled={playersWithProjections === 0}
                   />
                 }
                 label="Only Positive Edge"
@@ -1297,17 +1578,19 @@ const FantasyHubScreen = () => {
           
           <Box sx={{ mt: 2, p: 1, bgcolor: '#f0f9ff', borderRadius: 1 }}>
             <Typography variant="caption" color="text.secondary">
-              Current filter settings may exclude players without projection data.
-              {playerData.length > 0 && ` ${playerData.filter(p => p.projection && p.projection > 0).length} of ${playerData.length} players have projections.`}
+              {playersWithProjections === 0 
+                ? 'No projection data available. Enable mock data in API settings.'
+                : `Showing ${playersWithProjections} players with projection data.`}
             </Typography>
           </Box>
-        </>
-      )}
-    </Paper>
-  );
+          </>
+        )}
+      </Paper>
+    );
+  };
 
   const renderFantasyTeamsSection = () => {
-    if (!fantasyTeams || fantasyTeams.length === 0) {
+    if (!transformedFantasyTeams || transformedFantasyTeams.length === 0) {
       return (
         <Paper sx={{ p: 3, mb: 4 }}>
           <Typography variant="h5" fontWeight="bold" gutterBottom>
@@ -1328,7 +1611,7 @@ const FantasyHubScreen = () => {
               🏆 Your Fantasy Teams
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {fantasyTeams.length} teams loaded from React Query hooks
+              {transformedFantasyTeams.length} teams loaded from React Query hooks
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1346,7 +1629,7 @@ const FantasyHubScreen = () => {
         </Box>
 
         <Grid container spacing={3}>
-          {fantasyTeams.map((team) => (
+          {transformedFantasyTeams.map((team) => (
             <Grid item xs={12} md={6} key={team.id}>
               <Card sx={{ 
                 height: '100%',
@@ -1477,7 +1760,7 @@ const FantasyHubScreen = () => {
     );
   };
 
-  // ===== UPDATED RENDER TOP VALUE PICKS (Update 4) =====
+  // ===== UPDATED RENDER TOP VALUE PICKS =====
   const renderTopValuePicks = () => {
     if (!sortedPlayers || sortedPlayers.length === 0) return null;
     
@@ -1485,7 +1768,7 @@ const FantasyHubScreen = () => {
       .filter(p => {
         if (!p || typeof p !== 'object') return false;
         const value = calculateProjectionValue(p);
-        return value.edge > 0;
+        return !onlyShowProjectionEdges || value.edge > 0;
       })
       .slice(0, 5);
     
@@ -1494,7 +1777,7 @@ const FantasyHubScreen = () => {
     return (
       <Paper sx={{ mb: 3, p: 2, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
         <Typography variant="h6" sx={{ color: '#059669', fontWeight: 'bold', mb: 2 }}>
-          🎯 Top Projection Value Picks
+          🎯 Top Value Picks
         </Typography>
         
         <TableContainer>
@@ -1544,23 +1827,23 @@ const FantasyHubScreen = () => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" fontWeight="bold">
-                        {(player.fantasyScore || 0).toFixed(1)}
+                        {(player.fantasyScore || player.fantasy_points || 0).toFixed(1)}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         <Typography variant="body2" fontWeight="bold" 
-                          color={player.projection && player.projection > (player.fantasyScore || 0) ? '#059669' : '#ef4444'}>
-                          {(player.projection || 0).toFixed(1)}
+                          color={(player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '#059669' : '#ef4444'}>
+                          {(player.projection || player.projected_points || 0).toFixed(1)}
                         </Typography>
-                        {player.projection && (
+                        {(player.projection || player.projected_points) && (
                           <Chip 
-                            label={`${((player.projection || 0) - (player.fantasyScore || 0)).toFixed(1)}`}
+                            label={`${((player.projection || player.projected_points || 0) - (player.fantasyScore || player.fantasy_points || 0)).toFixed(1)}`}
                             size="small"
                             sx={{ 
                               ml: 1,
-                              bgcolor: (player.projection || 0) > (player.fantasyScore || 0) ? '#bbf7d0' : '#fecaca',
-                              color: (player.projection || 0) > (player.fantasyScore || 0) ? '#059669' : '#ef4444',
+                              bgcolor: (player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '#bbf7d0' : '#fecaca',
+                              color: (player.projection || player.projected_points || 0) > (player.fantasyScore || player.fantasy_points || 0) ? '#059669' : '#ef4444',
                               fontSize: '0.6rem'
                             }}
                           />
@@ -1609,44 +1892,54 @@ const FantasyHubScreen = () => {
   };
 
   // ===== UPDATE DEBUG INFO =====
-  const renderDebugInfo = () => (
-    <Box sx={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', borderRadius: '4px' }}>
-      <Typography variant="subtitle2" fontWeight="bold">FantasyHub Debug:</Typography>
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
-        <Chip 
-          label={teamsError ? '⚠️ Teams Error' : '✅ Teams Loaded'}
-          color={teamsError ? 'warning' : 'success'}
-        />
-        <Chip 
-          label={playersError ? '⚠️ Players Error' : '✅ Players Loaded'}
-          color={playersError ? 'warning' : 'success'}
-        />
-        <Typography variant="caption">
-          Teams: {fantasyTeams.length} | Players: {playerData.length}
-        </Typography>
-        <Button 
-          variant="outlined" 
-          size="small"
-          onClick={onRefresh}
-          disabled={refreshing}
-          startIcon={<RefreshIcon />}
-        >
-          Refresh All
-        </Button>
+  const renderDebugInfo = () => {
+    const playersWithProjections = transformedPlayerData.filter(p => 
+      p.projection || p.projected_points || p.projections?.fantasy_points
+    ).length;
+    
+    return (
+      <Box sx={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', borderRadius: '4px' }}>
+        <Typography variant="subtitle2" fontWeight="bold">FantasyHub Debug:</Typography>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
+          <Chip 
+            label={teamsError ? '⚠️ Teams Error' : '✅ Teams Loaded'}
+            color={teamsError ? 'warning' : 'success'}
+          />
+          <Chip 
+            label={playersError ? '⚠️ Players Error' : '✅ Players Loaded'}
+            color={playersError ? 'warning' : 'success'}
+          />
+          <Typography variant="caption">
+            Teams: {transformedFantasyTeams.length} | Players: {transformedPlayerData.length}
+          </Typography>
+          <Button 
+            variant="outlined" 
+            size="small"
+            onClick={onRefresh}
+            disabled={refreshing}
+            startIcon={<RefreshIcon />}
+          >
+            Refresh All
+          </Button>
+        </Box>
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" display="block">
+            Current Sport: {selectedSport} | Display: {selectedSportDisplay}
+          </Typography>
+          <Typography variant="caption" display="block">
+            Players with projections: {playersWithProjections} / {transformedPlayerData.length}
+          </Typography>
+          <Typography variant="caption" display="block">
+            Filtered players: {filteredPlayers.length} | Sorted players: {sortedPlayers.length}
+          </Typography>
+          <Typography variant="caption" display="block">
+            Projection Filtering: {enableProjectionFiltering ? 'ON' : 'OFF'} | 
+            Only Positive Edges: {onlyShowProjectionEdges ? 'ON' : 'OFF'}
+          </Typography>
+        </Box>
       </Box>
-      <Box sx={{ mt: 1 }}>
-        <Typography variant="caption" display="block">
-          Current Sport: {selectedSport} | Display: {selectedSportDisplay}
-        </Typography>
-        <Typography variant="caption" display="block">
-          Players with projections: {playerData.filter(p => p.projection && p.projection > 0).length} / {playerData.length}
-        </Typography>
-        <Typography variant="caption" display="block">
-          Filtered players: {filteredPlayers.length} | Sorted players: {sortedPlayers.length}
-        </Typography>
-      </Box>
-    </Box>
-  );
+    );
+  };
 
   const renderAddPlayerModal = () => (
     <Dialog open={showAddPlayer} onClose={() => setShowAddPlayer(false)} maxWidth="md" fullWidth>
@@ -1666,7 +1959,9 @@ const FantasyHubScreen = () => {
         ) : (
           <List>
             {sortedPlayers.map((player) => {
-              const playerSalary = activePlatform.name === 'FanDuel' ? player.fanDuelSalary : player.draftKingsSalary;
+              const playerSalary = activePlatform.name === 'FanDuel' 
+                ? (player.fanDuelSalary || 0)
+                : (player.draftKingsSalary || 0);
               const canAdd = budget >= playerSalary && team.length < 9;
               const value = calculateProjectionValue(player);
               
@@ -1694,8 +1989,8 @@ const FantasyHubScreen = () => {
                   }
                 >
                   <ListItemAvatar>
-                    <Avatar sx={{ bgcolor: getPositionColor(player.position) }}>
-                      {player.position.charAt(0)}
+                    <Avatar sx={{ bgcolor: getPositionColor(player.position || '') }}>
+                      {(player.position || 'N/A').charAt(0)}
                     </Avatar>
                   </ListItemAvatar>
                   <ListItemText
@@ -1720,11 +2015,13 @@ const FantasyHubScreen = () => {
                     secondary={
                       <Box>
                         <Typography component="span" variant="body2">
-                          {player.position} • {player.team} • Value: {player.value.toFixed(2)}x
+                          {player.position} • {player.team} • Value: {(player.value || 0).toFixed(2)}x
                         </Typography>
                         <br />
                         <Typography component="span" variant="caption" color="text.secondary">
-                          Fantasy: {player.fantasyScore.toFixed(1)} • Proj: {player.projection?.toFixed(1) || 'N/A'} • Salary: ${playerSalary.toLocaleString()}
+                          Fantasy: {(player.fantasyScore || player.fantasy_points || 0).toFixed(1)} • 
+                          Proj: {(player.projection || player.projected_points || 0).toFixed(1) || 'N/A'} • 
+                          Salary: ${playerSalary.toLocaleString()}
                         </Typography>
                       </Box>
                     }
@@ -1748,7 +2045,7 @@ const FantasyHubScreen = () => {
         {draftResults ? (
           <Box>
             <Typography variant="h6" gutterBottom>
-              {draftResults.draftType === 'snake' ? 'Snake' : 'Turn'} Draft - Position {draftResults.draftPosition}
+              {draftType === 'snake' ? 'Snake' : 'Turn'} Draft - Position {draftResults.draftPosition}
             </Typography>
             <Typography variant="body2" color="text.secondary" gutterBottom>
               Sport: {draftResults.sport} • Platform: {draftResults.platform}
@@ -1844,7 +2141,7 @@ const FantasyHubScreen = () => {
         {renderFantasyTeamsSection()}
         
         {/* Show player data status */}
-        {playerData.length === 0 && (
+        {transformedPlayerData.length === 0 && (
           <Alert severity="info" sx={{ mb: 3 }}>
             <AlertTitle>No Player Data Loaded</AlertTitle>
             No player data available for {selectedSportDisplay}.
@@ -1852,7 +2149,7 @@ const FantasyHubScreen = () => {
         )}
         
         {/* Projection Filtering Controls - Only show if we have player data */}
-        {playerData.length > 0 && (
+        {transformedPlayerData.length > 0 && (
           <>
             {renderProjectionFilteringControls()}
             {renderTopValuePicks()}

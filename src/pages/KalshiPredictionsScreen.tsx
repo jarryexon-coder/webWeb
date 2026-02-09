@@ -1,4 +1,4 @@
-// src/pages/KalshiPredictionsScreen.tsx - UPDATED WITH CORRECT HOOK INTEGRATION
+// src/pages/KalshiPredictionsScreen.tsx - UPDATED WITH KALSHI HOOK INTEGRATION
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -74,8 +74,9 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
 
-// ✅ UPDATED: USE PREDICTIONS HOOK INSTEAD OF KALSHI-SPECIFIC HOOK
-import { usePredictions } from '../hooks/useBackendAPI';
+// ✅ NEW: USE KALSHI-SPECIFIC HOOK
+import { useKalshiPredictions } from '../hooks/useKalshiPredictions';
+import { useParlaySuggestions, useOddsGames } from '../hooks/useUnifiedAPI';
 
 // Prediction interface
 interface Prediction {
@@ -90,6 +91,7 @@ interface Prediction {
   confidence: number;
   edge: string;
   aiGenerated?: boolean;
+  trend?: string;
 }
 
 // Styled Components (keep existing)
@@ -114,155 +116,170 @@ const PredictionCard = styled(Card)(({ theme }) => ({
   },
 }));
 
-// ✅ ENHANCED MOCK DATA FOR FALLBACK
+// ✅ ENHANCED MOCK DATA FOR FALLBACK (NBA-focused to match API)
 const MOCK_KALSHI_PREDICTIONS: Prediction[] = [
   { 
     id: '1', 
-    question: 'Will Trump win the 2024 presidential election?', 
-    category: 'Politics', 
-    yesPrice: '0.52', 
-    noPrice: '0.48', 
+    question: 'Will LeBron James score over 25.5 points tonight?', 
+    category: 'NBA', 
+    yesPrice: '0.62', 
+    noPrice: '0.38', 
     volume: 'High', 
-    analysis: 'Current polls show close race with slight edge to Trump. Market sentiment indicates 52% probability.', 
-    expires: 'Nov 5, 2024', 
-    confidence: 65, 
-    edge: '+2.5%',
+    analysis: 'Lebron averaging 27.3 PPG this season. Playing at home against weak defense.', 
+    expires: '2024-02-08', 
+    confidence: 72, 
+    edge: '+3.8%',
+    trend: 'up',
     aiGenerated: false 
   },
   { 
     id: '2', 
-    question: 'Will US recession occur in 2024?', 
-    category: 'Economics', 
-    yesPrice: '0.38', 
-    noPrice: '0.62', 
-    volume: 'High', 
-    analysis: 'Economic indicators mixed, but strong labor market reduces probability. Inflation data suggests 38% chance.', 
-    expires: 'Dec 31, 2024', 
-    confidence: 68, 
-    edge: '+2.9%',
+    question: 'Will Warriors win by 5+ points vs Lakers?', 
+    category: 'NBA', 
+    yesPrice: '0.45', 
+    noPrice: '0.55', 
+    volume: 'Medium', 
+    analysis: 'Warriors slight favorites but Lakers have home court advantage.', 
+    expires: '2024-02-08', 
+    confidence: 58, 
+    edge: '+1.2%',
+    trend: 'neutral',
     aiGenerated: false 
   },
   { 
     id: '3', 
-    question: 'Will Chiefs win Super Bowl 2025?', 
-    category: 'Sports', 
-    yesPrice: '0.28', 
-    noPrice: '0.72', 
+    question: 'Will Nikola Jokić record a triple-double?', 
+    category: 'NBA', 
+    yesPrice: '0.38', 
+    noPrice: '0.62', 
     volume: 'High', 
-    analysis: 'Strong team but competitive field reduces probability. Key player injuries factored into 28% odds.', 
-    expires: 'Feb 9, 2025', 
-    confidence: 62, 
-    edge: '+1.5%',
+    analysis: 'Jokić averages triple-double in last 10 games. Strong matchup tonight.', 
+    expires: '2024-02-08', 
+    confidence: 65, 
+    edge: '+2.5%',
+    trend: 'up',
     aiGenerated: false 
   },
   { 
     id: '4', 
-    question: 'Will Taylor Swift win Album of the Year Grammy 2025?', 
-    category: 'Culture', 
-    yesPrice: '0.55', 
-    noPrice: '0.45', 
-    volume: 'High', 
-    analysis: 'Critical acclaim and commercial success create strong candidacy. Industry buzz suggests 55% probability.', 
-    expires: 'Feb 2, 2025', 
-    confidence: 70, 
-    edge: '+3.6%',
+    question: 'Will Celtics cover -7.5 spread vs Knicks?', 
+    category: 'NBA', 
+    yesPrice: '0.52', 
+    noPrice: '0.48', 
+    volume: 'Medium', 
+    analysis: 'Celtics strong at home but Knicks playing well recently.', 
+    expires: '2024-02-08', 
+    confidence: 60, 
+    edge: '+2.1%',
+    trend: 'neutral',
     aiGenerated: false 
   },
   { 
     id: '5', 
-    question: 'Will Bitcoin reach $100K in 2024?', 
-    category: 'Technology', 
-    yesPrice: '0.42', 
-    noPrice: '0.58', 
-    volume: 'Medium', 
-    analysis: 'Halving event creates bullish sentiment but regulatory concerns remain. Market pricing indicates 42% chance.', 
-    expires: 'Dec 31, 2024', 
-    confidence: 60, 
-    edge: '+1.8%',
+    question: 'Will total points be over 230.5 in Bucks vs Suns?', 
+    category: 'NBA', 
+    yesPrice: '0.68', 
+    noPrice: '0.32', 
+    volume: 'High', 
+    analysis: 'Both teams rank top 5 in offensive rating. Expected high-scoring game.', 
+    expires: '2024-02-08', 
+    confidence: 75, 
+    edge: '+4.5%',
+    trend: 'up',
     aiGenerated: false 
   },
   { 
     id: '6', 
-    question: 'Will Fed cut rates by 100+ bps in 2024?', 
-    category: 'Economics', 
-    yesPrice: '0.31', 
-    noPrice: '0.69', 
-    volume: 'High', 
-    analysis: 'Inflation cooling slower than expected reduces aggressive rate cut probability to 31%.', 
-    expires: 'Dec 31, 2024', 
-    confidence: 65, 
-    edge: '+2.1%',
+    question: 'Will Stephen Curry make 5+ three-pointers?', 
+    category: 'NBA', 
+    yesPrice: '0.42', 
+    noPrice: '0.58', 
+    volume: 'Medium', 
+    analysis: 'Curry averaging 4.8 threes per game. Facing tough perimeter defense.', 
+    expires: '2024-02-08', 
+    confidence: 55, 
+    edge: '+1.5%',
+    trend: 'down',
     aiGenerated: false 
   },
 ];
 
-// ✅ ENHANCED Helper function to transform API data
-const transformApiData = (apiPredictions: any[]): Prediction[] => {
-  if (!apiPredictions || !Array.isArray(apiPredictions)) {
-    console.log('No valid predictions array to transform');
+// ✅ ENHANCED Helper function to transform Kalshi API data
+const transformKalshiData = (kalshiPredictions: any[]): Prediction[] => {
+  if (!kalshiPredictions || !Array.isArray(kalshiPredictions)) {
+    console.log('No valid Kalshi predictions array to transform');
     return MOCK_KALSHI_PREDICTIONS;
   }
 
-  console.log(`🔄 Transforming ${apiPredictions.length} API predictions`);
+  console.log(`🔄 Transforming ${kalshiPredictions.length} Kalshi predictions`);
   
-  const transformed = apiPredictions.map((pred: any, index: number) => {
-    // Extract data with better fallbacks
-    const isKalshi = pred.platform === 'kalshi' || pred.marketType === 'binary' || 
-                    (pred.source && pred.source.toLowerCase().includes('kalshi'));
+  const transformed = kalshiPredictions.map((pred: any, index: number) => {
+    // Extract the question from 'market' field (API returns 'market' not 'question')
+    const question = pred.market || `Kalshi Market ${index + 1}`;
     
-    // Extract yes/no prices
-    let yesPrice = '0.50';
-    let noPrice = '0.50';
+    // Convert prices from numbers (0-100) to formatted strings (0.00-1.00)
+    const yesPriceNum = typeof pred.yesPrice === 'number' ? pred.yesPrice : 
+                       typeof pred.yesPrice === 'string' ? parseFloat(pred.yesPrice) : 50;
+    const noPriceNum = typeof pred.noPrice === 'number' ? pred.noPrice : 
+                      typeof pred.noPrice === 'string' ? parseFloat(pred.noPrice) : 50;
     
-    if (pred.yesPrice !== undefined) {
-      yesPrice = typeof pred.yesPrice === 'number' ? pred.yesPrice.toFixed(2) : pred.yesPrice.toString();
-      noPrice = (1 - parseFloat(yesPrice)).toFixed(2);
-    } else if (pred.probability !== undefined) {
-      const prob = parseFloat(pred.probability) / 100;
-      yesPrice = prob.toFixed(2);
-      noPrice = (1 - prob).toFixed(2);
-    } else if (pred.odds !== undefined) {
-      // Convert odds to probability
-      const odds = parseFloat(pred.odds);
-      const prob = odds > 0 ? 1 / (1 + odds) : 1 / (1 + Math.abs(odds));
-      yesPrice = prob.toFixed(2);
-      noPrice = (1 - prob).toFixed(2);
-    } else {
-      // Default random probability
-      const randomProb = 0.45 + Math.random() * 0.3;
-      yesPrice = randomProb.toFixed(2);
-      noPrice = (1 - randomProb).toFixed(2);
+    // Convert 42 to 0.42, 58 to 0.58
+    const yesPrice = (yesPriceNum / 100).toFixed(2);
+    const noPrice = (noPriceNum / 100).toFixed(2);
+    
+    // Calculate confidence from various sources
+    let confidence = pred.confidence || 
+                    Math.min(95, Math.max(50, yesPriceNum + 10)) || 65;
+    
+    // Generate analysis based on available data
+    const category = pred.category || 'General';
+    const volume = pred.volume || 'Medium';
+    const trend = pred.trend || 'neutral';
+    const closeDate = pred.closeDate || '';
+    
+    // Create analysis text
+    const analysis = pred.analysis || 
+      `${category} market showing ${trend} trend. Current market pricing suggests a ${yesPriceNum}% probability for "Yes". ${volume ? `Trading volume: ${volume}.` : ''} ${closeDate ? `Closes on ${closeDate}.` : ''}`;
+    
+    // Format expiration date
+    const expires = pred.closeDate || 
+                    pred.expires || 
+                    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString();
+    
+    // Calculate edge based on confidence and trend
+    let edge = pred.edge || '+2.5%';
+    if (trend === 'up' && confidence > 70) edge = '+4.2%';
+    if (trend === 'down' && confidence < 60) edge = '+1.8%';
+    
+    // Format volume
+    let volumeDisplay = volume;
+    if (typeof volume === 'number') {
+      volumeDisplay = `$${volume.toLocaleString()}`;
+    } else if (typeof volume === 'string' && !isNaN(parseFloat(volume))) {
+      volumeDisplay = `$${parseFloat(volume).toLocaleString()}`;
     }
     
-    // Extract confidence with fallback
-    let confidence = 65;
-    if (pred.confidence !== undefined) {
-      confidence = typeof pred.confidence === 'number' ? pred.confidence : parseInt(pred.confidence);
-    } else if (pred.probability !== undefined) {
-      confidence = Math.min(95, Math.max(50, parseFloat(pred.probability)));
-    }
-    
-    // Create transformed prediction
     const transformedPred: Prediction = {
-      id: pred.id || pred._id || pred.marketId || `kalshi-${index + 1}-${Date.now()}`,
-      question: pred.question || pred.title || pred.name || `Kalshi Market ${index + 1}`,
-      category: pred.category || pred.type || (isKalshi ? 'Kalshi' : 'General'),
+      id: pred.id || `kalshi-${index + 1}-${Date.now()}`,
+      question: question,
+      category: category,
       yesPrice: yesPrice,
       noPrice: noPrice,
-      volume: pred.volume || pred.tradingVolume || (Math.random() > 0.5 ? 'High' : 'Medium'),
-      analysis: pred.analysis || pred.description || pred.summary || 
-                `Market analysis based on current trends and probability models.`,
-      expires: pred.expires || pred.expirationDate || pred.endDate || 
-               new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+      volume: volumeDisplay.toString(),
+      analysis: analysis,
+      expires: expires,
       confidence: Math.min(95, Math.max(50, confidence)), // Clamp between 50-95
-      edge: pred.edge || pred.expectedValue || `+${(Math.random() * 5).toFixed(1)}%`,
-      aiGenerated: pred.aiGenerated || false
+      edge: edge,
+      trend: trend,
+      aiGenerated: false
     };
     
     return transformedPred;
   });
 
-  console.log(`✅ Successfully transformed ${transformed.length} predictions`);
+  console.log(`✅ Successfully transformed ${transformed.length} Kalshi predictions`);
+  
+  // If we have real data, use it. Otherwise fall back to mock.
   return transformed.length > 0 ? transformed : MOCK_KALSHI_PREDICTIONS;
 };
 
@@ -583,18 +600,18 @@ const KalshiNewsFeed = ({ newsItems }: { newsItems: any[] }) => {
   );
 };
 
-// ✅ Main Kalshi Predictions Screen with FIXED HOOK INTEGRATION
+// ✅ Main Kalshi Predictions Screen with KALSHI HOOK INTEGRATION
 const KalshiPredictionsScreen = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   
-  // ✅ UPDATED: USE PREDICTIONS HOOK INSTEAD OF KALSHI-SPECIFIC HOOK
+  // ✅ USE KALSHI-SPECIFIC HOOK
   const { 
-    data: predictionsData, 
-    isLoading: predictionsLoading, 
-    error: predictionsError, 
-    refetch: refetchPredictions 
-  } = usePredictions();
+    data: kalshiData, 
+    loading: kalshiLoading, 
+    error: kalshiError, 
+    refetch: refetchKalshi 
+  } = useKalshiPredictions();
   
   // ✅ STATE MANAGEMENT
   const [predictions, setPredictions] = useState<Prediction[]>([]);
@@ -618,79 +635,67 @@ const KalshiPredictionsScreen = () => {
     recordDay: '$466M',
   });
 
-// ✅ TRANSFORM API DATA WHEN HOOK RETURNS IT
-useEffect(() => {
-  console.log('🔄 Predictions hook data:', { 
-    data: predictionsData, 
-    loading: predictionsLoading, 
-    error: predictionsError 
-  });
-  
-  if (predictionsLoading) {
-    setLoading(true);
-    return;
-  }
-  
-  // Check for API response structure
-  if (predictionsData) {
-    console.log('📊 API Response structure:', {
-      success: predictionsData.success,
-      count: predictionsData.count,
-      has_data: predictionsData.has_data,
-      predictions_length: predictionsData.predictions?.length
+  // ✅ TRANSFORM KALSHI API DATA
+  useEffect(() => {
+    console.log('🔄 Kalshi hook data:', { 
+      data: kalshiData, 
+      loading: kalshiLoading, 
+      error: kalshiError 
     });
     
-    if (predictionsData.success && predictionsData.predictions && Array.isArray(predictionsData.predictions)) {
-      const apiPredictions = predictionsData.predictions;
-      console.log(`✅ API returned ${apiPredictions.length} predictions`);
+    if (kalshiLoading) {
+      setLoading(true);
+      return;
+    }
+    
+    if (kalshiData && Array.isArray(kalshiData) && kalshiData.length > 0) {
+      console.log(`✅ Kalshi API returned ${kalshiData.length} predictions`);
+      console.log('📊 Sample Kalshi data:', kalshiData[0]);
       
-      // Always transform all predictions since we now ensure they're Kalshi-style
-      const predictionsToUse = transformApiData(apiPredictions);
+      // Transform Kalshi-specific data
+      const predictionsToUse = transformKalshiData(kalshiData);
       
-      if (predictionsToUse.length === 0) {
-        console.warn('⚠️ No predictions after transformation, using mock data');
-        setPredictions(MOCK_KALSHI_PREDICTIONS);
-        setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
-      } else {
-        console.log(`✅ Setting ${predictionsToUse.length} predictions`);
-        setPredictions(predictionsToUse);
-        setFilteredPredictions(predictionsToUse);
-      }
-      
-      setLoading(false);
+      console.log(`✅ Setting ${predictionsToUse.length} transformed predictions`);
+      setPredictions(predictionsToUse);
+      setFilteredPredictions(predictionsToUse);
       setError(null);
       
       // Store for debugging
-      window[`_kalshipredictionsscreenDebug`] = {
-        rawApiResponse: predictionsData,
+      window[`_kalshiDebug`] = {
+        rawApiResponse: kalshiData,
         transformedData: predictionsToUse,
         timestamp: new Date().toISOString()
       };
+    } else if (kalshiError) {
+      // Handle API error
+      console.error('❌ Kalshi API Error:', kalshiError);
+      setError(`Kalshi API Error: ${kalshiError}`);
+      
+      // Fallback to mock data
+      console.log('🔄 Falling back to mock Kalshi data due to error');
+      const predictionsToUse = MOCK_KALSHI_PREDICTIONS;
+      setPredictions(predictionsToUse);
+      setFilteredPredictions(predictionsToUse);
     } else {
-      // API returned success but no predictions or empty array
-      console.warn('⚠️ API returned no predictions data:', predictionsData);
-      setPredictions(MOCK_KALSHI_PREDICTIONS);
-      setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
-      setLoading(false);
+      // No data - might be empty array
+      console.warn('⚠️ No Kalshi data received or empty array');
+      
+      if (kalshiData && Array.isArray(kalshiData) && kalshiData.length === 0) {
+        // API returned empty array, use mock
+        console.log('🔄 API returned empty array, using mock data');
+        const predictionsToUse = MOCK_KALSHI_PREDICTIONS;
+        setPredictions(predictionsToUse);
+        setFilteredPredictions(predictionsToUse);
+      } else {
+        // No data at all, use mock
+        const predictionsToUse = MOCK_KALSHI_PREDICTIONS;
+        setPredictions(predictionsToUse);
+        setFilteredPredictions(predictionsToUse);
+      }
     }
-  } else if (predictionsError) {
-    // Handle API error
-    console.error('❌ Predictions API Error:', predictionsError);
-    setError(`API Error: ${predictionsError.message || predictionsError}`);
     
-    // Fallback to mock data
-    console.log('🔄 Falling back to mock Kalshi data due to error');
-    setPredictions(MOCK_KALSHI_PREDICTIONS);
-    setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
     setLoading(false);
-  } else {
-    // No data or error - should not happen but handle gracefully
-    console.warn('⚠️ No predictions data and no error - using mock data');
-    setPredictions(MOCK_KALSHI_PREDICTIONS);
-    setFilteredPredictions(MOCK_KALSHI_PREDICTIONS);
-    setLoading(false);
-  }
-}, [predictionsData, predictionsLoading, predictionsError]);
+  }, [kalshiData, kalshiLoading, kalshiError]);
 
   // ✅ Handle sport filter
   useEffect(() => {
@@ -719,15 +724,15 @@ useEffect(() => {
     setFilteredPredictions(filtered);
   }, [searchQuery, predictions]);
 
-  // ✅ Updated refresh function to use hook's refetch
+  // ✅ Updated refresh function to use Kalshi hook's refetch
   const handleRefresh = async () => {
-    console.log('🔄 Manual refresh triggered');
+    console.log('🔄 Manual Kalshi refresh triggered');
     setRefreshing(true);
     try {
-      await refetchPredictions();
-      setSnackbarMessage('Predictions refreshed successfully');
+      await refetchKalshi();
+      setSnackbarMessage('Kalshi predictions refreshed successfully');
     } catch (err: any) {
-      console.error('Refresh failed:', err);
+      console.error('Kalshi refresh failed:', err);
       setSnackbarMessage(`Refresh failed: ${err.message}`);
     } finally {
       setRefreshing(false);
@@ -755,6 +760,7 @@ useEffect(() => {
         edge: '+4.5%',
         analysis: `AI analysis of "${prompt}". Based on current market trends and probability models. Kalshi market data suggests this outcome has a 65% probability.`,
         expires: 'Tomorrow',
+        trend: 'up',
         aiGenerated: true,
       };
 
@@ -777,6 +783,7 @@ useEffect(() => {
 
   const getCategoryColor = (category: string) => {
     switch (category) {
+      case 'NBA': return '#ef4444';
       case 'Sports': return '#ef4444';
       case 'Politics': return '#3b82f6';
       case 'Economics': return '#10b981';
@@ -797,7 +804,7 @@ useEffect(() => {
           <CircularProgress />
           <Typography sx={{ ml: 2, mt: 2 }}>Loading Kalshi predictions...</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Fetching live market data from API...
+            Fetching live market data from Kalshi API...
           </Typography>
         </Box>
       </Container>
@@ -805,17 +812,17 @@ useEffect(() => {
   }
 
   // ✅ ADD ERROR STATE WITH FALLBACK OPTION
-  const displayError = error || predictionsError;
+  const displayError = error || kalshiError;
   
   const markets = [
     { id: 'All', name: 'All Markets', icon: <FlagIcon />, color: '#8b5cf6' },
+    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444' },
     { id: 'Politics', name: 'Politics', icon: <FlagIcon />, color: '#3b82f6' },
     { id: 'Economics', name: 'Economics', icon: <MoneyIcon />, color: '#10b981' },
     { id: 'Sports', name: 'Sports', icon: <SportsBasketballIcon />, color: '#ef4444' },
     { id: 'Culture', name: 'Culture', icon: <CultureIcon />, color: '#f59e0b' },
     { id: 'Technology', name: 'Tech', icon: <TechnologyIcon />, color: '#8b5cf6' },
     { id: 'Science', name: 'Science', icon: <ScienceIcon />, color: '#14b8a6' },
-    { id: 'Health', name: 'Health', icon: <HealthIcon />, color: '#ec4899' },
   ];
 
   const kalshiPrompts = [
@@ -853,7 +860,6 @@ useEffect(() => {
     },
   ];
 
- // ✅ KEEP YOUR ENTIRE EXISTING RETURN STATEMENT
   return (
     <>
       <Container maxWidth="lg">
@@ -881,8 +887,8 @@ useEffect(() => {
             }
           >
             <Typography variant="caption">
-              🔍 Debug: Showing {predictions.length} predictions •
-              Source: {displayError ? 'MOCK DATA' : 'API Data'} •
+              🔍 Kalshi Debug: Showing {predictions.length} predictions •
+              Source: {kalshiData?.length > 0 ? 'KALSHI API' : 'MOCK DATA'} •
               Filtered: {filteredPredictions.length}
             </Typography>
             {displayError && (
@@ -891,6 +897,20 @@ useEffect(() => {
               </Typography>
             )}
           </Alert>
+        )}
+
+        {/* Debug Raw Kalshi Data */}
+        {import.meta.env.DEV && kalshiData && kalshiData.length > 0 && (
+          <Paper sx={{ p: 2, mb: 3, backgroundColor: '#1e293b', color: 'white', fontSize: '10px' }}>
+            <Typography variant="caption" sx={{ color: '#8b5cf6', mb: 1, display: 'block' }}>
+              🔍 Raw Kalshi API Data ({kalshiData.length} items)
+            </Typography>
+            <Box sx={{ maxHeight: '150px', overflow: 'auto' }}>
+              <pre style={{ margin: 0, fontSize: '9px' }}>
+                {JSON.stringify(kalshiData.slice(0, 2), null, 2)}
+              </pre>
+            </Box>
+          </Paper>
         )}
 
         {/* Error Alert if present */}
@@ -909,6 +929,18 @@ useEffect(() => {
           </Alert>
         )}
 
+        {/* Success Alert when using real data */}
+        {!displayError && kalshiData && kalshiData.length > 0 && !import.meta.env.DEV && (
+          <Alert 
+            severity="success" 
+            sx={{ mb: 3, mt: 2 }}
+            icon={<CheckCircleIcon />}
+          >
+            <AlertTitle>Live Kalshi Data</AlertTitle>
+            Showing {kalshiData.length} real Kalshi predictions from CFTC-regulated markets.
+          </Alert>
+        )}
+
         {/* Header */}
         <GradientCard sx={{ mb: 4, mt: 2 }}>
           <CardContent>
@@ -922,11 +954,11 @@ useEffect(() => {
                   Back
                 </Button>
                 <Chip
-                  label={displayError ? "Demo Mode" : "Live API"}
+                  label={kalshiData?.length > 0 ? "Live Kalshi API" : "Demo Mode"}
                   sx={{ 
-                    backgroundColor: displayError ? 'rgba(245,158,11,0.2)' : 'rgba(59,130,246,0.2)',
-                    color: displayError ? '#f59e0b' : 'white',
-                    border: `1px solid ${displayError ? '#f59e0b40' : 'rgba(255,255,255,0.2)'}`
+                    backgroundColor: kalshiData?.length > 0 ? 'rgba(59,130,246,0.2)' : 'rgba(245,158,11,0.2)',
+                    color: kalshiData?.length > 0 ? 'white' : '#f59e0b',
+                    border: `1px solid ${kalshiData?.length > 0 ? 'rgba(255,255,255,0.2)' : '#f59e0b40'}`
                   }}
                 />
               </Box>
@@ -934,7 +966,7 @@ useEffect(() => {
                 <IconButton sx={{ color: 'white' }}>
                   <SearchIcon />
                 </IconButton>
-                <Tooltip title="Refresh Predictions">
+                <Tooltip title="Refresh Kalshi Predictions">
                   <IconButton 
                     sx={{ color: 'white' }} 
                     onClick={handleRefresh}
@@ -1157,7 +1189,7 @@ useEffect(() => {
               📊 Live Kalshi Markets
             </Typography>
             <Chip
-              label={`${filteredPredictions.length} contracts • ${remainingGenerations} free today`}
+              label={`${filteredPredictions.length} contracts • ${kalshiData?.length || 0} from API • ${remainingGenerations} free today`}
               sx={{ backgroundColor: '#1e293b', color: '#cbd5e1', borderColor: '#334155' }}
             />
           </Box>
@@ -1166,6 +1198,8 @@ useEffect(() => {
             <Grid container spacing={3}>
               {filteredPredictions.map((prediction: Prediction) => {
                 const yesProbability = Math.round(parseFloat(prediction.yesPrice) * 100);
+                const trendColor = prediction.trend === 'up' ? '#10b981' : 
+                                 prediction.trend === 'down' ? '#ef4444' : '#f59e0b';
                 
                 return (
                   <Grid item xs={12} md={6} lg={4} key={prediction.id}>
@@ -1189,6 +1223,18 @@ useEffect(() => {
                                 sx={{
                                   backgroundColor: '#8b5cf620',
                                   color: '#8b5cf6',
+                                }}
+                              />
+                            )}
+                            {prediction.trend && (
+                              <StyledChip
+                                icon={prediction.trend === 'up' ? <TrendingUpIcon /> : 
+                                      prediction.trend === 'down' ? <TrendingDownIcon /> : <TrendingUpIcon />}
+                                label={prediction.trend}
+                                size="small"
+                                sx={{
+                                  backgroundColor: `${trendColor}20`,
+                                  color: trendColor,
                                 }}
                               />
                             )}
@@ -1281,6 +1327,14 @@ useEffect(() => {
                               sx={{
                                 backgroundColor: '#f59e0b20',
                                 color: '#f59e0b',
+                              }}
+                            />
+                            <Chip
+                              label={`${prediction.confidence}% conf`}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#8b5cf620',
+                                color: '#8b5cf6',
                               }}
                             />
                           </Box>

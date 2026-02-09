@@ -9,6 +9,9 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 // Import Global Error Boundary
 import GlobalErrorBoundary from './components/GlobalErrorBoundary'
 
+// Import Performance Dashboard (for development monitoring)
+import PerformanceDashboard from './components/PerformanceDashboard'
+
 // Import React Query Provider (if you create a separate provider file)
 // import { ReactQueryProvider } from './providers/ReactQueryProvider'
 
@@ -159,6 +162,9 @@ function App() {
         <Router>
           {/* Infinite Loop Detector - place it at the top level */}
           <InfiniteLoopDetector />
+          
+          {/* Performance Dashboard - only show in development mode */}
+          {import.meta.env.DEV && <PerformanceDashboard />}
           
           <Routes>
             <Route path="/" element={<Layout />}>

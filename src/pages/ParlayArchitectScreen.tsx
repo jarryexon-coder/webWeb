@@ -70,7 +70,7 @@ import { alpha } from '@mui/material/styles';
 import { format, parseISO, isToday } from 'date-fns';
 
 // Import the new hooks
-import { useParlaySuggestions, useOddsGames } from '../hooks/useBackendAPI';
+import { useParlaySuggestions, useOddsGames } from '../hooks/useUnifiedAPI'; // Updated import
 
 // Types
 interface Game {

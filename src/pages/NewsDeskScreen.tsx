@@ -167,12 +167,147 @@ const NewsDeskScreen = () => {
     cacheTime: 600000, // 10 minutes
   });
   
-  // Extract news from hook response
+  // ENHANCED: Extract news from hook response - handles multiple API formats
   const newsFromApi = useMemo(() => {
-    if (!newsData) return [];
-    if (newsData.success === false) return [];
-    return newsData.news || [];
-  }, [newsData]);
+    console.log('🔍 Processing newsData:', newsData);
+    
+    if (!newsData) {
+      console.log('No newsData yet');
+      return [];
+    }
+    
+    // Check if data is in different formats
+    // Format 1: Direct news array
+    if (newsData.news && Array.isArray(newsData.news)) {
+      console.log(`✅ Found news array: ${newsData.news.length} items`);
+      return newsData.news;
+    }
+    
+    // Format 2: Data array from scraper
+    if (newsData.data && Array.isArray(newsData.data)) {
+      console.log(`✅ Found data array: ${newsData.data.length} items`);
+      return newsData.data.map((item: any, index: number) => ({
+        ...item,
+        id: item.id || `data-${index}`,
+        publishedAt: item.publishedAt || item.timestamp || item.date || new Date().toISOString(),
+        source: item.source || { name: 'Sports Wire' },
+        title: item.title || item.headline || `Update ${index + 1}`,
+        description: item.description || item.summary || item.content || 'No description available'
+      }));
+    }
+    
+    // Format 3: Picks array
+    if (newsData.picks && Array.isArray(newsData.picks)) {
+      console.log(`✅ Found picks array: ${newsData.picks.length} items`);
+      return newsData.picks.map((pick: any, index: number) => ({
+        id: `pick-${index}`,
+        title: `Pick: ${pick.player} ${pick.stat || pick.stat_type || 'Performance'}`,
+        description: pick.analysis || `${pick.player} is projected for ${pick.projection} ${pick.stat || pick.stat_type || ''}`,
+        publishedAt: pick.last_updated || new Date().toISOString(),
+        source: { name: 'Daily Picks' },
+        url: `#pick-${index}`,
+        category: 'tip'
+      }));
+    }
+    
+    // Format 4: Selections array from prizepicks
+    if (newsData.selections && Array.isArray(newsData.selections)) {
+      console.log(`✅ Found selections array: ${newsData.selections.length} items`);
+      return newsData.selections.map((selection: any, index: number) => ({
+        id: `selection-${index}`,
+        title: `${selection.player} - ${selection.stat_type || 'Prop'}`,
+        description: `${selection.player} has a ${selection.confidence || 70}% chance of hitting ${selection.line} ${selection.stat_type || ''}`,
+        publishedAt: selection.last_updated || new Date().toISOString(),
+        source: { name: 'Player Props' },
+        url: `#selection-${index}`,
+        category: 'tip'
+      }));
+    }
+    
+    // Format 5: Analytics array
+    if (newsData.analytics && Array.isArray(newsData.analytics)) {
+      console.log(`✅ Found analytics array: ${newsData.analytics.length} items`);
+      return newsData.analytics.map((analytic: any, index: number) => ({
+        id: `analytic-${index}`,
+        title: analytic.title || `Analytics: ${analytic.metric || 'Data'}`,
+        description: analytic.analysis || `Trend: ${analytic.trend || 'neutral'} with ${analytic.change || 'no change'}`,
+        publishedAt: analytic.timestamp || new Date().toISOString(),
+        source: { name: 'Analytics' },
+        url: `#analytic-${index}`,
+        category: 'tip'
+      }));
+    }
+    
+    // Check if API returned success but no data structure we recognize
+    if (newsData.success === true) {
+      console.log('✅ API returned success but no recognized data format');
+      // Try to extract any array from the response
+      for (const key in newsData) {
+        if (Array.isArray(newsData[key]) && key !== 'endpoints') {
+          console.log(`Found unrecognized array in key "${key}": ${newsData[key].length} items`);
+          return newsData[key].slice(0, 10).map((item: any, index: number) => ({
+            id: item.id || `${key}-${index}`,
+            title: item.name || item.title || item.player || `Update ${index + 1}`,
+            description: item.description || item.analysis || JSON.stringify(item).substring(0, 100) + '...',
+            publishedAt: item.publishedAt || item.timestamp || item.date || new Date().toISOString(),
+            source: { name: key.charAt(0).toUpperCase() + key.slice(1) },
+            url: `#${key}-${index}`,
+            category: 'announcement'
+          }));
+        }
+      }
+    }
+    
+    // If we get here, generate mock data
+    console.log('⚠️ No valid news format found, generating mock data');
+    return generateMockNewsData(selectedSport);
+  }, [newsData, selectedSport]);
+  
+  // Helper function to generate mock news data
+  const generateMockNewsData = useCallback((sport: string) => {
+    const sportsMap = {
+      nba: {
+        name: 'NBA',
+        teams: ['Lakers', 'Warriors', 'Celtics', 'Bucks', 'Suns', 'Nuggets', 'Heat', 'Knicks'],
+        events: ['Game', 'Trade', 'Injury Update', 'Draft News', 'Playoff Race', 'All-Star']
+      },
+      nfl: {
+        name: 'NFL',
+        teams: ['Chiefs', '49ers', 'Ravens', 'Bills', 'Cowboys', 'Eagles', 'Packers', 'Dolphins'],
+        events: ['Game', 'Trade', 'Injury Report', 'Draft', 'Playoff Picture', 'Pro Bowl']
+      },
+      mlb: {
+        name: 'MLB',
+        teams: ['Dodgers', 'Yankees', 'Braves', 'Astros', 'Phillies', 'Rangers', 'Orioles', 'Mariners'],
+        events: ['Game', 'Trade', 'Injury', 'Standings', 'All-Star', 'Playoff Push']
+      },
+      nhl: {
+        name: 'NHL',
+        teams: ['Maple Leafs', 'Rangers', 'Golden Knights', 'Bruins', 'Avalanche', 'Oilers', 'Stars', 'Hurricanes'],
+        events: ['Game', 'Trade', 'Injury', 'Playoff Race', 'All-Star', 'Standings']
+      }
+    };
+    
+    const sportInfo = sportsMap[sport as keyof typeof sportsMap] || sportsMap.nba;
+    const categories: UpdateItem['category'][] = ['announcement', 'tip', 'update', 'feature', 'performance'];
+    
+    return Array.from({ length: 8 }, (_, i) => {
+      const team = sportInfo.teams[i % sportInfo.teams.length];
+      const event = sportInfo.events[i % sportInfo.events.length];
+      const hoursAgo = i * 2; // 0, 2, 4, 6... hours ago
+      
+      return {
+        id: `mock-${sport}-${i}`,
+        title: `${sportInfo.name}: ${team} ${event}`,
+        description: `Latest update from the ${sportInfo.name}. ${team} news and ${event.toLowerCase()} coverage.`,
+        publishedAt: new Date(Date.now() - hoursAgo * 3600000).toISOString(),
+        source: { name: `${sportInfo.name} News Network` },
+        url: `https://example.com/${sport}/news/${i}`,
+        urlToImage: `https://picsum.photos/400/300?random=${i}&sport=${sport}`,
+        category: categories[i % categories.length]
+      };
+    });
+  }, []);
 
   // State management
   const [searchInput, setSearchInput] = useState('');
@@ -231,6 +366,10 @@ const NewsDeskScreen = () => {
         category = 'tip';
       } else if (article.category === 'feature') {
         category = 'feature';
+      } else if (article.category === 'update' || article.source?.name?.includes('Update')) {
+        category = 'update';
+      } else if (article.category === 'performance' || article.description?.includes('performance')) {
+        category = 'performance';
       }
       
       return {
@@ -285,8 +424,9 @@ const NewsDeskScreen = () => {
 
   // Update effect to transform API news when data arrives
   useEffect(() => {
+    console.log('🔄 Processing newsFromApi:', newsFromApi.length, 'items');
+    
     if (newsFromApi.length > 0) {
-      console.log('Processing API news:', newsFromApi.length, 'articles');
       const transformedUpdates = transformApiNewsToUpdates(newsFromApi);
       setUpdates(transformedUpdates);
       setFilteredUpdates(transformedUpdates);
@@ -299,13 +439,13 @@ const NewsDeskScreen = () => {
         }
       });
       setReadStatus(updatedReadStatus);
-    } else if (newsData?.success === false) {
-      // API returned error, use mock data
-      console.log('API error, using mock data');
+    } else {
+      // Keep using mock articles if no API data
+      console.log('Using mock articles as fallback');
       setUpdates(MOCK_ARTICLES);
       setFilteredUpdates(MOCK_ARTICLES);
     }
-  }, [newsFromApi, newsData, transformApiNewsToUpdates, readStatus]);
+  }, [newsFromApi, transformApiNewsToUpdates, readStatus]);
 
   // Filter updates based on search
   useEffect(() => {
@@ -359,6 +499,7 @@ const NewsDeskScreen = () => {
   }, []);
 
   const handleRefresh = useCallback(() => {
+    console.log('🔄 Manual refresh triggered');
     refetch();
     setLastRefresh(new Date());
   }, [refetch]);

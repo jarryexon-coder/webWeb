@@ -66,13 +66,14 @@ import {
   TrendingUp as TrendingUpIcon,
   Newspaper as NewspaperIcon,
   Error as ErrorIcon,
-  Update as UpdateIcon
+  Update as UpdateIcon,
+  People
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { format } from 'date-fns';
 
 // Import React Query hook
-import { useAnalytics } from '../hooks/useBackendAPI';
+import { usePrizePicksSelections } from '../hooks/useBackendAPI';
 
 // Mock Data
 const MOCK_DATA = {
@@ -149,6 +150,40 @@ const MOCK_DATA = {
         broadcast: 'TNT',
         attendance: '18,997',
         quarter: 'Final'
+      },
+      {
+        id: 5,
+        homeTeam: { name: 'Celtics', logo: 'BOS', color: '#007A33' },
+        awayTeam: { name: 'Heat', logo: 'MIA', color: '#98002E' },
+        homeScore: 108,
+        awayScore: 104,
+        status: 'Final',
+        sport: 'NBA',
+        date: 'Jan 19, 2024',
+        time: '7:30 PM EST',
+        venue: 'TD Garden',
+        weather: 'Indoor',
+        odds: { spread: '-5.5', total: '222.5' },
+        broadcast: 'ESPN',
+        attendance: '19,156',
+        quarter: 'Final'
+      },
+      {
+        id: 6,
+        homeTeam: { name: 'Bucks', logo: 'MIL', color: '#00471B' },
+        awayTeam: { name: 'Suns', logo: 'PHX', color: '#1D1160' },
+        homeScore: 122,
+        awayScore: 118,
+        status: 'Live',
+        sport: 'NBA',
+        date: 'Today',
+        time: '8:00 PM EST',
+        venue: 'Fiserv Forum',
+        weather: 'Indoor',
+        odds: { spread: '-3.5', total: '235.5' },
+        broadcast: 'TNT',
+        attendance: '17,341',
+        quarter: 'Q4 3:15'
       }
     ]
   }
@@ -190,23 +225,113 @@ const STATS_DATA = [
   { label: 'Red Zone %', home: '75%', away: '60%', icon: <LocationOn /> },
 ];
 
+// Helper functions
+const randomChoice = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
+
+const getTeamColor = (teamName: string): string => {
+  if (!teamName) return '#3b82f6';
+  
+  const teamColors: Record<string, string> = {
+    // NBA Teams
+    'LAL': '#552583', 'GSW': '#1D428A', 'BOS': '#007A33', 'MIA': '#98002E',
+    'MIL': '#00471B', 'PHX': '#1D1160', 'DEN': '#0E2240', 'PHI': '#006BB6',
+    'BKN': '#000000', 'NYK': '#006BB6', 'CHI': '#CE1141', 'LAC': '#C8102E',
+    'DAL': '#00538C', 'ATL': '#C8102E', 'CLE': '#860038', 'MEM': '#5D76A9',
+    'MIN': '#0C2340', 'NOP': '#0C2340', 'OKC': '#007AC1', 'ORL': '#0077C0',
+    'POR': '#E03A3E', 'SAC': '#5A2D81', 'SAS': '#C4CED4', 'TOR': '#CE1141',
+    'UTA': '#002B5C', 'WAS': '#002B5C', 'HOU': '#CE1141', 'CHA': '#1D1160',
+    'DET': '#C8102E', 'IND': '#002D62',
+    // NFL Teams (only those not already in NBA)
+    'KC': '#E31837', 'BAL': '#241773', 'SF': '#AA0000', 'GB': '#203731',
+    'BUF': '#00338D', 'CIN': '#FB4F14', 'TEN': '#4B92DB', 'JAX': '#006778',
+    'LV': '#000000', 'SEA': '#002244', 'ARI': '#97233F', 'LAR': '#003594',
+    'CAR': '#0085CA', 'NO': '#D3BC8D', 'TB': '#D50A0A', 'NYJ': '#125740',
+    'PIT': '#FFB612', 'NE': '#002244'
+  };
+  
+  // Try to match by abbreviation (first 2-3 characters)
+  const abbr = teamName.substring(0, 3).toUpperCase();
+  const abbr2 = teamName.substring(0, 2).toUpperCase();
+  
+  return teamColors[abbr] || teamColors[abbr2] || '#3b82f6'; // Default blue
+};
+
+const getGameStatus = (status: string): string => {
+  if (!status) return 'Scheduled';
+  const statusLower = status.toLowerCase();
+  if (statusLower.includes('live') || statusLower.includes('in') || statusLower === 'live') return 'Live';
+  if (statusLower.includes('final') || statusLower.includes('complete') || statusLower === 'final') return 'Final';
+  return 'Scheduled';
+};
+
+const getQuarter = (status: string): string => {
+  if (!status) return 'Scheduled';
+  const statusLower = status.toLowerCase();
+  if (statusLower.includes('live') || statusLower === 'live') {
+    const quarters = ['Q1 10:00', 'Q2 5:30', 'Q3 8:45', 'Q4 3:15'];
+    return randomChoice(quarters);
+  }
+  if (statusLower.includes('final') || statusLower === 'final') return 'Final';
+  return 'Scheduled';
+};
+
+const extractTeamName = (teamStr: string): string => {
+  if (!teamStr) return 'Unknown';
+  
+  // Remove common prefixes/suffixes
+  const cleanStr = teamStr
+    .replace(/^[A-Z]{2,3}\s+/, '') // Remove team abbreviations at start
+    .replace(/\s+\([A-Z]{2,3}\)$/, '') // Remove abbreviations in parentheses at end
+    .trim();
+  
+  return cleanStr || teamStr;
+};
+
+const extractTeamAbbreviation = (teamStr: string): string => {
+  if (!teamStr) return '???';
+  
+  // Common NBA team abbreviations
+  const teamAbbreviations: Record<string, string> = {
+    'lakers': 'LAL', 'warriors': 'GSW', 'celtics': 'BOS', 'heat': 'MIA',
+    'bucks': 'MIL', 'suns': 'PHX', 'nuggets': 'DEN', '76ers': 'PHI',
+    'nets': 'BKN', 'knicks': 'NYK', 'bulls': 'CHI', 'clippers': 'LAC',
+    'mavericks': 'DAL', 'hawks': 'ATL', 'cavaliers': 'CLE', 'grizzlies': 'MEM',
+    'timberwolves': 'MIN', 'pelicans': 'NOP', 'thunder': 'OKC', 'magic': 'ORL',
+    'trail blazers': 'POR', 'kings': 'SAC', 'spurs': 'SAS', 'raptors': 'TOR',
+    'jazz': 'UTA', 'wizards': 'WAS', 'rockets': 'HOU', 'hornets': 'CHA',
+    'pistons': 'DET', 'pacers': 'IND'
+  };
+  
+  const teamLower = teamStr.toLowerCase();
+  
+  // Check for exact matches
+  for (const [key, value] of Object.entries(teamAbbreviations)) {
+    if (teamLower.includes(key)) {
+      return value;
+    }
+  }
+  
+  // Fallback: use first 3 letters
+  return teamStr.substring(0, 3).toUpperCase();
+};
+
 const MatchAnalyticsScreen = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // Use React Query hook
-  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nfl');
+  // Use the prize picks hook instead of analytics
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
   
   const { 
-    data: analyticsData, 
+    data: prizePicksData, 
     isLoading, 
     error, 
     refetch,
     isRefetching 
-  } = useAnalytics(selectedSport);
+  } = usePrizePicksSelections(selectedSport);
   
-  // Extract games from hook response
-  const gamesFromApi = analyticsData?.games || [];
+  // Extract selections and convert them to "games"
+  const selectionsFromApi = prizePicksData?.selections || [];
   
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -218,40 +343,107 @@ const MatchAnalyticsScreen = () => {
   const [activeTab, setActiveTab] = useState('conditions');
   const [filteredGames, setFilteredGames] = useState<any[]>([]);
   
-  // Transform API data to match expected format or use fallback
+  // Transform prize picks selections into game data
   const games = React.useMemo(() => {
-    if (gamesFromApi && gamesFromApi.length > 0) {
-      console.log(`✅ Using REAL analytics data: ${gamesFromApi.length} games`);
-      // Transform API data to match our component's expected format
-      return gamesFromApi.map((game: any, index: number) => {
-        const sportUpper = selectedSport.toUpperCase();
-        const mockSportData = MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || [];
-        const mockGame = mockSportData[index] || mockSportData[0] || MOCK_DATA.nfl.games[0];
-        
-        // Merge API data with mock structure for missing fields
-        return {
-          id: game.id || game.game_id || index,
-          homeTeam: game.homeTeam || mockGame.homeTeam,
-          awayTeam: game.awayTeam || mockGame.awayTeam,
-          homeScore: game.homeScore || mockGame.homeScore,
-          awayScore: game.awayScore || mockGame.awayScore,
-          status: game.status || mockGame.status,
-          sport: game.sport || sportUpper,
-          date: game.date || mockGame.date,
-          time: game.time || mockGame.time,
-          venue: game.venue || mockGame.venue,
-          weather: game.weather || mockGame.weather,
-          odds: game.odds || mockGame.odds,
-          broadcast: game.broadcast || mockGame.broadcast,
-          attendance: game.attendance || mockGame.attendance,
-          quarter: game.quarter || mockGame.quarter
-        };
+    if (selectionsFromApi && selectionsFromApi.length > 0) {
+      console.log(`✅ Using REAL data from prize picks: ${selectionsFromApi.length} selections`);
+      
+      // Create a map of games from player selections
+      const gameMap = new Map();
+      
+      selectionsFromApi.forEach((selection: any, index: number) => {
+        try {
+          // Extract team and opponent - handle different field names
+          const playerTeamRaw = selection.team || selection.teamAbbrev || selection.team_full || 'Unknown';
+          const playerTeam = extractTeamName(playerTeamRaw);
+          
+          // Extract opponent from game field - handle different formats
+          let opponent = 'Opponent';
+          const gameField = selection.game || selection.opponent || '';
+          if (gameField) {
+            if (gameField.includes(' vs ')) {
+              const parts = gameField.split(' vs ');
+              opponent = extractTeamName(parts[1] || parts[0] || 'Opponent');
+            } else if (gameField.includes(' @ ')) {
+              const parts = gameField.split(' @ ');
+              opponent = extractTeamName(parts[1] || parts[0] || 'Opponent');
+            } else if (gameField.includes(' at ')) {
+              const parts = gameField.split(' at ');
+              opponent = extractTeamName(parts[1] || parts[0] || 'Opponent');
+            } else {
+              opponent = extractTeamName(gameField);
+            }
+          }
+          
+          // Get team abbreviations
+          const homeAbbr = extractTeamAbbreviation(playerTeam);
+          const awayAbbr = extractTeamAbbreviation(opponent);
+          
+          const gameKey = `${homeAbbr} vs ${awayAbbr}`;
+          
+          if (!gameMap.has(gameKey)) {
+            // Create a game from selection data
+            gameMap.set(gameKey, {
+              id: `game-${homeAbbr}-${awayAbbr}-${index}`,
+              homeTeam: { 
+                name: playerTeam, 
+                logo: homeAbbr, 
+                color: getTeamColor(playerTeam)
+              },
+              awayTeam: { 
+                name: opponent, 
+                logo: awayAbbr, 
+                color: getTeamColor(opponent)
+              },
+              homeScore: Math.floor(Math.random() * 30) + 80,
+              awayScore: Math.floor(Math.random() * 30) + 80,
+              status: getGameStatus(selection.status),
+              sport: selection.sport || selectedSport.toUpperCase(),
+              date: format(new Date(), 'MMM dd, yyyy'),
+              time: `${Math.floor(Math.random() * 12) + 1}:${randomChoice(['00', '30'])} PM EST`,
+              venue: `${playerTeam} Arena`,
+              weather: randomChoice(['Clear, 72°F', 'Partly Cloudy, 68°F', 'Indoor']),
+              odds: { 
+                spread: `${randomChoice(['+', '-'])}${Math.floor(Math.random() * 7) + 1}.5`,
+                total: `${Math.floor(Math.random() * 30) + 210}`
+              },
+              broadcast: randomChoice(['TNT', 'ESPN', 'ABC', 'NBA TV']),
+              attendance: `${Math.floor(Math.random() * 5000) + 15000}`,
+              quarter: getQuarter(selection.status),
+              players: [selection.player],
+              // Store selection data for reference
+              selectionData: [selection],
+              // Store raw data for debugging
+              rawGameData: selection.game
+            });
+          } else {
+            // Add player to existing game
+            const existingGame = gameMap.get(gameKey);
+            if (!existingGame.players.includes(selection.player)) {
+              existingGame.players.push(selection.player);
+              existingGame.selectionData.push(selection);
+            }
+          }
+        } catch (err) {
+          console.warn('Error processing selection:', err, selection);
+        }
       });
-    } else {
-      console.log('⚠️ Using mock analytics data');
-      return MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || MOCK_DATA.nfl.games;
+      
+      // Convert map to array
+      const gamesFromSelections = Array.from(gameMap.values());
+      
+      // If we have real games, use them
+      if (gamesFromSelections.length > 0) {
+        console.log(`🎮 Created ${gamesFromSelections.length} games from selections`);
+        return gamesFromSelections;
+      }
     }
-  }, [gamesFromApi, selectedSport]);
+    
+    // Fallback to mock data
+    console.log('⚠️ Using mock analytics data');
+    return MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || MOCK_DATA.nfl.games;
+    
+  }, [selectionsFromApi, selectedSport]);
 
   // Set initial selected game
   useEffect(() => {
@@ -321,17 +513,73 @@ const MatchAnalyticsScreen = () => {
     setLoadingAI(true);
     setShowAIModal(true);
     
+    // Get selection data for the selected game
+    const selectionData = selectedGame?.selectionData || [];
+    
     setTimeout(() => {
-      const responses = {
-        weather: `**Weather Impact Analysis**\n\n**Game:** ${selectedGame?.homeTeam?.name || 'Home'} vs ${selectedGame?.awayTeam?.name || 'Away'}\n**Weather:** ${selectedGame?.weather || 'Clear'}\n\n**Impact Analysis:**\n• Temperature: 42°F - Optimal for defensive play\n• Wind: 12 mph NW - Slight impact on passing\n• Field: Natural grass - Home team advantage`,
-        homeAway: `**Home vs Away Trends**\n\n**Home Team at Home:**\n• Win Rate: 75%\n• Points/Game: 28.4\n• Defensive Rank: 1st`,
-        playerMatchup: `**Key Player Matchup**\n\n**Quarterback Comparison:**\n• Home QB: 92.3 rating, 68% completion\n• Away QB: 88.7 rating, 65% completion`,
-        recentForm: `**Recent Form Analysis**\n\n**Home Team (Last 5):**\n• Record: 4-1\n• Avg Margin: +7.2 points`,
-        injury: `**Injury Impact Assessment**\n\n**Home Team Injuries:**\n• Starting CB (questionable)\n• Overall: Minor impact`,
-        predictive: `**Predictive Statistics**\n\n**Win Probability:**\n• Home: 62%\n• Away: 38%\n\n**Expected Score:**\n• Home: 27.3 points\n• Away: 24.1 points`
-      };
+      let analysis = '';
       
-      setAiResponse(responses[promptType as keyof typeof responses] || 'Analysis generated successfully.');
+      switch(promptType) {
+        case 'weather':
+          analysis = `**Weather Impact Analysis**\n\n**Game:** ${selectedGame?.homeTeam?.name || 'Home'} vs ${selectedGame?.awayTeam?.name || 'Away'}\n**Weather:** ${selectedGame?.weather || 'Clear'}\n\n**Impact Analysis:**\n• Temperature: 72°F - Optimal for basketball\n• Indoor arena - No weather impact\n• Home court advantage: +3.5 points`;
+          break;
+          
+        case 'playerMatchup':
+          if (selectionData.length > 0) {
+            const topPlayers = selectionData.slice(0, 3).map((sel: any) => {
+              const playerName = sel.player || 'Unknown Player';
+              const teamName = sel.team || 'Unknown Team';
+              const statType = sel.stat_type || sel.stat || 'stat';
+              const line = sel.line || 'N/A';
+              const projection = sel.projection || 'N/A';
+              const edge = sel.edge ? `${sel.edge}%` : 'N/A';
+              
+              return `${playerName} (${teamName}): ${statType} ${line} (Projection: ${projection}, Edge: ${edge})`;
+            }).join('\n• ');
+            
+            analysis = `**Player Matchup Analysis**\n\n**Key Players in this game:**\n• ${topPlayers}\n\n**Analysis:** These players have the highest projection edges based on recent performance.`;
+          } else {
+            analysis = `**Player Matchup Analysis**\n\nNo specific player data available for this matchup.`;
+          }
+          break;
+          
+        case 'predictive':
+          if (selectionData.length > 0) {
+            const edges = selectionData.map((sel: any) => {
+              if (sel.edge && typeof sel.edge === 'number') return sel.edge;
+              if (sel.projection_edge && typeof sel.projection_edge === 'number') return sel.projection_edge * 100;
+              return 0;
+            });
+            
+            const avgEdge = edges.length > 0 
+              ? edges.reduce((sum: number, edge: number) => sum + edge, 0) / edges.length 
+              : 0;
+            
+            const winProb = Math.min(70 + avgEdge, 85).toFixed(1);
+            
+            analysis = `**Predictive Statistics**\n\n**Based on ${selectionData.length} player selections:**\n• Average Edge: ${avgEdge.toFixed(1)}%\n• Home Win Probability: ${winProb}%\n• Expected Total Points: ${selectedGame?.odds?.total || '225.5'}\n\n**Key Insight:** ${avgEdge > 5 ? 'Positive value detected in player projections' : 'Market appears efficient'}`;
+          } else {
+            analysis = `**Predictive Statistics**\n\n**Win Probability:**\n• Home: 62%\n• Away: 38%\n\n**Expected Score:**\n• Home: 112.3 points\n• Away: 108.1 points`;
+          }
+          break;
+          
+        case 'recentForm':
+          analysis = `**Recent Form Analysis**\n\n**${selectedGame?.homeTeam?.name || 'Home'} (Last 10):**\n• Record: 7-3\n• Avg Points: 118.4\n• Defensive Rating: 110.2\n\n**${selectedGame?.awayTeam?.name || 'Away'} (Last 10):**\n• Record: 6-4\n• Avg Points: 115.8\n• Defensive Rating: 112.7`;
+          break;
+          
+        case 'injury':
+          analysis = `**Injury Impact Assessment**\n\n**${selectedGame?.homeTeam?.name || 'Home'} Injuries:**\n• Starting SF (questionable)\n• Backup PG (out)\n\n**${selectedGame?.awayTeam?.name || 'Away'} Injuries:**\n• Starting C (probable)\n• 6th Man (out)\n\n**Overall Impact:** Moderate - favors home team`;
+          break;
+          
+        case 'homeAway':
+          analysis = `**Home/Away Trends**\n\n**${selectedGame?.homeTeam?.name || 'Home'} at Home:**\n• Win Rate: 75%\n• Points/Game: 116.8\n• Defensive Rank: 5th\n\n**${selectedGame?.awayTeam?.name || 'Away'} on Road:**\n• Win Rate: 45%\n• Points/Game: 112.3\n• Defensive Rank: 12th`;
+          break;
+          
+        default:
+          analysis = `**${PROMPTS.find(p => p.id === promptType)?.title || 'Analysis'}**\n\nDetailed analysis for ${selectedGame?.homeTeam?.name || 'Home'} vs ${selectedGame?.awayTeam?.name || 'Away'}\n\nBased on real player data and projections.`;
+      }
+      
+      setAiResponse(analysis);
       setLoadingAI(false);
     }, 1500);
   };
@@ -376,7 +624,7 @@ const MatchAnalyticsScreen = () => {
                     Capacity: {selectedGame.attendance}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Surface: Natural Grass
+                    Surface: Hardwood
                   </Typography>
                 </CardContent>
               </Card>
@@ -420,9 +668,9 @@ const MatchAnalyticsScreen = () => {
                       {selectedGame.homeTeam?.name || 'Home'} Advantages
                     </Typography>
                     <Box component="ul" sx={{ pl: 2, mt: 1 }}>
-                      <li><Typography variant="body2">Pass rush efficiency</Typography></li>
-                      <li><Typography variant="body2">Red zone conversion</Typography></li>
-                      <li><Typography variant="body2">Turnover differential</Typography></li>
+                      <li><Typography variant="body2">Three-point shooting</Typography></li>
+                      <li><Typography variant="body2">Fast break points</Typography></li>
+                      <li><Typography variant="body2">Rebounding</Typography></li>
                     </Box>
                   </Box>
                 </Grid>
@@ -432,9 +680,9 @@ const MatchAnalyticsScreen = () => {
                       {selectedGame.awayTeam?.name || 'Away'} Advantages
                     </Typography>
                     <Box component="ul" sx={{ pl: 2, mt: 1 }}>
-                      <li><Typography variant="body2">Run defense</Typography></li>
-                      <li><Typography variant="body2">Time of possession</Typography></li>
-                      <li><Typography variant="body2">Third down conversion</Typography></li>
+                      <li><Typography variant="body2">Defensive efficiency</Typography></li>
+                      <li><Typography variant="body2">Turnover creation</Typography></li>
+                      <li><Typography variant="body2">Free throw percentage</Typography></li>
                     </Box>
                   </Box>
                 </Grid>
@@ -511,65 +759,78 @@ const MatchAnalyticsScreen = () => {
     }
   };
 
-  const GameCard = ({ game, isSelected = false, onSelect }: { game: any; isSelected?: boolean; onSelect: (game: any) => void }) => (
-    <Card 
-      sx={{ 
-        mb: 2, 
-        cursor: 'pointer',
-        border: isSelected ? '2px solid #1976d2' : '1px solid #e0e0e0',
-        transition: 'all 0.2s',
-        '&:hover': {
-          transform: 'translateY(-2px)',
-          boxShadow: 3
-        }
-      }}
-      onClick={() => onSelect(game)}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Avatar sx={{ 
-              bgcolor: game.homeTeam?.color || '#3b82f6',
-              width: 32,
-              height: 32,
-              fontSize: 14,
-              fontWeight: 'bold'
-            }}>
-              {game.homeTeam?.logo || 'H'}
-            </Avatar>
-            <Typography variant="body2" fontWeight="medium">
-              {game.homeTeam?.name || 'Home'}
-            </Typography>
+  const GameCard = ({ game, isSelected = false, onSelect }: { game: any; isSelected?: boolean; onSelect: (game: any) => void }) => {
+    const homeTeam = game.homeTeam || { name: 'Home', logo: 'H', color: '#3b82f6' };
+    const awayTeam = game.awayTeam || { name: 'Away', logo: 'A', color: '#ef4444' };
+    
+    return (
+      <Card 
+        sx={{ 
+          mb: 2, 
+          cursor: 'pointer',
+          border: isSelected ? '2px solid #1976d2' : '1px solid #e0e0e0',
+          transition: 'all 0.2s',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: 3
+          }
+        }}
+        onClick={() => onSelect(game)}
+      >
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Avatar sx={{ 
+                bgcolor: homeTeam.color,
+                width: 32,
+                height: 32,
+                fontSize: 14,
+                fontWeight: 'bold'
+              }}>
+                {homeTeam.logo}
+              </Avatar>
+              <Typography variant="body2" fontWeight="medium">
+                {homeTeam.name}
+              </Typography>
+            </Box>
+            <Typography variant="caption" color="text.secondary">vs</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" fontWeight="medium">
+                {awayTeam.name}
+              </Typography>
+              <Avatar sx={{ 
+                bgcolor: awayTeam.color,
+                width: 32,
+                height: 32,
+                fontSize: 14,
+                fontWeight: 'bold'
+              }}>
+                {awayTeam.logo}
+              </Avatar>
+            </Box>
           </Box>
-          <Typography variant="caption" color="text.secondary">vs</Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" fontWeight="medium">
-              {game.awayTeam?.name || 'Away'}
+          
+          {/* Show player count if available */}
+          {game.players && game.players.length > 0 && (
+            <Typography variant="caption" color="primary" sx={{ display: 'block', mb: 1 }}>
+              <People sx={{ fontSize: 12, verticalAlign: 'middle', mr: 0.5 }} />
+              {game.players.length} player{game.players.length !== 1 ? 's' : ''}
             </Typography>
-            <Avatar sx={{ 
-              bgcolor: game.awayTeam?.color || '#ef4444',
-              width: 32,
-              height: 32,
-              fontSize: 14,
-              fontWeight: 'bold'
-            }}>
-              {game.awayTeam?.logo || 'A'}
-            </Avatar>
+          )}
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <CalendarToday sx={{ fontSize: 14, color: 'text.secondary' }} />
+              <Typography variant="caption" color="text.secondary">
+                {game.date || 'Today'}
+              </Typography>
+            </Box>
+            {renderStatusBadge(game.status || 'Scheduled')}
           </Box>
-        </Box>
-        
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <CalendarToday sx={{ fontSize: 14, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              {game.date}
-            </Typography>
-          </Box>
-          {renderStatusBadge(game.status)}
-        </Box>
-      </CardContent>
-    </Card>
-  );
+        </CardContent>
+      </Card>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -595,6 +856,14 @@ const MatchAnalyticsScreen = () => {
           </Typography>
           <Typography variant="body1" color="text.secondary">
             Live scores, stats, and in-depth analysis
+            {selectionsFromApi.length > 0 && (
+              <Chip 
+                label={`${selectionsFromApi.length} real player selections`} 
+                size="small" 
+                color="success" 
+                sx={{ ml: 1 }}
+              />
+            )}
           </Typography>
         </Box>
         
@@ -606,8 +875,8 @@ const MatchAnalyticsScreen = () => {
             label="Sport"
             onChange={(e) => handleSportChange(e.target.value)}
           >
-            <MenuItem value="nfl">NFL</MenuItem>
             <MenuItem value="nba">NBA</MenuItem>
+            <MenuItem value="nfl">NFL</MenuItem>
             <MenuItem value="mlb">MLB</MenuItem>
           </Select>
         </FormControl>

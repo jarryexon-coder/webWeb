@@ -63,7 +63,7 @@ import {
   SportsSoccer
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { useDailyPicks } from '../hooks/useBackendAPI'; // Updated import
+import { useDailyPicks } from '../hooks/useUnifiedAPI'; // Use unified hook instead
 
 // Types
 interface DailyPick {
