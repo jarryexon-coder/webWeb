@@ -1,6 +1,24 @@
 import React from 'react';
 import { Box, Paper, Typography, Chip, Button } from '@mui/material';
-import { getApiPerformance, clearApiCache, debugApiState } from '../hooks/useUnifiedAPI';
+
+// Safely import functions with fallbacks
+let getApiPerformance: any = () => ({ 
+  averageResponseTime: 0, 
+  successRate: 0, 
+  totalRequests: 0, 
+  cacheSize: 0 
+});
+let clearApiCache: any = () => console.log('clearApiCache not available');
+let debugApiState: any = () => console.log('debugApiState not available');
+
+try {
+  const imports = require('../hooks/useUnifiedAPI');
+  if (imports.getApiPerformance) getApiPerformance = imports.getApiPerformance;
+  if (imports.clearApiCache) clearApiCache = imports.clearApiCache;
+  if (imports.debugApiState) debugApiState = imports.debugApiState;
+} catch (e) {
+  console.warn('PerformanceDashboard: Could not import from useUnifiedAPI', e);
+}
 
 const PerformanceDashboard: React.FC = () => {
   const [performance, setPerformance] = React.useState(getApiPerformance());
@@ -41,7 +59,7 @@ const PerformanceDashboard: React.FC = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Typography variant="body2">Avg Response:</Typography>
           <Chip 
-            label={`\${performance.averageResponseTime?.toFixed(0) || 0}ms`}
+            label={`${performance.averageResponseTime?.toFixed(0) || 0}ms`}
             size="small"
             color={performance.averageResponseTime > 1000 ? 'error' : 'success'}
           />
@@ -50,9 +68,9 @@ const PerformanceDashboard: React.FC = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Typography variant="body2">Success Rate:</Typography>
           <Chip 
-            label={`\${(performance.successRate * 100)?.toFixed(0) || 0}%`}
+            label={`${((performance.successRate || 0) * 100).toFixed(0)}%`}
             size="small"
-            color={performance.successRate > 0.9 ? 'success' : performance.successRate > 0.7 ? 'warning' : 'error'}
+            color={(performance.successRate || 0) > 0.9 ? 'success' : (performance.successRate || 0) > 0.7 ? 'warning' : 'error'}
           />
         </Box>
         

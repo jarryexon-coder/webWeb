@@ -73,7 +73,13 @@ import { format } from 'date-fns';
 
 // Import React Query hook - UPDATE THE PATH BASED ON YOUR STRUCTURE
 import { news } from '../hooks/useBackendAPI';
-import { useOddsGames, usePlayerTrends, useAdvancedAnalytics } from '../hooks/useUnifiedAPI';
+import { 
+  news, 
+  useSportsWire,  // Add this
+  useOddsGames, 
+  usePlayerTrends, 
+  useAdvancedAnalytics 
+} from '../hooks/useUnifiedAPI';
 
 // Fix for __DEV__ error - define it if not defined
 declare global {

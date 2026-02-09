@@ -89,7 +89,7 @@ import {
 import { alpha } from '@mui/material/styles';
 
 // Import React Query hook
-import { useFantasyPlayers } from '../hooks/useBackendAPI';
+import { useOddsGames } from '../hooks/useUnifiedAPI';
 
 // Mock data for players (fallback)
 const mockPlayers = {

@@ -1,5 +1,5 @@
 // src/App.tsx - UPDATED WITH REACT QUERY PROVIDER
-import React, { useEffect } from 'react'
+import React, { useEffect, Suspense, lazy } from 'react'
 import { Routes, Route, Navigate, BrowserRouter as Router } from 'react-router-dom'
 
 // Import React Query
@@ -15,30 +15,34 @@ import PerformanceDashboard from './components/PerformanceDashboard'
 // Import React Query Provider (if you create a separate provider file)
 // import { ReactQueryProvider } from './providers/ReactQueryProvider'
 
-// Import all screens
+// Import frequently used screens directly
 import Layout from './layouts/Layout'
 import HomeScreen from './pages/HomeScreen'
 import LiveGamesScreen from './pages/LiveGamesScreen'
 import NewsDeskScreen from './pages/NewsDeskScreen'
-import FantasyHubScreen from './pages/FantasyHubScreen'
-import PlayerStatsScreen from './pages/PlayerStatsScreen'
-import SportsWireScreen from './pages/SportsWireScreen'
-import NHLTrendsScreen from './pages/NHLTrendsScreen'
-import MatchAnalyticsScreen from './pages/MatchAnalyticsScreen'
 import DailyPicksScreen from './pages/DailyPicksScreen'
-import ParlayArchitectScreen from './pages/ParlayArchitectScreen'
-import AdvancedAnalyticsScreen from './pages/AdvancedAnalyticsScreen'
-import PredictionsOutcomeScreen from './pages/PredictionsOutcomeScreen'
-import KalshiPredictionsScreen from './pages/KalshiPredictionsScreen'
-import SecretPhraseScreen from './pages/SecretPhraseScreen'
-import SubscriptionScreen from './pages/SubscriptionScreen'
-import BackendTestScreen from './pages/BackendTestScreen'
-import PrizePicksScreen from './pages/PrizePicksScreen'
 import LoginScreenEnhanced from './pages/LoginScreenEnhanced'
 import NFLAnalyticsScreen from './pages/NFLAnalyticsScreen'
 import DiagnosticScreen from './pages/DiagnosticScreen'
+import NHLTrendsScreen from './pages/NHLTrendsScreen'
 
-// Firebase initialization (if needed)
+// Lazy load larger/heavier pages
+const PrizePicksScreen = lazy(() => import('./pages/PrizePicksScreen'));
+const FantasyHubScreen = lazy(() => import('./pages/FantasyHubScreen'));
+const AdvancedAnalyticsScreen = lazy(() => import('./pages/AdvancedAnalyticsScreen'));
+const PlayerStatsScreen = lazy(() => import('./pages/PlayerStatsScreen'));
+const KalshiPredictionsScreen = lazy(() => import('./pages/KalshiPredictionsScreen'));
+const PredictionsOutcomeScreen = lazy(() => import('./pages/PredictionsOutcomeScreen'));
+const MatchAnalyticsScreen = lazy(() => import('./pages/MatchAnalyticsScreen'));
+const ParlayArchitectScreen = lazy(() => import('./pages/ParlayArchitectScreen'));
+const SportsWireScreen = lazy(() => import('./pages/SportsWireScreen'));
+
+// Lazy load less-used pages (already in file)
+const SecretPhraseScreen = lazy(() => import('./pages/SecretPhraseScreen'))
+const SubscriptionScreen = lazy(() => import('./pages/SubscriptionScreen'))
+const BackendTestScreen = lazy(() => import('./pages/BackendTestScreen'))
+
+// Firebase initialization (if needed) - Using direct initialization instead of module imports
 import { initializeApp } from 'firebase/app'
 import { getAnalytics } from 'firebase/analytics'
 
@@ -164,7 +168,7 @@ function App() {
           <InfiniteLoopDetector />
           
           {/* Performance Dashboard - only show in development mode */}
-          {import.meta.env.DEV && <PerformanceDashboard />}
+          {/* PerformanceDashboard temporarily disabled */}
           
           <Routes>
             <Route path="/" element={<Layout />}>
@@ -175,22 +179,83 @@ function App() {
               <Route path="live-games" element={<LiveGamesScreen />} />
               <Route path="nfl-analytics" element={<NFLAnalyticsScreen />} />
               <Route path="news-desk" element={<NewsDeskScreen />} />
-              <Route path="fantasy-hub" element={<FantasyHubScreen />} />
-              <Route path="player-stats" element={<PlayerStatsScreen />} />
-              <Route path="sports-wire" element={<SportsWireScreen />} />
-              <Route path="nhl-trends" element={<NHLTrendsScreen />} />
-              <Route path="match-analytics" element={<MatchAnalyticsScreen />} />
               <Route path="daily-picks" element={<DailyPicksScreen />} />
-              <Route path="parlay-architect" element={<ParlayArchitectScreen />} />
-              <Route path="advanced-analytics" element={<AdvancedAnalyticsScreen />} />
-              <Route path="predictions-outcome" element={<PredictionsOutcomeScreen />} />
-              <Route path="Kalshi-predictions" element={<KalshiPredictionsScreen />} />
-              <Route path="secret-phrases" element={<SecretPhraseScreen />} />
-              <Route path="prize-picks" element={<PrizePicksScreen />} />
-              <Route path="subscription" element={<SubscriptionScreen />} />
+              <Route path="nhl-trends" element={<NHLTrendsScreen />} />
               <Route path="login" element={<LoginScreenEnhanced />} />
               <Route path="diagnostic" element={<DiagnosticScreen />} />
-              <Route path="backend-test" element={<BackendTestScreen />} />
+              
+              {/* Routes with dynamic imports wrapped in Suspense */}
+              <Route path="fantasy-hub" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <FantasyHubScreen />
+                </Suspense>
+              } />
+              
+              <Route path="player-stats" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <PlayerStatsScreen />
+                </Suspense>
+              } />
+              
+              <Route path="sports-wire" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <SportsWireScreen />
+                </Suspense>
+              } />
+              
+              <Route path="match-analytics" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <MatchAnalyticsScreen />
+                </Suspense>
+              } />
+              
+              <Route path="parlay-architect" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <ParlayArchitectScreen />
+                </Suspense>
+              } />
+              
+              <Route path="advanced-analytics" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <AdvancedAnalyticsScreen />
+                </Suspense>
+              } />
+              
+              <Route path="predictions-outcome" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <PredictionsOutcomeScreen />
+                </Suspense>
+              } />
+              
+              <Route path="Kalshi-predictions" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <KalshiPredictionsScreen />
+                </Suspense>
+              } />
+              
+              <Route path="prize-picks" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <PrizePicksScreen />
+                </Suspense>
+              } />
+              
+              <Route path="secret-phrases" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <SecretPhraseScreen />
+                </Suspense>
+              } />
+              
+              <Route path="subscription" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <SubscriptionScreen />
+                </Suspense>
+              } />
+              
+              <Route path="backend-test" element={
+                <Suspense fallback={<div>Loading...</div>}>
+                  <BackendTestScreen />
+                </Suspense>
+              } />
               
               {/* Catch-all redirect */}
               <Route path="*" element={<Navigate to="/" replace />} />

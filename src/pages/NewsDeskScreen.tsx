@@ -76,7 +76,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 
 // Custom hooks
-import { useSportsWire } from '../hooks/useBackendAPI';
+import { useOddsGames } from '../hooks/useUnifiedAPI';
 import { logEvent, logScreenView } from '../utils/analytics';
 
 interface UpdateItem {

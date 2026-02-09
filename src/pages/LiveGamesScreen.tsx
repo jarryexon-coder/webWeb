@@ -50,7 +50,7 @@ import {
 } from '@mui/icons-material';
 
 // ADD THIS IMPORT
-import { useOddsGames } from '../hooks/useBackendAPI';
+import { useOddsGames } from '../hooks/useUnifiedAPI';
 
 interface Game {
   id: string;

@@ -1,20 +1,46 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    visualizer({
+      open: true,
+      gzipSize: true,
+      brotliSize: true,
+      filename: 'dist/stats.html', // ← ADD THIS LINE
+    })
+  ],
   root: '.',
   publicDir: 'public',
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // ✅ MOVE THIS LINE HERE (directly in build, NOT inside rollupOptions)
+    chunkSizeWarningLimit: 1000,
+    
     rollupOptions: {
       input: path.resolve(__dirname, 'index.html'),
       output: {
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash].[ext]'
+        assetFileNames: 'assets/[name]-[hash].[ext]',
+        // ❌ REMOVE chunkSizeWarningLimit from here
+        
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'mui-vendor': [
+            '@mui/material',
+            '@mui/icons-material',
+            '@emotion/react',
+            '@emotion/styled'
+          ],
+          'charts-vendor': ['recharts', 'victory'],
+          'query-vendor': ['@tanstack/react-query'],
+          'date-vendor': ['date-fns', 'moment']
+        }
       }
     }
   },

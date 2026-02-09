@@ -34,7 +34,7 @@ import {
   TableRow
 } from '@mui/material';
 import { Refresh as RefreshIcon, SportsBasketball, SportsFootball, SportsBaseball, Info as InfoIcon, FilterList as FilterIcon, TrendingUp, ShowChart, AttachMoney } from '@mui/icons-material';
-import { usePrizePicksSelections, usePlayerProps, useAnalytics } from '../hooks/useBackendAPI';
+import { usePrizepicksSelections, usePlayerTrends as usePlayerProps, useAdvancedAnalytics as useAnalytics } from '../hooks/useUnifiedAPI';
 
 // Fix for Chip size prop
 const Chip = (props: any) => <MuiChip size="small" {...props} />;

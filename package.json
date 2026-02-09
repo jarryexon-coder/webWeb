@@ -18,7 +18,8 @@
     "reinstall": "rm -rf node_modules && npm install",
     "dev:3000": "vite --port 3000",
     "dev:5173": "vite --port 5173",
-    "dev:8080": "vite --port 8080"
+    "dev:8080": "vite --port 8080",
+    "start": "vite preview --port $PORT"
   },
   "dependencies": {
     "@emotion/react": "^11.13.0",
@@ -55,6 +56,7 @@
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.19",
+    "rollup-plugin-visualizer": "^6.0.5",
     "typescript": "^5.9.3",
     "vite": "^6.0.0"
   },

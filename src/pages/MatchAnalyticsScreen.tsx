@@ -73,7 +73,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { format } from 'date-fns';
 
 // Import React Query hook
-import { usePrizePicksSelections } from '../hooks/useBackendAPI';
+import { useOddsGames } from '../hooks/useUnifiedAPI';
 
 // Mock Data
 const MOCK_DATA = {
