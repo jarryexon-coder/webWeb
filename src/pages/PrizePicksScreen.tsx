@@ -145,7 +145,7 @@ const PrizePicksScreen: React.FC = () => {
     isLoading: picksLoading, 
     error: picksError,
     refetch: refetchPicks 
-  } = usePrizePicksSelections(selectedSport);
+  } = usePrizepicksSelections(selectedSport);
   
   const { 
     data: propsData, 

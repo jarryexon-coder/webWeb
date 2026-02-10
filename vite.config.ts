@@ -49,6 +49,9 @@ export default defineConfig({
     host: true
   },
   define: {
+    // Add this line from file 1
+    __DEV__: JSON.stringify(import.meta.env.DEV),
+    
     // Unified API environment variables
     'import.meta.env.VITE_API_BASE_NBA_BACKEND': JSON.stringify(process.env.VITE_API_BASE_NBA_BACKEND),
     'import.meta.env.VITE_API_BASE_PYTHON': JSON.stringify(process.env.VITE_API_BASE_PYTHON),
