@@ -1,1008 +1,635 @@
-// src/pages/FantasyHubScreen.tsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+// FantasyHubScreen.js - WITH FILTERING SYSTEM
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Box,
-  Typography,
   Container,
-  Button,
+  Grid,
+  Card,
+  CardContent,
+  Typography,
+  Box,
   Chip,
+  Button,
+  TextField,
+  InputAdornment,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Slider,
+  Checkbox,
+  FormGroup,
+  FormControlLabel,
+  Paper,
+  IconButton,
+  Tooltip,
+  Divider,
   CircularProgress,
   Alert,
-  Snackbar,
+  Switch
 } from '@mui/material';
-import {
-  Search as SearchIcon,
-  Clear as ClearIcon,
-  SportsBasketball as BasketballIcon,
-  EmojiEvents as TrophyIcon,
-  Add as AddIcon,
-  Remove as RemoveIcon,
-  Favorite as FavoriteIcon,
-  FavoriteBorder as FavoriteBorderIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  TrendingFlat as TrendingFlatIcon,
-  AttachMoney as MoneyIcon,
-  Person as PersonIcon,
-  Group as GroupIcon,
-  ShowChart as ChartIcon,
-  Lightbulb as LightbulbIcon,
-  Warning as WarningIcon,
-  Share as ShareIcon,
-  Save as SaveIcon,
-  Refresh as RefreshIcon,
-  ArrowBack as ArrowBackIcon,
-  SportsFootball as FootballIcon,
-  SportsHockey as HockeyIcon,
-  SportsBaseball as BaseballIcon,
-  School as SchoolIcon,
-  FilterList as FilterIcon,
-  ExpandMore as ExpandMoreIcon,
-  Leaderboard as LeaderboardIcon,
-  Score as ScoreIcon,
-  AccountBalanceWallet as WalletIcon,
-  Info as InfoIcon,
-  Home as HomeIcon,
-} from '@mui/icons-material';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { logScreenView } from '../utils/analytics';
-
-// ===== IMPORT UNIFIED HOOKS =====
-import { useAPI } from '../hooks/useUnifiedAPI';
-
-// ===== FIX: Define __DEV__ for web environment =====
-if (typeof window !== 'undefined') {
-  // @ts-ignore
-  window.__DEV__ = process.env.NODE_ENV === 'development';
-}
-
-// ===== ADD MISSING RENDERHEADER FUNCTION =====
-const renderHeader = (navigate: Function) => (
-  <Box sx={{ 
-    backgroundColor: '#1e293b',
-    color: 'white',
-    py: 3,
-    mb: 4,
-    borderBottom: '3px solid #3b82f6'
-  }}>
-    <Container maxWidth="lg">
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          <Typography variant="h4" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center' }}>
-            <TrophyIcon sx={{ mr: 2, color: '#fbbf24' }} />
-            Fantasy Hub
-          </Typography>
-          <Typography variant="body1" color="#cbd5e1" sx={{ mt: 1 }}>
-            Manage your fantasy teams, analyze projections, and build winning lineups
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button 
-            variant="outlined" 
-            sx={{ color: 'white', borderColor: 'white' }}
-            onClick={() => navigate('/')}
-            startIcon={<HomeIcon />}
-          >
-            Home
-          </Button>
-          <Button 
-            variant="contained" 
-            sx={{ bgcolor: '#3b82f6' }}
-            onClick={() => navigate('/fantasy/create')}
-            startIcon={<AddIcon />}
-          >
-            Create Team
-          </Button>
-        </Box>
-      </Box>
-    </Container>
-  </Box>
-);
-
-// ===== CREATE MOCK PLAYERS FOR FALLBACK =====
-const createMockPlayers = (count: number = 50): Player[] => {
-  const teams = ['LAL', 'GSW', 'BOS', 'MIA', 'PHI', 'MIL', 'DEN', 'PHX', 'DAL', 'LAC'];
-  const positions = ['PG', 'SG', 'SF', 'PF', 'C'];
-  const firstNames = ['LeBron', 'Stephen', 'Kevin', 'Giannis', 'Luka', 'Jayson', 'Joel', 'Nikola', 'Ja', 'Damian'];
-  const lastNames = ['James', 'Curry', 'Durant', 'Antetokounmpo', 'Doncic', 'Tatum', 'Embiid', 'Jokic', 'Morant', 'Lillard'];
-  
-  return Array.from({ length: count }, (_, i) => {
-    const firstName = firstNames[i % firstNames.length];
-    const lastName = lastNames[i % lastNames.length];
-    const team = teams[i % teams.length];
-    const position = positions[i % positions.length];
-    const fantasyScore = Math.random() * 40 + 15;
-    const projection = fantasyScore * (1 + (Math.random() * 0.2 - 0.1));
-    const salary = Math.floor(Math.random() * 8000) + 3000;
-    
-    return {
-      id: `mock-player-${i}`,
-      name: `${firstName} ${lastName}`,
-      team: team,
-      position: position,
-      fanDuelSalary: salary,
-      draftKingsSalary: salary - 500,
-      salary: salary,
-      fantasyScore: fantasyScore,
-      fantasy_points: fantasyScore,
-      projected_points: projection,
-      projection: projection,
-      value: fantasyScore / (salary / 1000),
-      trend: Math.random() > 0.6 ? 'up' : Math.random() > 0.4 ? 'down' : 'stable',
-      points: Math.floor(Math.random() * 30) + 10,
-      rebounds: Math.floor(Math.random() * 15) + 3,
-      assists: Math.floor(Math.random() * 10) + 3,
-      steals: parseFloat((Math.random() * 2).toFixed(1)),
-      blocks: parseFloat((Math.random() * 2).toFixed(1)),
-      ownership: Math.random() * 100,
-      threePointers: Math.floor(Math.random() * 6),
-      valueScore: Math.random() * 2 + 0.5,
-      projectedFantasyScore: projection,
-      sport: 'NBA'
-    };
-  });
-};
-
-// ===== CREATE MOCK TEAMS FOR FALLBACK =====
-const createMockTeams = (count: number = 5): FantasyTeam[] => {
-  const teams = ['Lakers Legends', 'Warriors Dynasty', 'Celtics Pride', 'Heat Culture', '76ers Process'];
-  const owners = ['John', 'Mike', 'Sarah', 'David', 'Emma'];
-  const leagues = ['Premium League', 'Expert League', 'Pro League', 'Champions League', 'Elite League'];
-  
-  return Array.from({ length: count }, (_, i) => ({
-    id: `mock-team-${i}`,
-    name: teams[i],
-    owner: owners[i],
-    sport: 'NBA',
-    league: leagues[i],
-    record: `${Math.floor(Math.random() * 50) + 30}-${Math.floor(Math.random() * 30) + 10}`,
-    points: Math.floor(Math.random() * 5000) + 3000,
-    rank: i + 1,
-    players: ['LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo', 'Luka Doncic'].slice(0, 3),
-    waiverPosition: Math.floor(Math.random() * 10) + 1,
-    movesThisWeek: Math.floor(Math.random() * 5),
-    lastUpdated: new Date().toISOString(),
-    projectedPoints: Math.floor(Math.random() * 5000) + 3000,
-    winProbability: Math.random() * 0.5 + 0.3,
-    strengthOfSchedule: Math.random() * 0.3 + 0.5
-  }));
-};
-
-// ===== API DATA TRANSFORMER =====
-const transformAPIPlayerData = (player: any): Player => {
-  if (!player) {
-    return {
-      id: `player-${Math.random().toString(36).substr(2, 9)}`,
-      name: 'Unknown Player',
-      team: 'Unknown Team',
-      position: 'N/A',
-      fanDuelSalary: 0,
-      draftKingsSalary: 0,
-      salary: 0,
-      fantasyScore: 0,
-      fantasy_points: 0,
-      projected_points: 0,
-      value: 0,
-      trend: 'stable',
-      points: 0,
-      rebounds: 0,
-      assists: 0,
-      steals: 0,
-      blocks: 0,
-      ownership: 0,
-      threePointers: 0,
-      projection: 0,
-      valueScore: 0,
-      projectedFantasyScore: 0
-    };
-  }
-  
-  const fantasyScore = player.fantasyScore || player.fantasy_points || 
-                       player.avg_fantasy_points || player.fppg || 
-                       player.points || Math.random() * 30 + 10;
-  
-  const baseProjection = player.projection || player.projected_points || 
-                        player.proj_fantasy_points || player.projected_fantasy;
-  
-  let projection;
-  if (baseProjection && baseProjection > 0) {
-    projection = baseProjection;
-  } else if (fantasyScore > 0) {
-    const variation = (Math.random() * 0.25) - 0.1;
-    projection = fantasyScore * (1 + variation);
-  } else {
-    projection = Math.random() * 30 + 10;
-  }
-  
-  const playerName = player.name || player.player_name || 'Unknown Player';
-  const playerTeam = player.team || player.team_name || 'Unknown Team';
-  const playerPosition = player.position || player.pos || 'N/A';
-  
-  return {
-    id: player.id || player._id || `player-${Math.random().toString(36).substr(2, 9)}`,
-    name: playerName,
-    team: playerTeam,
-    position: playerPosition,
-    fanDuelSalary: player.fanDuelSalary || player.fanduel_salary || player.salary || Math.floor(Math.random() * 5000) + 3000,
-    draftKingsSalary: player.draftKingsSalary || player.draftkings_salary || player.salary || Math.floor(Math.random() * 5000) + 3000,
-    salary: player.salary || player.fanduel_salary || player.draftkings_salary || Math.floor(Math.random() * 5000) + 3000,
-    fantasyScore: fantasyScore,
-    fantasy_points: fantasyScore,
-    projected_points: projection,
-    projection: projection,
-    value: player.value || player.value_score || 
-           (player.salary && fantasyScore ? fantasyScore / (player.salary / 1000) : 0),
-    points: player.points || player.stats?.points || Math.floor(Math.random() * 30) + 5,
-    rebounds: player.rebounds || player.stats?.rebounds || Math.floor(Math.random() * 15) + 2,
-    assists: player.assists || player.stats?.assists || Math.floor(Math.random() * 10) + 2,
-    steals: player.steals || player.stats?.steals || parseFloat((Math.random() * 2).toFixed(1)),
-    blocks: player.blocks || player.stats?.blocks || parseFloat((Math.random() * 2).toFixed(1)),
-    sport: player.sport || 'NBA',
-    ownership: player.ownership || player.ownership_percentage || 0,
-    projections: player.projections || {
-      fantasy_points: projection,
-      points: player.projected_stats?.points || Math.floor(Math.random() * 30) + 5,
-      rebounds: player.projected_stats?.rebounds || Math.floor(Math.random() * 15) + 2,
-      assists: player.projected_stats?.assists || Math.floor(Math.random() * 10) + 2,
-      value: player.projected_value || 0,
-      confidence: player.projection_confidence || 0.5 + (Math.random() * 0.5)
-    },
-    trend: player.trend || (Math.random() > 0.5 ? 'up' : Math.random() > 0.3 ? 'down' : 'stable'),
-    threePointers: player.threePointers || player.stats?.three_pointers_made || Math.floor(Math.random() * 5),
-    valueScore: player.valueScore || player.value || 0,
-    projectedFantasyScore: player.projectedFantasyScore || projection
-  };
-};
-
-// ===== INTERFACE DEFINITIONS =====
-interface Player {
-  id: string;
-  name: string;
-  team: string;
-  position: string;
-  fanDuelSalary?: number;
-  draftKingsSalary?: number;
-  salary?: number;
-  fantasyScore?: number;
-  fantasy_points?: number;
-  projected_points?: number;
-  value?: number;
-  trend?: 'up' | 'down' | 'stable';
-  points?: number;
-  rebounds?: number;
-  assists?: number;
-  steals?: number;
-  blocks?: number;
-  ownership?: number;
-  threePointers?: number;
-  projection?: number;
-  projectionEdge?: number;
-  projectionConfidence?: string;
-  valueScore?: number;
-  projectedFantasyScore?: number;
-  sport?: string;
-  stats?: {
-    points?: number;
-    rebounds?: number;
-    assists?: number;
-    steals?: number;
-    blocks?: number;
-    three_pointers_made?: number;
-    minutes?: number;
-  };
-  projections?: {
-    fantasy_points?: number;
-    points?: number;
-    rebounds?: number;
-    assists?: number;
-    value?: number;
-    confidence?: number;
-  };
-}
-
-interface TeamStats {
-  avgPoints: string;
-  avgRebounds: string;
-  avgAssists: string;
-  totalSalary: 0;
-  fantasyScore: string;
-  efficiency: string;
-}
-
-interface Platform {
-  name: 'FanDuel' | 'DraftKings';
-  budget: number;
-  color: string;
-}
-
-interface DraftResult {
-  success: boolean;
-  draftPosition: number;
-  sport: string;
-  platform: string;
-  results: any;
-}
-
-interface FantasyTeam {
-  id: string;
-  name: string;
-  owner: string;
-  sport: string;
-  league: string;
-  record: string;
-  points: number;
-  rank: number;
-  players: any[];
-  waiverPosition: number;
-  movesThisWeek: number;
-  lastUpdated: string;
-  projectionRank?: number;
-  projectedPoints?: number;
-  winProbability?: number;
-  strengthOfSchedule?: number;
-}
-
-interface ProjectionValueResult {
-  edge: number;
-  recommendedSide: 'over' | 'under' | 'none';
-  confidence: string;
-  marketImplied: number;
-  estimatedTrueProb: number;
-  projectionDiff: number;
-}
+import SearchIcon from '@mui/icons-material/Search';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import SortIcon from '@mui/icons-material/Sort';
+import ClearIcon from '@mui/icons-material/Clear';
+import SportsBasketballIcon from '@mui/icons-material/SportsBasketball';
+import TuneIcon from '@mui/icons-material/Tune';
 
 const FantasyHubScreen = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const initializedRef = useRef(false);
+  // State for players and loading
+  const [players, setPlayers] = useState([]);
+  const [filteredPlayers, setFilteredPlayers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   
-  // ===== USE UNIFIED API HOOKS =====
-  const { useFantasyPlayers, useFantasyTeams } = useAPI();
-  
-  // ===== STATE MANAGEMENT =====
-  const [searchInput, setSearchInput] = useState('');
+  // Filter states
   const [searchQuery, setSearchQuery] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
+  const [sortBy, setSortBy] = useState('value'); // 'value', 'projection', 'salary', 'points', 'name'
+  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' or 'desc'
+  const [minSalary, setMinSalary] = useState(3000);
+  const [maxSalary, setMaxSalary] = useState(15000);
+  const [minProjection, setMinProjection] = useState(0);
+  const [maxProjection, setMaxProjection] = useState(100);
+  const [selectedPositions, setSelectedPositions] = useState(['PG', 'SG', 'SF', 'PF', 'C']);
+  const [selectedTeams, setSelectedTeams] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
   
-  // ===== SPORT STATE =====
-  const [selectedSport, setSelectedSport] = useState('nba');
-  const [selectedSportDisplay, setSelectedSportDisplay] = useState('NBA');
-  
-  // ===== USE UNIFIED HOOKS =====
-  const { 
-    data: playersData, 
-    isLoading: playersLoading, 
-    error: playersError,
-    refetch: refetchPlayers 
-  } = useFantasyPlayers(selectedSport, 50);
-  
-  const { 
-    data: teamsData, 
-    isLoading: teamsLoading, 
-    error: teamsError,
-    refetch: refetchTeams 
-  } = useFantasyTeams(selectedSport);
-
-  // ===== FIXED: PLAYERS DATA PROCESSING =====
-  const transformedPlayerData = useMemo(() => {
-    console.log('🎯 Processing players data:', {
-      hasData: !!playersData,
-      hasPlayers: playersData?.players?.length > 0,
-      playerCount: playersData?.players?.length || 0,
-      error: playersError,
-      isLoading: playersLoading,
-      isRealData: playersData?.is_real_data || false
-    });
-
-    // If we have valid API data with players, use it
-    if (playersData?.success && playersData?.players?.length > 0) {
-      console.log(`✅ Using ${playersData.players.length} real players from API`);
-      console.log(`📊 Data source: ${playersData.is_real_data ? 'Real API Data' : 'Mock/Generated Data'}`);
-      return playersData.players.map(transformAPIPlayerData);
+  // Fetch players
+  const fetchPlayers = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch('https://python-api-fresh-production.up.railway.app/api/players?sport=nba&limit=100');
+      const data = await response.json();
+      
+      if (data.success && data.players) {
+        // Clean and enhance player data
+        const enhancedPlayers = data.players.map(player => ({
+          ...player,
+          id: player.id || `player-${Math.random()}`,
+          name: player.name || 'Unknown Player',
+          team: player.team || 'N/A',
+          position: player.position || 'N/A',
+          salary: player.salary || player.fanduel_salary || 5000,
+          projection: player.projection || player.projected_points || 0,
+          points: player.points || 0,
+          rebounds: player.rebounds || 0,
+          assists: player.assists || 0,
+          value: player.value || player.valueScore || 0,
+          injury_status: player.injury_status || 'Healthy'
+        }));
+        
+        setPlayers(enhancedPlayers);
+        setFilteredPlayers(enhancedPlayers);
+        
+        // Extract unique teams for filter
+        const uniqueTeams = [...new Set(enhancedPlayers.map(p => p.team).filter(Boolean))];
+        setSelectedTeams(uniqueTeams);
+      } else {
+        throw new Error(data.message || 'Failed to load players');
+      }
+    } catch (err) {
+      setError(err.message);
+      console.error('Error fetching players:', err);
+    } finally {
+      setIsLoading(false);
     }
-    
-    // If loading, return empty array (don't use fallback yet)
-    if (playersLoading) {
-      console.log('⏳ Players data loading...');
-      return [];
-    }
-    
-    // Only use fallback if API truly failed
-    console.log('⚠️ Using fallback fantasy players - API data missing or empty');
-    return createMockPlayers(50);
-  }, [playersData, playersError, playersLoading]);
-
-  // ===== FIXED: TEAMS DATA PROCESSING =====
-  const transformedFantasyTeams = useMemo(() => {
-    console.log('🎯 Processing teams data:', {
-      hasData: !!teamsData,
-      hasTeams: teamsData?.teams?.length > 0,
-      teamCount: teamsData?.teams?.length || 0,
-      error: teamsError,
-      isLoading: teamsLoading,
-      isRealData: teamsData?.is_real_data || false
-    });
-
-    // If we have valid API data with teams, use it
-    if (teamsData?.success && teamsData?.teams?.length > 0) {
-      console.log(`✅ Using ${teamsData.teams.length} real teams from API`);
-      console.log(`📊 Data source: ${teamsData.is_real_data ? 'Real API Data' : 'Mock/Generated Data'}`);
-      return teamsData.teams.map((team: any) => ({
-        ...team,
-        players: Array.isArray(team.players) 
-          ? team.players.map((p: any) => typeof p === 'string' ? p : p.name || p.id || 'Unknown Player')
-          : []
-      }));
-    }
-    
-    // If loading, return empty array (don't use fallback yet)
-    if (teamsLoading) {
-      console.log('⏳ Teams data loading...');
-      return [];
-    }
-    
-    // Only use fallback if API truly failed
-    console.log('⚠️ Using fallback fantasy teams - API data missing or empty');
-    return createMockTeams(5);
-  }, [teamsData, teamsError, teamsLoading]);
-
-  const loading = playersLoading || teamsLoading;
-
-  // PROJECTION FILTERING STATE
-  const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
-  const [projectionDifferenceThreshold, setProjectionDifferenceThreshold] = useState(1.0);
-  const [onlyShowProjectionEdges, setOnlyShowProjectionEdges] = useState(false);
-  const [sortByProjectionValue, setSortByProjectionValue] = useState(true);
-  const [minEdgeThreshold, setMinEdgeThreshold] = useState(0);
-
-  // Platform and budget
-  const [activePlatform, setActivePlatform] = useState<Platform>({
-    name: 'FanDuel',
-    budget: 60000,
-    color: '#3b82f6'
-  });
-  const [budget, setBudget] = useState(60000);
+  };
   
-  // Teams and players
-  const [team, setTeam] = useState<Player[]>([]);
-  const [availablePlayers, setAvailablePlayers] = useState<Player[]>([]);
-  const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
-  const [sortedPlayers, setSortedPlayers] = useState<Player[]>([]);
-  
-  // Filters
-  const [selectedTeam, setSelectedTeam] = useState('all');
-  const [selectedPosition, setSelectedPosition] = useState('ALL');
-  
-  // Modals
-  const [showAddPlayer, setShowAddPlayer] = useState(false);
-  const [showDraftResults, setShowDraftResults] = useState(false);
-  
-  // Draft
-  const [draftResults, setDraftResults] = useState<DraftResult | null>(null);
-  const [draftType, setDraftType] = useState<'snake' | 'turn'>('snake');
-  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
-  
-  // Stats
-  const [teamStats, setTeamStats] = useState<TeamStats>({
-    avgPoints: '0',
-    avgRebounds: '0',
-    avgAssists: '0',
-    totalSalary: 0,
-    fantasyScore: '0',
-    efficiency: '0'
-  });
-  
-  // Notifications
-  const [snackbar, setSnackbar] = useState({ 
-    open: false, 
-    message: '', 
-    severity: 'success' as 'success' | 'error' | 'info' | 'warning' 
-  });
-  
-  // Positions
-  const positions = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'];
-  
-  // Platforms
-  const platforms: Platform[] = [
-    { name: 'FanDuel', budget: 60000, color: '#3b82f6' },
-    { name: 'DraftKings', budget: 50000, color: '#8b5cf6' }
-  ];
-  
-  // Sports mapping for display
-  const sports = [
-    { value: 'NBA', label: 'NBA', icon: <BasketballIcon />, apiValue: 'nba' },
-    { value: 'NFL', label: 'NFL', icon: <FootballIcon />, apiValue: 'nfl' },
-    { value: 'NHL', label: 'NHL', icon: <HockeyIcon />, apiValue: 'nhl' },
-    { value: 'MLB', label: 'MLB', icon: <BaseballIcon />, apiValue: 'mlb' }
-  ];
-
-  // ===== PROJECTION VALUE CALCULATION =====
-  const calculateProjectionValue = useCallback((player: Player): ProjectionValueResult => {
-    if (!player || typeof player !== 'object') {
-      return { 
-        edge: 0, 
-        recommendedSide: 'none', 
-        confidence: 'low',
-        marketImplied: 0,
-        estimatedTrueProb: 0.5,
-        projectionDiff: 0 
-      };
-    }
-    
-    const fantasyScore = player.fantasyScore || player.fantasy_points || 0;
-    const projection = player.projection || player.projected_points || 0;
-    
-    const projectionDiff = projection - fantasyScore;
-    const isOverProjection = projectionDiff > 0;
-    
-    const absDiff = Math.abs(projectionDiff);
-    let edge;
-    let estimatedTrueProb;
-    
-    if (absDiff > 10) {
-      edge = isOverProjection ? 0.12 : -0.12;
-      estimatedTrueProb = isOverProjection ? 0.62 : 0.38;
-    } else if (absDiff > 5) {
-      edge = isOverProjection ? 0.08 : -0.08;
-      estimatedTrueProb = isOverProjection ? 0.58 : 0.42;
-    } else if (absDiff > 2) {
-      edge = isOverProjection ? 0.04 : -0.04;
-      estimatedTrueProb = isOverProjection ? 0.54 : 0.46;
-    } else {
-      edge = isOverProjection ? 0.02 : -0.02;
-      estimatedTrueProb = isOverProjection ? 0.52 : 0.48;
-    }
-    
-    const marketImplied = 0.5;
-    
-    let confidence = 'low';
-    if (Math.abs(edge) > 0.08) confidence = 'very-high';
-    else if (Math.abs(edge) > 0.05) confidence = 'high';
-    else if (Math.abs(edge) > 0.03) confidence = 'medium';
-    else if (Math.abs(edge) > 0.01) confidence = 'low';
-    else confidence = 'no-edge';
-    
-    return {
-      edge,
-      recommendedSide: edge > 0.02 ? 'over' : edge < -0.02 ? 'under' : 'none',
-      confidence,
-      marketImplied,
-      estimatedTrueProb,
-      projectionDiff
-    };
+  useEffect(() => {
+    fetchPlayers();
   }, []);
-
-  // ===== VALUE-BASED FILTERING =====
-  const applyValueFiltering = useCallback((players: Player[]): Player[] => {
-    if (!players || players.length === 0) {
-      return [];
-    }
+  
+  // Apply filters whenever filter criteria change
+  useEffect(() => {
+    if (players.length === 0) return;
     
     let filtered = [...players];
     
-    if (enableProjectionFiltering) {
-      filtered = filtered.filter(p => {
-        const projectionValue = p.projection || p.projected_points || 0;
-        const fantasyValue = p.fantasyScore || p.fantasy_points || 0;
-        
-        if (!projectionValue || projectionValue === 0) {
-          return true;
-        }
-        
-        const diff = Math.abs(projectionValue - fantasyValue);
-        return diff >= projectionDifferenceThreshold;
-      });
+    // 1. Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(player =>
+        player.name.toLowerCase().includes(query) ||
+        player.team.toLowerCase().includes(query) ||
+        player.position.toLowerCase().includes(query)
+      );
     }
     
-    if (minEdgeThreshold > 0 && onlyShowProjectionEdges) {
-      filtered = filtered.filter(p => {
-        const value = calculateProjectionValue(p);
-        return Math.abs(value.edge) >= minEdgeThreshold;
-      });
+    // 2. Salary range filter
+    filtered = filtered.filter(player =>
+      player.salary >= minSalary && player.salary <= maxSalary
+    );
+    
+    // 3. Projection range filter
+    filtered = filtered.filter(player =>
+      player.projection >= minProjection && player.projection <= maxProjection
+    );
+    
+    // 4. Position filter
+    filtered = filtered.filter(player =>
+      selectedPositions.includes(player.position)
+    );
+    
+    // 5. Team filter
+    if (selectedTeams.length > 0) {
+      filtered = filtered.filter(player =>
+        selectedTeams.includes(player.team)
+      );
     }
     
-    if (onlyShowProjectionEdges) {
-      filtered = filtered.filter(p => {
-        const value = calculateProjectionValue(p);
-        return value.edge > 0;
-      });
-    }
-    
-    return filtered;
-  }, [enableProjectionFiltering, projectionDifferenceThreshold, minEdgeThreshold, onlyShowProjectionEdges, calculateProjectionValue]);
-
-  const sortByValueScore = useCallback((players: Player[]): Player[] => {
-    if (!players || players.length === 0) {
-      return [];
-    }
-    
-    return [...players].sort((a, b) => {
-      if (sortByProjectionValue) {
-        const valueA = calculateProjectionValue(a);
-        const valueB = calculateProjectionValue(b);
-        return valueB.edge - valueA.edge;
+    // 6. Sorting
+    filtered.sort((a, b) => {
+      let aValue, bValue;
+      
+      switch (sortBy) {
+        case 'value':
+          aValue = a.value || 0;
+          bValue = b.value || 0;
+          break;
+        case 'projection':
+          aValue = a.projection || 0;
+          bValue = b.projection || 0;
+          break;
+        case 'salary':
+          aValue = a.salary || 0;
+          bValue = b.salary || 0;
+          break;
+        case 'points':
+          aValue = a.points || 0;
+          bValue = b.points || 0;
+          break;
+        case 'name':
+          aValue = a.name?.toLowerCase() || '';
+          bValue = b.name?.toLowerCase() || '';
+          break;
+        default:
+          aValue = a.value || 0;
+          bValue = b.value || 0;
+      }
+      
+      if (sortOrder === 'desc') {
+        return bValue - aValue;
       } else {
-        const scoreA = a.valueScore || a.value || a.fantasyScore || a.fantasy_points || 0;
-        const scoreB = b.valueScore || b.value || b.fantasyScore || b.fantasy_points || 0;
-        return scoreB - scoreA;
+        return aValue - bValue;
       }
     });
-  }, [calculateProjectionValue, sortByProjectionValue]);
-
-  // ===== ADD DEBOUNCED INITIALIZATION =====
-  const initializeDataDebounced = useCallback((forceRefresh = false) => {
-    // Prevent multiple initializations
-    if (initializedRef.current && !forceRefresh) {
-      return;
-    }
     
-    // Only initialize if we have data
-    if (transformedPlayerData.length > 0) {
-      console.log(`🔍 Initializing data with ${transformedPlayerData.length} players...`);
-      console.log(`🔗 Using unified hooks from useAPI`);
-      initializedRef.current = true;
-      
-      // Apply filtering and sorting
-      const valueFiltered = applyValueFiltering(transformedPlayerData);
-      const sortedByValue = sortByValueScore(valueFiltered);
-      
-      setAvailablePlayers(transformedPlayerData);
-      setFilteredPlayers(valueFiltered);
-      setSortedPlayers(sortedByValue);
-    }
-  }, [transformedPlayerData, applyValueFiltering, sortByValueScore]);
-
-  // ===== USE THIS EFFECT FOR DATA INIT =====
-  useEffect(() => {
-    // Use setTimeout to debounce initialization
-    const timer = setTimeout(() => {
-      initializeDataDebounced();
-    }, 500); // Wait 500ms after mount
-    
-    return () => clearTimeout(timer);
-  }, [initializeDataDebounced]); // Only depends on the debounced function
-
-  // ===== UPDATE LOAD DATA ON MOUNT =====
-  useEffect(() => {
-    console.log('🎯 FantasyHubScreen mounted with unified hooks');
-    console.log('🔗 Using unified hooks from useAPI');
-    logScreenView('FantasyHubScreen');
-    
-    // Check for initial search params
-    const params = new URLSearchParams(location.search);
-    const initialSearch = params.get('search');
-    if (initialSearch) {
-      setSearchInput(initialSearch);
-      setSearchQuery(initialSearch);
-    }
-    
-    // Cleanup function
-    return () => {
-      console.log('🧹 FantasyHubScreen unmounting');
-      initializedRef.current = false;
-    };
-  }, [location]); // ONLY location as dependency - remove others!
-
-  // ===== CALCULATE TEAM STATS =====
-  const calculateTeamStats = useCallback((teamData: Player[]) => {
-    if (!teamData || teamData.length === 0) {
-      setTeamStats({
-        avgPoints: '0',
-        avgRebounds: '0',
-        avgAssists: '0',
-        totalSalary: 0,
-        fantasyScore: '0',
-        efficiency: '0'
-      });
-      return;
-    }
-
-    const totals = teamData.reduce((acc, player) => ({
-      points: acc.points + (player.points || 0),
-      rebounds: acc.rebounds + (player.rebounds || 0),
-      assists: acc.assists + (player.assists || 0),
-      salary: acc.salary + (player.salary || 0),
-      fantasyScore: acc.fantasyScore + (player.fantasyScore || player.fantasy_points || 0),
-    }), { points: 0, rebounds: 0, assists: 0, salary: 0, fantasyScore: 0 });
-    
-    const avgPoints = totals.points / teamData.length;
-    const avgRebounds = totals.rebounds / teamData.length;
-    const avgAssists = totals.assists / teamData.length;
-    const avgFantasyScore = totals.fantasyScore / teamData.length;
-    
-    const efficiency = totals.salary > 0 ? (totals.fantasyScore / totals.salary) * 1000 : 0;
-    
-    setTeamStats({
-      avgPoints: avgPoints.toFixed(1),
-      avgRebounds: avgRebounds.toFixed(1),
-      avgAssists: avgAssists.toFixed(1),
-      totalSalary: totals.salary,
-      fantasyScore: avgFantasyScore.toFixed(1),
-      efficiency: efficiency.toFixed(2)
-    });
-  }, []);
-
-  // ===== FILTER EFFECT =====
-  useEffect(() => {
-    if (!availablePlayers || availablePlayers.length === 0) {
-      setFilteredPlayers([]);
-      setSortedPlayers([]);
-      return;
-    }
-    
-    let filtered = availablePlayers.filter(player => {
-      if (!player || typeof player !== 'object') {
-        return false;
-      }
-      
-      const playerName = player.name || '';
-      const playerTeam = player.team || '';
-      const playerPosition = player.position || '';
-      
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const nameMatch = playerName.toLowerCase().includes(query);
-        const teamMatch = playerTeam.toLowerCase().includes(query);
-        const positionMatch = playerPosition.toLowerCase().includes(query);
-        
-        if (!nameMatch && !teamMatch && !positionMatch) {
-          return false;
-        }
-      }
-      
-      if (selectedPosition !== 'ALL' && playerPosition !== selectedPosition) {
-        return false;
-      }
-      
-      if (selectedTeam !== 'all' && playerTeam !== selectedTeam) {
-        return false;
-      }
-      
-      return true;
-    });
-    
-    const valueFiltered = applyValueFiltering(filtered);
-    const sorted = sortByValueScore(valueFiltered);
-    
-    setFilteredPlayers(valueFiltered);
-    setSortedPlayers(sorted);
-    
-  }, [availablePlayers, searchQuery, selectedPosition, selectedTeam, applyValueFiltering, sortByValueScore]);
-
-  // ===== SPORT DATA FETCHING =====
-  const fetchSportData = async (sport: string) => {
-    try {
-      setSnackbar({
-        open: true,
-        message: `Loading ${sport} data from unified API...`,
-        severity: 'info'
-      });
-      
-      await refetchPlayers();
-      await refetchTeams();
-      
-      // Reset initialization to force re-initialization
-      initializedRef.current = false;
-      initializeDataDebounced(true);
-      
-      setSnackbar({
-        open: true,
-        message: `${sport} data loaded from unified API`,
-        severity: 'success'
-      });
-      
-    } catch (error) {
-      console.error(`Failed to load ${sport} data:`, error);
-      setSnackbar({
-        open: true,
-        message: `Failed to load ${sport} data, using fallback data`,
-        severity: 'warning'
-      });
-    }
-  };
-
-  // ===== UPDATE SPORT CHANGE HANDLER =====
-  const handleSportChange = (sportValue: string) => {
-    const sportObj = sports.find(s => s.value === sportValue);
-    if (sportObj) {
-      setSelectedSportDisplay(sportValue);
-      setSelectedSport(sportObj.apiValue);
-      
-      setSelectedPosition('ALL');
-      setSelectedTeam('all');
-      setSearchQuery('');
-      setSearchInput('');
-      
-      fetchSportData(sportObj.apiValue);
-    }
-  };
-
-  // ===== REFRESH HANDLER =====
-  const onRefresh = async () => {
-    setRefreshing(true);
+    setFilteredPlayers(filtered);
+  }, [
+    players,
+    searchQuery,
+    sortBy,
+    sortOrder,
+    minSalary,
+    maxSalary,
+    minProjection,
+    maxProjection,
+    selectedPositions,
+    selectedTeams
+  ]);
+  
+  // Get unique positions from players
+  const allPositions = useMemo(() => {
+    return [...new Set(players.map(p => p.position).filter(Boolean))].sort();
+  }, [players]);
+  
+  // Get unique teams from players
+  const allTeams = useMemo(() => {
+    return [...new Set(players.map(p => p.team).filter(Boolean))].sort();
+  }, [players]);
+  
+  // Get salary range from players
+  const salaryRange = useMemo(() => {
+    if (players.length === 0) return [0, 15000];
+    const salaries = players.map(p => p.salary).filter(Boolean);
+    return [Math.min(...salaries), Math.max(...salaries)];
+  }, [players]);
+  
+  // Get projection range from players
+  const projectionRange = useMemo(() => {
+    if (players.length === 0) return [0, 100];
+    const projections = players.map(p => p.projection).filter(Boolean);
+    return [Math.min(...projections), Math.max(...projections)];
+  }, [players]);
+  
+  // Reset filters
+  const resetFilters = () => {
     setSearchQuery('');
-    setSearchInput('');
-    
-    try {
-      await refetchPlayers();
-      await refetchTeams();
-      
-      // Reset initialization to force re-initialization
-      initializedRef.current = false;
-      initializeDataDebounced(true);
-      
-      setSnackbar({ 
-        open: true, 
-        message: 'Data refreshed from unified API', 
-        severity: 'success' 
-      });
-    } catch (error) {
-      console.error('Refresh error:', error);
-      setSnackbar({ 
-        open: true, 
-        message: 'Failed to refresh, using available data', 
-        severity: 'warning' 
-      });
-    } finally {
-      setRefreshing(false);
+    setSortBy('value');
+    setSortOrder('desc');
+    setMinSalary(salaryRange[0]);
+    setMaxSalary(salaryRange[1]);
+    setMinProjection(projectionRange[0]);
+    setMaxProjection(projectionRange[1]);
+    setSelectedPositions(['PG', 'SG', 'SF', 'PF', 'C']);
+    setSelectedTeams(allTeams);
+  };
+  
+  // Toggle position selection
+  const togglePosition = (position) => {
+    if (selectedPositions.includes(position)) {
+      setSelectedPositions(selectedPositions.filter(p => p !== position));
+    } else {
+      setSelectedPositions([...selectedPositions, position]);
     }
   };
-
-  // ===== RENDER PLAYER CARD (simplified for brevity) =====
-  const renderPlayerCard = (player: Player) => (
-    <Box key={player.id} sx={{ mb: 2, p: 2, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: 'white' }}>
-      <Typography variant="subtitle1" fontWeight="bold">{player.name}</Typography>
-      <Typography variant="body2" color="text.secondary">
-        {player.position} • {player.team}
-      </Typography>
-      <Typography variant="body2">
-        Salary: ${player.salary?.toLocaleString()}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
-        Source: {playersData?.is_real_data ? 'Python API' : 'Fallback Data'}
-      </Typography>
-    </Box>
-  );
-
-  // ===== LOADING STATE =====
-  if (loading) {
+  
+  // Toggle team selection
+  const toggleTeam = (team) => {
+    if (selectedTeams.includes(team)) {
+      setSelectedTeams(selectedTeams.filter(t => t !== team));
+    } else {
+      setSelectedTeams([...selectedTeams, team]);
+    }
+  };
+  
+  // Loading state
+  if (isLoading) {
     return (
-      <Container maxWidth="lg">
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', flexDirection: 'column' }}>
-          <CircularProgress />
-          <Typography sx={{ ml: 2, mt: 2 }}>Loading Fantasy Hub from unified API...</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Using unified hooks system
+      <Container sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '70vh' 
+      }}>
+        <Box sx={{ textAlign: 'center' }}>
+          <CircularProgress size={60} />
+          <Typography variant="h6" sx={{ mt: 3, color: 'text.secondary' }}>
+            Loading players...
           </Typography>
         </Box>
       </Container>
     );
   }
-
-  return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
-      {/* Header */}
-      {renderHeader(navigate)}
-      
-      <Container maxWidth="lg">
-        {/* Debug Info */}
-        <Box sx={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', borderRadius: '4px' }}>
-          <Typography variant="subtitle2" fontWeight="bold">FantasyHub Debug (Unified Hooks):</Typography>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mt: 1 }}>
-            <Chip 
-              label={teamsError ? '⚠️ Teams Error' : '✅ Teams Loaded'}
-              color={teamsError ? 'warning' : 'success'}
-            />
-            <Chip 
-              label={playersError ? '⚠️ Players Error' : '✅ Players Loaded'}
-              color={playersError ? 'warning' : 'success'}
-            />
-            <Chip 
-              label={transformedPlayerData[0]?.id?.includes('mock') ? '📊 Mock Data' : '📊 Python API'}
-              color={transformedPlayerData[0]?.id?.includes('mock') ? 'info' : 'success'}
-            />
-            <Chip 
-              label="🔗 Unified Hooks"
-              color="primary"
-              variant="outlined"
-            />
-            <Typography variant="caption">
-              Teams: {transformedFantasyTeams.length} | Players: {transformedPlayerData.length}
-            </Typography>
-            <Button 
-              variant="outlined" 
-              size="small"
-              onClick={onRefresh}
-              disabled={refreshing}
-              startIcon={<RefreshIcon />}
-            >
-              {refreshing ? 'Refreshing...' : 'Refresh'}
+  
+  // Error state
+  if (error) {
+    return (
+      <Container sx={{ py: 8 }}>
+        <Alert 
+          severity="error" 
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={fetchPlayers}>
+              Retry
             </Button>
+          }
+        >
+          Error loading players: {error}
+        </Alert>
+      </Container>
+    );
+  }
+  
+  return (
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+          <SportsBasketballIcon sx={{ fontSize: 48, color: 'primary.main' }} />
+          <Box>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 700 }}>
+              🏀 NBA Fantasy Players
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              {players.length} players • Advanced filtering • Real-time data
+            </Typography>
           </Box>
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="caption" display="block">
-              Hook Type: useAPI (unified) | Current Sport: {selectedSport} | Display: {selectedSportDisplay}
-            </Typography>
-            <Typography variant="caption" display="block">
-              Players Data: {playersData?.is_real_data ? 'Real API' : 'Generated/Fallback'}
-            </Typography>
-            <Typography variant="caption" display="block">
-              Teams Data: {teamsData?.is_real_data ? 'Real API' : 'Generated/Fallback'}
-            </Typography>
-            <Typography variant="caption" display="block">
-              Initialized: {initializedRef.current ? '✅ Yes' : '❌ No'}
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Sport Selector */}
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="h6" gutterBottom>Select Sport:</Typography>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            {sports.map((sport) => (
-              <Button
-                key={sport.value}
-                variant={selectedSportDisplay === sport.value ? "contained" : "outlined"}
-                onClick={() => handleSportChange(sport.value)}
-                startIcon={sport.icon}
-              >
-                {sport.label}
-              </Button>
-            ))}
-          </Box>
-        </Box>
-
-        {/* Simplified UI for demonstration */}
-        <Box sx={{ mt: 4 }}>
-          <Typography variant="h5" gutterBottom>
-            Fantasy Players ({filteredPlayers.length})
-            <Typography variant="caption" sx={{ ml: 2 }}>
-              {playersData?.is_real_data ? '(Real API Data)' : '(Generated/Fallback Data)'}
-            </Typography>
-          </Typography>
-          
-          {filteredPlayers.slice(0, 5).map(renderPlayerCard)}
-          
-          {filteredPlayers.length > 5 && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              ... and {filteredPlayers.length - 5} more players
-            </Typography>
-          )}
         </Box>
         
-        <Box sx={{ mt: 4 }}>
-          <Typography variant="h5" gutterBottom>
-            Fantasy Teams ({transformedFantasyTeams.length})
-            <Typography variant="caption" sx={{ ml: 2 }}>
-              {teamsData?.is_real_data ? '(Real API Data)' : '(Generated/Fallback Data)'}
-            </Typography>
-          </Typography>
+        {/* Stats Bar */}
+        <Box sx={{ 
+          display: 'flex', 
+          flexWrap: 'wrap', 
+          gap: 2, 
+          mb: 3,
+          alignItems: 'center'
+        }}>
+          <Chip 
+            label={`${filteredPlayers.length} of ${players.length} players`}
+            color={filteredPlayers.length < players.length ? "warning" : "success"}
+            variant="outlined"
+          />
           
-          {transformedFantasyTeams.slice(0, 3).map((team: FantasyTeam) => (
-            <Box key={team.id} sx={{ mb: 2, p: 2, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: 'white' }}>
-              <Typography variant="subtitle1" fontWeight="bold">{team.name}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Owner: {team.owner} • Record: {team.record}
-              </Typography>
-              <Typography variant="body2">
-                Rank: #{team.rank} • Points: {team.points}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Data Source: {teamsData?.is_real_data ? 'Python API' : 'Fallback'}
-              </Typography>
-            </Box>
-          ))}
+          <Chip 
+            label="Python API Connected"
+            color="primary"
+            variant="outlined"
+          />
+          
+          <Box sx={{ flexGrow: 1 }} />
+          
+          <Button
+            variant="contained"
+            startIcon={<RefreshIcon />}
+            onClick={fetchPlayers}
+          >
+            Refresh
+          </Button>
+          
+          <Button
+            variant={showFilters ? "contained" : "outlined"}
+            startIcon={<FilterListIcon />}
+            onClick={() => setShowFilters(!showFilters)}
+            color="secondary"
+          >
+            {showFilters ? 'Hide Filters' : 'Show Filters'}
+          </Button>
         </Box>
-      </Container>
-
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-        message={snackbar.message}
-      />
-    </Box>
+      </Box>
+      
+      {/* FILTER PANEL */}
+      {showFilters && (
+        <Paper elevation={3} sx={{ p: 3, mb: 4, borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <TuneIcon /> Advanced Filters
+            </Typography>
+            <Button
+              startIcon={<ClearIcon />}
+              onClick={resetFilters}
+              size="small"
+            >
+              Reset All
+            </Button>
+          </Box>
+          
+          <Grid container spacing={3}>
+            {/* Search */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Search Players"
+                placeholder="Search by name, team, or position..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  ),
+                  endAdornment: searchQuery && (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setSearchQuery('')} size="small">
+                        <ClearIcon />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            
+            {/* Sort Controls */}
+            <Grid item xs={12} md={6}>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Sort By</InputLabel>
+                  <Select
+                    value={sortBy}
+                    label="Sort By"
+                    onChange={(e) => setSortBy(e.target.value)}
+                  >
+                    <MenuItem value="value">Value Score</MenuItem>
+                    <MenuItem value="projection">Projection</MenuItem>
+                    <MenuItem value="salary">Salary</MenuItem>
+                    <MenuItem value="points">Points</MenuItem>
+                    <MenuItem value="name">Name</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <Button
+                  variant="outlined"
+                  startIcon={<SortIcon />}
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  {sortOrder === 'asc' ? 'Asc ↑' : 'Desc ↓'}
+                </Button>
+              </Box>
+            </Grid>
+            
+            {/* Salary Range */}
+            <Grid item xs={12} md={6}>
+              <Typography gutterBottom>
+                Salary Range: ${minSalary.toLocaleString()} - ${maxSalary.toLocaleString()}
+              </Typography>
+              <Slider
+                value={[minSalary, maxSalary]}
+                onChange={(e, newValue) => {
+                  setMinSalary(newValue[0]);
+                  setMaxSalary(newValue[1]);
+                }}
+                valueLabelDisplay="auto"
+                min={salaryRange[0]}
+                max={salaryRange[1]}
+                step={100}
+                sx={{ mt: 2 }}
+              />
+            </Grid>
+            
+            {/* Projection Range */}
+            <Grid item xs={12} md={6}>
+              <Typography gutterBottom>
+                Projection Range: {minProjection.toFixed(1)} - {maxProjection.toFixed(1)}
+              </Typography>
+              <Slider
+                value={[minProjection, maxProjection]}
+                onChange={(e, newValue) => {
+                  setMinProjection(newValue[0]);
+                  setMaxProjection(newValue[1]);
+                }}
+                valueLabelDisplay="auto"
+                min={projectionRange[0]}
+                max={projectionRange[1]}
+                step={1}
+                sx={{ mt: 2 }}
+              />
+            </Grid>
+            
+            {/* Position Filters */}
+            <Grid item xs={12} md={6}>
+              <Typography gutterBottom>Positions</Typography>
+              <FormGroup row>
+                {allPositions.map((position) => (
+                  <FormControlLabel
+                    key={position}
+                    control={
+                      <Checkbox
+                        checked={selectedPositions.includes(position)}
+                        onChange={() => togglePosition(position)}
+                        size="small"
+                      />
+                    }
+                    label={position}
+                  />
+                ))}
+              </FormGroup>
+            </Grid>
+            
+            {/* Team Filters */}
+            <Grid item xs={12} md={6}>
+              <Typography gutterBottom>Teams</Typography>
+              <Box sx={{ maxHeight: 150, overflow: 'auto', p: 1, border: '1px solid #ddd', borderRadius: 1 }}>
+                <FormGroup>
+                  {allTeams.map((team) => (
+                    <FormControlLabel
+                      key={team}
+                      control={
+                        <Checkbox
+                          checked={selectedTeams.includes(team)}
+                          onChange={() => toggleTeam(team)}
+                          size="small"
+                        />
+                      }
+                      label={team}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+            </Grid>
+          </Grid>
+        </Paper>
+      )}
+      
+      {/* Player Grid */}
+      <Grid container spacing={3}>
+        {filteredPlayers.map((player) => (
+          <Grid item key={player.id} xs={12} sm={6} md={4} lg={3}>
+            <PlayerCard player={player} />
+          </Grid>
+        ))}
+      </Grid>
+      
+      {/* No results */}
+      {filteredPlayers.length === 0 && (
+        <Alert severity="info" sx={{ mt: 3 }}>
+          No players found matching your filters. Try adjusting your criteria.
+        </Alert>
+      )}
+    </Container>
   );
 };
+
+// PlayerCard Component
+const PlayerCard = ({ player }) => (
+  <Card sx={{ 
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'transform 0.2s, box-shadow 0.2s',
+    '&:hover': {
+      transform: 'translateY(-4px)',
+      boxShadow: 6
+    }
+  }}>
+    <CardContent sx={{ flexGrow: 1 }}>
+      {/* Player Header */}
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        mb: 2 
+      }}>
+        <Box>
+          <Typography variant="h6" noWrap sx={{ fontWeight: 600 }}>
+            {player.name}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            {player.team} • {player.position}
+          </Typography>
+        </Box>
+        <Chip
+          label={`$${player.salary.toLocaleString()}`}
+          color="primary"
+          size="small"
+        />
+      </Box>
+      
+      {/* Projection & Value */}
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        mb: 2,
+        p: 2,
+        bgcolor: 'grey.50',
+        borderRadius: 1
+      }}>
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            Projection
+          </Typography>
+          <Typography variant="h5" color="primary.main" sx={{ fontWeight: 700 }}>
+            {player.projection.toFixed(1)}
+          </Typography>
+        </Box>
+        <Box sx={{ textAlign: 'right' }}>
+          <Typography variant="caption" color="text.secondary">
+            Value
+          </Typography>
+          <Typography variant="h5" color="success.main" sx={{ fontWeight: 700 }}>
+            {player.value.toFixed(2)}
+          </Typography>
+        </Box>
+      </Box>
+      
+      {/* Stats */}
+      <Grid container spacing={1} sx={{ mb: 2 }}>
+        <Grid item xs={4}>
+          <Typography variant="caption" color="text.secondary">
+            Points
+          </Typography>
+          <Typography variant="body1" sx={{ fontWeight: 500 }}>
+            {player.points.toFixed(1)}
+          </Typography>
+        </Grid>
+        <Grid item xs={4}>
+          <Typography variant="caption" color="text.secondary">
+            Rebounds
+          </Typography>
+          <Typography variant="body1" sx={{ fontWeight: 500 }}>
+            {player.rebounds.toFixed(1)}
+          </Typography>
+        </Grid>
+        <Grid item xs={4}>
+          <Typography variant="caption" color="text.secondary">
+            Assists
+          </Typography>
+          <Typography variant="body1" sx={{ fontWeight: 500 }}>
+            {player.assists.toFixed(1)}
+          </Typography>
+        </Grid>
+      </Grid>
+      
+      {/* Status */}
+      <Box sx={{ 
+        mt: 'auto', 
+        pt: 2, 
+        borderTop: 1, 
+        borderColor: 'divider',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <Chip
+          label={player.injury_status}
+          size="small"
+          color={player.injury_status === 'Healthy' ? 'success' : 'error'}
+          variant="outlined"
+        />
+        <Button 
+          size="small" 
+          variant="outlined"
+          sx={{ fontSize: '0.75rem' }}
+        >
+          Add to Team
+        </Button>
+      </Box>
+    </CardContent>
+  </Card>
+);
 
 export default FantasyHubScreen;

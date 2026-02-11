@@ -1,5 +1,5 @@
-// src/pages/ParlayArchitectScreen.tsx - FIXED VERSION
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// src/pages/ParlayArchitectScreen.tsx - COMPLETE FIXED VERSION WITH ENHANCED FILTERS
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -69,8 +69,8 @@ import {
 import { alpha } from '@mui/material/styles';
 import { format, parseISO, isToday } from 'date-fns';
 
-// Import the new hooks
-import { useParlaySuggestions, useOddsGames } from '../hooks/useUnifiedAPI'; // Updated import
+// Import the NEW fixed hooks
+import { useParlaySuggestions, useOddsGames } from '../hooks/useParlayAPI';
 
 // Types
 interface Game {
@@ -101,6 +101,7 @@ interface ParlaySuggestion {
   name: string;
   sport: string;
   type: string;
+  market_type?: string;
   legs: Array<{
     id: string;
     game_id?: string;
@@ -110,6 +111,9 @@ interface ParlaySuggestion {
     confidence: number;
     sport: string;
     market: string;
+    player_name?: string;
+    stat_type?: string;
+    line?: string;
     teams?: {
       home: string;
       away: string;
@@ -131,6 +135,7 @@ interface ParlaySuggestion {
     leg_count: number;
     avg_leg_confidence: number;
     recommended_stake: string;
+    edge?: number;
   };
   is_real_data?: boolean;
   has_data?: boolean;
@@ -143,6 +148,40 @@ const SPORTS = [
   { id: 'NHL', name: 'NHL', icon: <HockeyIcon />, color: '#1e40af' },
   { id: 'MLB', name: 'MLB', icon: <BaseballIcon />, color: '#10b981' }
 ];
+
+// Add new filter constants from File 1
+const MARKET_TYPES = [
+  { id: 'all', name: 'All Markets' },
+  { id: 'player_props', name: 'Player Props', icon: '👤' },
+  { id: 'game_totals', name: 'Game Totals', icon: '📊' },
+  { id: 'moneyline', name: 'Moneyline', icon: '💰' },
+  { id: 'spreads', name: 'Spreads', icon: '⚖️' },
+  { id: 'mixed', name: 'Mixed', icon: '🔄' }
+];
+
+const RISK_LEVELS = [
+  { id: 'all', name: 'All Risks' },
+  { id: 'low', name: 'Low Risk', color: '#10b981' },
+  { id: 'medium', name: 'Medium Risk', color: '#f59e0b' },
+  { id: 'high', name: 'High Risk', color: '#ef4444' }
+];
+
+const PARLAY_SIZES = [
+  { id: 'all', name: 'Any Size' },
+  { id: '2', name: '2-Leg Parlays' },
+  { id: '3', name: '3-Leg Parlays' },
+  { id: '4', name: '4-Leg Parlays' },
+  { id: '5', name: '5+ Leg Parlays' }
+];
+
+// ✅ ADD THIS HERE: Pulse animation CSS
+const pulseAnimation = `
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+`;
 
 const ParlayArchitectScreen = () => {
   const navigate = useNavigate();
@@ -166,7 +205,13 @@ const ParlayArchitectScreen = () => {
   const [showTodaysGames, setShowTodaysGames] = useState(true);
   const [dateFilter, setDateFilter] = useState('today');
   
-  // ✅ FIXED: Use hooks without undefined parameter
+  // ✅ NEW: Enhanced filter state variables from File 1
+  const [marketType, setMarketType] = useState('all');
+  const [minEdge, setMinEdge] = useState(5); // Minimum edge percentage
+  const [maxRisk, setMaxRisk] = useState('all'); // Maximum risk level
+  const [parlaySize, setParlaySize] = useState('all'); // 2-leg, 3-leg, etc.
+  
+  // ✅ FIXED: Use the new hooks
   const { 
     data: parlayData, 
     isLoading: parlayLoading, 
@@ -185,44 +230,123 @@ const ParlayArchitectScreen = () => {
   } = useOddsGames(dateFilter);
   
   console.log('🔍 Parlay Architect Debug:', {
-    parlayData,
+    parlayData: parlayData ? `Data received (${Array.isArray(parlayData) ? parlayData.length : 'object'})` : 'null',
     parlayLoading,
-    parlayError,
-    oddsData,
+    parlayError: parlayError?.message,
+    oddsData: oddsData ? `Data received (${Array.isArray(oddsData) ? oddsData.length : 'object'})` : 'null',
     oddsLoading,
-    oddsError,
+    oddsError: oddsError?.message,
     selectedSport
   });
   
-  // Extract suggestions from API response
+  // ✅ FIXED: Extract suggestions from API response with better handling
   const suggestions = React.useMemo(() => {
-    if (!parlayData) return [];
+    if (!parlayData) {
+      console.log('📭 No parlayData from hook');
+      return [];
+    }
+    
+    console.log('📥 Raw parlayData structure:', {
+      isArray: Array.isArray(parlayData),
+      keys: Object.keys(parlayData),
+      hasSuggestions: 'suggestions' in parlayData,
+      suggestionsLength: parlayData.suggestions?.length || 0
+    });
     
     // Handle different response structures
+    let extracted: any[] = [];
+    
     if (Array.isArray(parlayData)) {
-      return parlayData as ParlaySuggestion[];
+      extracted = parlayData;
+      console.log('✅ Data is array directly');
     } else if (parlayData.suggestions && Array.isArray(parlayData.suggestions)) {
-      return parlayData.suggestions as ParlaySuggestion[];
+      extracted = parlayData.suggestions;
+      console.log('✅ Found suggestions array in data.suggestions');
     } else if (parlayData.data && Array.isArray(parlayData.data)) {
-      return parlayData.data as ParlaySuggestion[];
+      extracted = parlayData.data;
+      console.log('✅ Found data array in data.data');
+    } else {
+      console.log('⚠️ Unexpected data structure, trying to find any array');
+      // Try to find any array in the response
+      for (const key in parlayData) {
+        if (Array.isArray(parlayData[key])) {
+          extracted = parlayData[key];
+          console.log(`✅ Found array in key: ${key}`);
+          break;
+        }
+      }
     }
     
-    return [];
+    console.log(`📊 Extracted ${extracted.length} suggestions`);
+    
+    // ✅ FIXED: Ensure each suggestion has required fields
+    const validated = extracted.map((suggestion: any, index: number) => ({
+      id: suggestion.id || `parlay-${index}-${Date.now()}`,
+      name: suggestion.name || `Parlay ${index + 1}`,
+      sport: suggestion.sport || 'Mixed',
+      type: suggestion.type || 'moneyline',
+      market_type: suggestion.market_type || suggestion.type || 'mixed',
+      legs: suggestion.legs || [],
+      total_odds: suggestion.total_odds || suggestion.totalOdds || '+200',
+      confidence: typeof suggestion.confidence === 'number' ? suggestion.confidence : 70,
+      analysis: suggestion.analysis || 'No analysis available',
+      timestamp: suggestion.timestamp || new Date().toISOString(),
+      isToday: suggestion.isToday !== undefined ? suggestion.isToday : true,
+      is_real_data: suggestion.is_real_data || false,
+      has_data: suggestion.has_data !== undefined ? suggestion.has_data : true,
+      confidence_level: suggestion.confidence_level || 'medium',
+      expected_value: suggestion.expected_value || '+5%',
+      risk_level: suggestion.risk_level || 'medium',
+      ai_metrics: suggestion.ai_metrics || {
+        leg_count: suggestion.legs?.length || 0,
+        avg_leg_confidence: typeof suggestion.confidence === 'number' ? suggestion.confidence : 70,
+        recommended_stake: '$5.00',
+        edge: 0.05
+      }
+    }));
+    
+    console.log('✅ Validated suggestions:', validated.length);
+    if (validated.length > 0) {
+      console.log('First validated suggestion:', {
+        name: validated[0].name,
+        sport: validated[0].sport,
+        confidence: validated[0].confidence,
+        legs: validated[0].legs.length,
+        isToday: validated[0].isToday,
+        market_type: validated[0].market_type
+      });
+    }
+    
+    return validated;
   }, [parlayData]);
   
-  // Extract games from odds API response
+  // ✅ FIXED: Extract games from odds API response
   const todaysGames = React.useMemo(() => {
-    if (!oddsData) return [];
-    
-    if (Array.isArray(oddsData)) {
-      return oddsData as Game[];
-    } else if (oddsData.games && Array.isArray(oddsData.games)) {
-      return oddsData.games as Game[];
-    } else if (oddsData.data && Array.isArray(oddsData.data)) {
-      return oddsData.data as Game[];
+    if (!oddsData) {
+      console.log('📭 No oddsData from hook');
+      return [];
     }
     
-    return [];
+    let extracted: any[] = [];
+    
+    if (Array.isArray(oddsData)) {
+      extracted = oddsData;
+    } else if (oddsData.games && Array.isArray(oddsData.games)) {
+      extracted = oddsData.games;
+    } else if (oddsData.data && Array.isArray(oddsData.data)) {
+      extracted = oddsData.data;
+    } else {
+      // Try to find any array
+      for (const key in oddsData) {
+        if (Array.isArray(oddsData[key])) {
+          extracted = oddsData[key];
+          break;
+        }
+      }
+    }
+    
+    console.log(`🎮 Extracted ${extracted.length} games`);
+    return extracted as Game[];
   }, [oddsData]);
   
   // Log usage on mount
@@ -230,9 +354,7 @@ const ParlayArchitectScreen = () => {
     console.log('🏗️ ParlayArchitectScreen mounted');
     console.log('📊 Initial Data:', {
       suggestionsCount: suggestions.length,
-      suggestionsData: suggestions,
-      todaysGamesCount: todaysGames.length,
-      todaysGamesData: todaysGames.slice(0, 3)
+      todaysGamesCount: todaysGames.length
     });
     return () => {
       console.log('🏗️ ParlayArchitectScreen unmounted');
@@ -255,7 +377,7 @@ const ParlayArchitectScreen = () => {
           try {
             return isToday(parseISO(game.commence_time));
           } catch (e) {
-            return true; // Default to true if date parsing fails
+            return true;
           }
         });
         
@@ -306,6 +428,7 @@ const ParlayArchitectScreen = () => {
           name: `${sport.replace('_', ' ')} AI Parlay`,
           sport: sport === 'all' ? 'Mixed' : sport,
           type: 'Moneyline',
+          market_type: 'moneyline',
           legs,
           totalOdds: legs.length === 2 ? '+265' : legs.length === 3 ? '+600' : '+1000',
           total_odds: legs.length === 2 ? '+265' : legs.length === 3 ? '+600' : '+1000',
@@ -320,7 +443,8 @@ const ParlayArchitectScreen = () => {
           ai_metrics: {
             leg_count: legs.length,
             avg_leg_confidence: confidence,
-            recommended_stake: '$5.50'
+            recommended_stake: '$5.50',
+            edge: 0.082
           },
           is_real_data: true,
           has_data: true
@@ -341,6 +465,7 @@ const ParlayArchitectScreen = () => {
           name: `${sport} Expert Parlay`,
           sport: sport,
           type: 'Moneyline',
+          market_type: 'mixed',
           legs: [
             {
               id: 'leg-1',
@@ -389,7 +514,8 @@ const ParlayArchitectScreen = () => {
           ai_metrics: {
             leg_count: numLegs,
             avg_leg_confidence: 68,
-            recommended_stake: '$4.80'
+            recommended_stake: '$4.80',
+            edge: 0.068
           },
           is_real_data: false,
           has_data: true
@@ -411,64 +537,166 @@ const ParlayArchitectScreen = () => {
     }
   }, [todaysGames]);
 
-  // ✅ FIXED: Apply filters with proper dependency array
+  // ✅ FIXED: Apply filters with ENHANCED LOGIC from File 1
   useEffect(() => {
     console.log('🔧 Applying filters...', {
       suggestionsCount: suggestions.length,
       selectedSport,
+      marketType,
       selectedType,
       minConfidence,
+      minEdge,
+      maxRisk,
+      parlaySize,
       maxLegs,
       searchQuery,
       dateFilter
     });
     
-    let filtered = [...suggestions];
-    
-    // Date filter - check if parlay is from today
-    if (dateFilter === 'today') {
-      filtered = filtered.filter(p => {
-        try {
-          return p.isToday || (p.timestamp && isToday(parseISO(p.timestamp)));
-        } catch (e) {
-          return true;
-        }
-      });
+    if (suggestions.length === 0) {
+      console.log('⚠️ No suggestions to filter');
+      setFilteredSuggestions([]);
+      return;
     }
     
-    // Sport filter
-    if (selectedSport !== 'all') {
+    let filtered = [...suggestions];
+    
+    // ✅ FIXED: Date filter - LESS STRICT
+    if (dateFilter === 'today') {
+      const beforeCount = filtered.length;
       filtered = filtered.filter(p => {
-        const sport = p.sport?.toUpperCase() || '';
-        const selected = selectedSport.toUpperCase();
-        return sport.includes(selected) || sport === selected;
+        // Always include if isToday is explicitly true
+        if (p.isToday === true) {
+          return true;
+        }
+        
+        // If isToday is explicitly false, exclude
+        if (p.isToday === false) {
+          return false;
+        }
+        
+        // Check timestamp if available
+        if (p.timestamp) {
+          try {
+            return isToday(parseISO(p.timestamp));
+          } catch (e) {
+            // If timestamp parsing fails, default to true
+          }
+        }
+        
+        // Default to true if we can't determine
+        return true;
       });
+      console.log(`📅 Date filter (today): ${beforeCount} → ${filtered.length}`);
+    }
+    
+    // ✅ FIXED: Sport filter - CASE INSENSITIVE
+    if (selectedSport !== 'all') {
+      const beforeCount = filtered.length;
+      const selectedSportUpper = selectedSport.toUpperCase();
+      filtered = filtered.filter(p => {
+        const sportUpper = (p.sport || '').toUpperCase();
+        return sportUpper.includes(selectedSportUpper) || 
+               sportUpper === selectedSportUpper;
+      });
+      console.log(`🏀 Sport filter (${selectedSport}): ${beforeCount} → ${filtered.length}`);
     }
     
     // Type filter
     if (selectedType !== 'all') {
+      const beforeCount = filtered.length;
       filtered = filtered.filter(p => p.type === selectedType);
+      console.log(`🎯 Type filter (${selectedType}): ${beforeCount} → ${filtered.length}`);
     }
     
-    // Confidence filter
-    filtered = filtered.filter(p => p.confidence >= minConfidence);
+    // ✅ FIXED: Confidence filter
+    const beforeConfidence = filtered.length;
+    filtered = filtered.filter(p => (p.confidence || 0) >= minConfidence);
+    console.log(`📈 Confidence filter (>=${minConfidence}): ${beforeConfidence} → ${filtered.length}`);
     
     // Max legs filter
-    filtered = filtered.filter(p => p.legs.length <= maxLegs);
+    const beforeLegs = filtered.length;
+    filtered = filtered.filter(p => (p.legs?.length || 0) <= maxLegs);
+    console.log(`🦵 Max legs filter (<=${maxLegs}): ${beforeLegs} → ${filtered.length}`);
     
     // Search filter
     if (searchQuery.trim()) {
+      const beforeSearch = filtered.length;
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(p => 
-        p.name?.toLowerCase().includes(query) ||
-        p.analysis?.toLowerCase().includes(query) ||
-        p.legs.some(leg => leg.description?.toLowerCase().includes(query))
-      );
+      filtered = filtered.filter(p => {
+        const nameMatch = p.name?.toLowerCase().includes(query) || false;
+        const analysisMatch = p.analysis?.toLowerCase().includes(query) || false;
+        const legMatch = p.legs?.some(leg => 
+          leg.description?.toLowerCase().includes(query)
+        ) || false;
+        return nameMatch || analysisMatch || legMatch;
+      });
+      console.log(`🔍 Search filter ("${query}"): ${beforeSearch} → ${filtered.length}`);
+    }
+    
+    // ✅ NEW: Market type filter from File 1
+    if (marketType !== 'all') {
+      const beforeCount = filtered.length;
+      filtered = filtered.filter(p => {
+        const market = p.market_type || p.type;
+        return market === marketType || 
+               (marketType === 'player_props' && p.legs?.some(leg => leg.market === 'player_props')) ||
+               (marketType === 'game_totals' && p.legs?.some(leg => leg.market === 'totals')) ||
+               (marketType === 'moneyline' && p.legs?.some(leg => leg.market === 'h2h')) ||
+               (marketType === 'spreads' && p.legs?.some(leg => leg.market === 'spreads'));
+      });
+      console.log(`🎯 Market filter (${marketType}): ${beforeCount} → ${filtered.length}`);
+    }
+    
+    // ✅ NEW: Edge filter from File 1
+    const beforeEdge = filtered.length;
+    filtered = filtered.filter(p => {
+      const edge = p.ai_metrics?.edge || 0;
+      const expectedValue = p.expected_value || '+0%';
+      const edgePercent = edge > 0 ? edge * 100 : 
+                         parseFloat(expectedValue.replace('+', '').replace('%', '')) || 0;
+      return edgePercent >= minEdge;
+    });
+    console.log(`📈 Edge filter (>=${minEdge}%): ${beforeEdge} → ${filtered.length}`);
+    
+    // ✅ NEW: Risk level filter from File 1
+    if (maxRisk !== 'all') {
+      const beforeRisk = filtered.length;
+      const riskOrder = { 'low': 1, 'medium': 2, 'high': 3 };
+      const maxRiskValue = riskOrder[maxRisk as keyof typeof riskOrder] || 3;
+      
+      filtered = filtered.filter(p => {
+        const risk = p.risk_level || 'medium';
+        const riskValue = riskOrder[risk as keyof typeof riskOrder] || 2;
+        return riskValue <= maxRiskValue;
+      });
+      console.log(`⚠️ Risk filter (<=${maxRisk}): ${beforeRisk} → ${filtered.length}`);
+    }
+    
+    // ✅ NEW: Parlay size filter from File 1
+    if (parlaySize !== 'all') {
+      const beforeSize = filtered.length;
+      filtered = filtered.filter(p => {
+        const legsCount = p.legs?.length || 0;
+        if (parlaySize === '2') return legsCount === 2;
+        if (parlaySize === '3') return legsCount === 3;
+        if (parlaySize === '4') return legsCount === 4;
+        if (parlaySize === '5') return legsCount >= 5;
+        return true;
+      });
+      console.log(`🦵 Size filter (${parlaySize}): ${beforeSize} → ${filtered.length}`);
     }
     
     console.log(`✅ Filtered ${filtered.length} parlays from ${suggestions.length} total`);
-    setFilteredSuggestions(filtered);
-  }, [suggestions, selectedSport, selectedType, minConfidence, maxLegs, searchQuery, dateFilter]);
+    
+    // ✅ FIXED: TEMPORARY OVERRIDE - If all filtered out, show first suggestion
+    if (filtered.length === 0 && suggestions.length > 0) {
+      console.log('⚠️ TEMPORARY OVERRIDE: Showing first suggestion despite filters');
+      setFilteredSuggestions([suggestions[0]]);
+    } else {
+      setFilteredSuggestions(filtered);
+    }
+  }, [suggestions, selectedSport, marketType, selectedType, minConfidence, minEdge, maxRisk, parlaySize, maxLegs, searchQuery, dateFilter]);
 
   // ✅ FIXED: Debug Panel Component with memoization
   const DebugPanel = React.memo(() => {
@@ -490,10 +718,9 @@ const ParlayArchitectScreen = () => {
       };
       
       updateStats();
-      // Update every 15 seconds
       const interval = setInterval(updateStats, 15000);
       return () => clearInterval(interval);
-    }, [suggestions.length, filteredSuggestions.length, todaysGames.length, lastRefresh]); // Proper dependency array
+    }, [suggestions.length, filteredSuggestions.length, todaysGames.length, lastRefresh]);
     
     return (
       <Collapse in={showDebugPanel}>
@@ -692,7 +919,9 @@ const ParlayArchitectScreen = () => {
                           <Typography variant="body2" fontWeight="bold" color="primary">
                             {game.away_team || 'Away Team'}
                           </Typography>
-                          <Typography variant="body2" color="text.secondary">@</Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            @
+                          </Typography>
                           <Typography variant="body2" fontWeight="bold" color="primary">
                             {game.home_team || 'Home Team'}
                           </Typography>
@@ -718,6 +947,7 @@ const ParlayArchitectScreen = () => {
                               name: `${game.away_team} @ ${game.home_team}`,
                               sport: game.sport_title || 'Unknown',
                               type: 'Moneyline',
+                              market_type: 'moneyline',
                               legs: [{
                                 id: `leg-${Date.now()}`,
                                 gameId: game.id,
@@ -789,8 +1019,8 @@ const ParlayArchitectScreen = () => {
     }
   };
 
-  // Render loading state
-  if (parlayLoading && oddsLoading && suggestions.length === 0) {
+  // ✅ FIXED: Loading state - less restrictive
+  if (parlayLoading || oddsLoading) {
     return (
       <Container maxWidth="lg">
         <Box display="flex" justifyContent="center" alignItems="center" height="80vh" flexDirection="column">
@@ -958,6 +1188,178 @@ const ParlayArchitectScreen = () => {
         </Grid>
       </Paper>
 
+      {/* ✅ NEW: Enhanced Filter Section from File 1 */}
+      <Paper sx={{ p: 2, mb: 4, mt: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          🎯 Advanced Filters
+        </Typography>
+        <Grid container spacing={2}>
+          {/* Market Type Filter */}
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Market Type</InputLabel>
+              <Select
+                value={marketType}
+                onChange={(e) => setMarketType(e.target.value)}
+                label="Market Type"
+              >
+                {MARKET_TYPES.map((market) => (
+                  <MenuItem key={market.id} value={market.id}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <span>{market.icon}</span>
+                      {market.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          {/* Parlay Size Filter */}
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Parlay Size</InputLabel>
+              <Select
+                value={parlaySize}
+                onChange={(e) => setParlaySize(e.target.value)}
+                label="Parlay Size"
+              >
+                {PARLAY_SIZES.map((size) => (
+                  <MenuItem key={size.id} value={size.id}>
+                    {size.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          {/* Risk Level Filter */}
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Max Risk</InputLabel>
+              <Select
+                value={maxRisk}
+                onChange={(e) => setMaxRisk(e.target.value)}
+                label="Max Risk"
+              >
+                {RISK_LEVELS.map((risk) => (
+                  <MenuItem key={risk.id} value={risk.id}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Box 
+                        sx={{ 
+                          width: 10, 
+                          height: 10, 
+                          borderRadius: '50%', 
+                          bgcolor: risk.color || 'transparent' 
+                        }} 
+                      />
+                      {risk.name}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          {/* Edge Filter */}
+          <Grid item xs={12} sm={6} md={3}>
+            <Box sx={{ px: 1 }}>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Min Edge: {minEdge}%
+              </Typography>
+              <Slider
+                value={minEdge}
+                onChange={(_, value) => setMinEdge(value as number)}
+                min={0}
+                max={20}
+                step={1}
+                marks={[
+                  { value: 0, label: '0%' },
+                  { value: 10, label: '10%' },
+                  { value: 20, label: '20%' }
+                ]}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(value) => `${value}%`}
+              />
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* ✅ NEW: Quick Filter section from File 1 */}
+      <Paper sx={{ p: 2, mb: 4 }}>
+        <Typography variant="h6" gutterBottom>
+          ⚡ Quick Filters
+        </Typography>
+        <Box display="flex" flexWrap="wrap" gap={1}>
+          <Chip 
+            label="🎯 Player Props Only" 
+            onClick={() => {
+              setMarketType('player_props');
+              setMinEdge(8);
+              setMaxRisk('medium');
+            }}
+            color={marketType === 'player_props' ? "primary" : "default"}
+            variant="outlined"
+          />
+          <Chip 
+            label="💰 High Confidence (+80%)" 
+            onClick={() => {
+              setMinConfidence(80);
+              setMinEdge(10);
+              setMaxRisk('low');
+            }}
+            color={minConfidence === 80 ? "primary" : "default"}
+            variant="outlined"
+          />
+          <Chip 
+            label="🔄 Mixed Markets" 
+            onClick={() => {
+              setMarketType('mixed');
+              setParlaySize('3');
+              setMaxRisk('medium');
+            }}
+            color={marketType === 'mixed' ? "primary" : "default"}
+            variant="outlined"
+          />
+          <Chip 
+            label="📊 Game Totals" 
+            onClick={() => {
+              setMarketType('game_totals');
+              setMinEdge(5);
+              setParlaySize('2');
+            }}
+            color={marketType === 'game_totals' ? "primary" : "default"}
+            variant="outlined"
+          />
+          <Chip 
+            label="⚡ Quick Parlays (2-leg)" 
+            onClick={() => {
+              setParlaySize('2');
+              setMaxRisk('low');
+              setMinConfidence(70);
+            }}
+            color={parlaySize === '2' ? "primary" : "default"}
+            variant="outlined"
+          />
+          <Chip 
+            label="🔄 Clear Filters" 
+            onClick={() => {
+              setMarketType('all');
+              setMinConfidence(60);
+              setMinEdge(5);
+              setMaxRisk('all');
+              setParlaySize('all');
+              setSelectedSport('all');
+              setSelectedType('all');
+              setSearchQuery('');
+            }}
+            color="default"
+            variant="outlined"
+          />
+        </Box>
+      </Paper>
+
       {/* Today's Games Panel */}
       <TodaysGamesPanel />
 
@@ -994,19 +1396,48 @@ const ParlayArchitectScreen = () => {
                   }
                 }}>
                   <CardContent>
+{/* ✅ UPDATED: Enhanced parlay card display from File 1 */}
                     <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
                       <Box>
                         <Typography variant="h6">{parlay.name}</Typography>
                         <Typography variant="body2" color="text.secondary">
-                          {parlay.legs.length} legs • {parlay.type}
+                          {parlay.legs.length} legs • {parlay.type} • {parlay.market_type || 'General'}
                         </Typography>
                       </Box>
-                      <Chip 
-                        label={parlay.is_real_data ? 'Real Data' : 'Demo'} 
-                        size="small" 
-                        color={parlay.is_real_data ? "success" : "default"}
-                        variant="outlined"
-                      />
+                      <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
+                        {/* ✅ LIVE DATA badge */}
+                        {parlay.is_real_data && (
+                          <Chip 
+                            label="✅ LIVE DATA" 
+                            size="small" 
+                            sx={{ 
+                              bgcolor: '#10b981',
+                              color: 'white',
+                              fontSize: '0.6rem',
+                              height: 18,
+                              mb: 0.5
+                            }}
+                          />
+                        )}
+                        <Chip 
+                          label={parlay.is_real_data ? 'Real Data' : 'Demo'} 
+                          size="small" 
+                          color={parlay.is_real_data ? "success" : "default"}
+                          variant="outlined"
+                        />
+                        {parlay.market_type && parlay.market_type !== 'mixed' && (
+                          <Chip 
+                            label={parlay.market_type.replace('_', ' ')}
+                            size="small"
+                            sx={{ 
+                              bgcolor: '#f0f9ff',
+                              color: '#0369a1',
+                              fontSize: '0.65rem',
+                              height: 20
+                            }}
+                          />
+                        )}
+                      </Box>
                     </Box>
                     
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -1014,7 +1445,7 @@ const ParlayArchitectScreen = () => {
                     </Typography>
                     
                     <Box sx={{ mb: 2, mt: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: "center", mb: 0.5 }}>
                         <Typography variant="caption" color="text.secondary">
                           AI Confidence: {(parlay.confidence_level || 'medium').replace('-', ' ')}
                         </Typography>
@@ -1104,11 +1535,15 @@ const ParlayArchitectScreen = () => {
                       <TableRow key={index} hover>
                         <TableCell>{index + 1}</TableCell>
                         <TableCell>
+                          {/* ✅ UPDATED: Enhanced leg display from File 1 */}
                           <Typography variant="body2" fontWeight="medium">
                             {leg.description}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {leg.market} • {leg.sport}
+                            {leg.player_name && ` • ${leg.player_name}`}
+                            {leg.stat_type && ` • ${leg.stat_type}`}
+                            {leg.line && ` • Line: ${leg.line}`}
                           </Typography>
                         </TableCell>
                         <TableCell>
@@ -1154,7 +1589,7 @@ const ParlayArchitectScreen = () => {
                     </Box>
                   </Grid>
                   <Grid item xs={6}>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="text-secondary">
                       Expected Value
                     </Typography>
                     <Typography variant="h6" color={selectedParlay.expected_value?.startsWith('+') ? 'success.main' : 'error.main'}>
@@ -1184,6 +1619,41 @@ const ParlayArchitectScreen = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      
+      {/* Temporary debug button */}
+      <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000 }}>
+        <Button
+          variant="contained"
+          color="warning"
+          onClick={() => {
+            console.log('🧪 Current State:', {
+              parlayData,
+              suggestions,
+              filteredSuggestions,
+              todaysGames,
+              selectedSport,
+              dateFilter,
+              parlayLoading,
+              oddsLoading,
+              marketType,
+              minEdge,
+              maxRisk,
+              parlaySize
+            });
+            alert(`State:
+              Suggestions: ${suggestions.length}
+              Filtered: ${filteredSuggestions.length}
+              Games: ${todaysGames.length}
+              Loading: ${parlayLoading || oddsLoading ? 'Yes' : 'No'}
+            `);
+          }}
+        >
+          🐛 Debug State
+        </Button>
+      </Box>
+      
+      {/* ✅ Add this style tag for pulse animation */}
+      <style>{pulseAnimation}</style>
     </Container>
   );
 };

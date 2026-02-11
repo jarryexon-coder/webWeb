@@ -28,7 +28,7 @@ import NHLTrendsScreen from './pages/NHLTrendsScreen'
 
 // Lazy load larger/heavier pages
 const PrizePicksScreen = lazy(() => import('./pages/PrizePicksScreen'));
-const FantasyHubScreen = lazy(() => import('./pages/fantasyHubScreen'));
+const FantasyHubScreen = lazy(() => import('./pages/FantasyHubScreen'));
 const AdvancedAnalyticsScreen = lazy(() => import('./pages/AdvancedAnalyticsScreen'));
 const PlayerStatsScreen = lazy(() => import('./pages/PlayerStatsScreen'));
 const KalshiPredictionsScreen = lazy(() => import('./pages/KalshiPredictionsScreen'));
