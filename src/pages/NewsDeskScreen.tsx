@@ -76,7 +76,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 
 // Custom hooks
-import { useOddsGames } from '../hooks/useUnifiedAPI';
+import { useSportsWire } from '../hooks/useUnifiedAPI'; // ✅ Fixed import
 import { logEvent, logScreenView } from '../utils/analytics';
 
 interface UpdateItem {
@@ -150,7 +150,6 @@ const NewsDeskScreen = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   
-  // Use React Query hook with improved caching
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   
   const { 
@@ -160,7 +159,6 @@ const NewsDeskScreen = () => {
     refetch,
     isRefetching 
   } = useSportsWire(selectedSport, {
-    // Add query options to prevent excessive calls
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     staleTime: 300000, // 5 minutes
@@ -345,6 +343,25 @@ const NewsDeskScreen = () => {
     { value: 'NCAAB', label: 'NCAAB', icon: <SchoolIcon fontSize="small" /> },
   ];
 
+  // Memoize formatTimeAgo to avoid recreating it on every render
+  const formatTimeAgo = useCallback((date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) {
+      return `${diffDays}d ago`;
+    } else if (diffHours > 0) {
+      return `${diffHours}h ago`;
+    } else if (diffMins > 0) {
+      return `${diffMins}m ago`;
+    } else {
+      return 'Just now';
+    }
+  }, []);
+
   // Transform API news to UpdateItem format
   const transformApiNewsToUpdates = useCallback((apiNews: any[]): UpdateItem[] => {
     if (!apiNews || apiNews.length === 0) {
@@ -380,26 +397,7 @@ const NewsDeskScreen = () => {
         category: category
       };
     });
-  }, []);
-
-  // Helper function to format time ago
-  const formatTimeAgo = (date: Date): string => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) {
-      return `${diffDays}d ago`;
-    } else if (diffHours > 0) {
-      return `${diffHours}h ago`;
-    } else if (diffMins > 0) {
-      return `${diffMins}m ago`;
-    } else {
-      return 'Just now';
-    }
-  };
+  }, [formatTimeAgo]);
 
   // Fetch winning posts data
   const fetchWinningPosts = useCallback(() => {
@@ -431,21 +429,23 @@ const NewsDeskScreen = () => {
       setUpdates(transformedUpdates);
       setFilteredUpdates(transformedUpdates);
       
-      // Update read status for new updates
-      const updatedReadStatus = { ...readStatus };
-      transformedUpdates.forEach(update => {
-        if (!(update.id in updatedReadStatus)) {
-          updatedReadStatus[update.id] = false;
-        }
+      // Update read status for new updates (only once per new update)
+      setReadStatus(prev => {
+        const updated = { ...prev };
+        transformedUpdates.forEach(update => {
+          if (!(update.id in updated)) {
+            updated[update.id] = false;
+          }
+        });
+        return updated;
       });
-      setReadStatus(updatedReadStatus);
     } else {
       // Keep using mock articles if no API data
       console.log('Using mock articles as fallback');
       setUpdates(MOCK_ARTICLES);
       setFilteredUpdates(MOCK_ARTICLES);
     }
-  }, [newsFromApi, transformApiNewsToUpdates, readStatus]);
+  }, [newsFromApi, transformApiNewsToUpdates]); // ✅ Removed readStatus from deps to avoid loops
 
   // Filter updates based on search
   useEffect(() => {

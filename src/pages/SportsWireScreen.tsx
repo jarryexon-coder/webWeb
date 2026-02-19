@@ -1,5 +1,5 @@
 // src/pages/SportsWireScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -14,24 +14,27 @@ import {
   InputAdornment,
   Chip,
   LinearProgress,
-  Avatar,
   Paper,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   CircularProgress,
-  Divider,
   Badge,
   Tabs,
   Tab,
-  alpha,
   useTheme,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Alert
+  Alert,
+  Divider,
+  Avatar,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar
 } from '@mui/material';
 import {
   ArrowBack,
@@ -40,160 +43,151 @@ import {
   Analytics,
   Person,
   AccessTime,
-  Visibility,
   Share,
   BookmarkBorder,
   Bookmark,
-  ChatBubble,
   Newspaper,
-  MedicalServices,
-  People,
-  SwapHoriz,
-  School,
   SportsBasketball,
   SportsFootball,
   SportsBaseball,
   SportsHockey,
   ShowChart,
-  Business,
-  BarChart,
   Notifications,
   Close,
   AutoAwesome as SparklesIcon,
-  Remove,
-  TrendingDown,
-  Timer,
-  LocalFireDepartment,
   Bolt,
   Update as UpdateIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  MedicalServices,
+  LocalHospital,
+  Healing,
+  MonitorHeart,
+  Twitter,
+  Article,
+  Instagram,
+  Facebook,
+  Videocam,
+  Stadium,
+  CalendarToday,
+  Scoreboard,
+  EmojiEvents,
+  Groups as TeamIcon,
+  Search as SearchIcon,
+  Timeline,
+  Insights,
+  Sports,
+  FitnessCenter,
+  PersonAdd,
+  TrendingFlat,
+  Speed,
+  Warning,
+  CheckCircle,
+  Schedule
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
-// Import React Query hook - UPDATE THE PATH BASED ON YOUR STRUCTURE
-import { news } from '../hooks/useBackendAPI';
-import { 
-  news, 
-  useSportsWire,  // Add this
-  useOddsGames, 
-  usePlayerTrends, 
-  useAdvancedAnalytics 
-} from '../hooks/useUnifiedAPI';
+// ============= CONFIGURATION =============
+const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
+console.log('🎯 API Base URL:', API_BASE_URL);
 
-// Fix for __DEV__ error - define it if not defined
-declare global {
-  var __DEV__: boolean;
-}
-
-// Initialize __DEV__ if it doesn't exist
-if (typeof __DEV__ === 'undefined') {
-  globalThis.__DEV__ = process.env.NODE_ENV === 'development';
-}
-
-const SPORT_COLORS = {
+// ============= CONSTANTS =============
+const SPORT_COLORS: Record<string, string> = {
   NBA: '#ef4444',
   NFL: '#3b82f6',
   NHL: '#1e40af',
   MLB: '#10b981'
 };
 
-const CATEGORY_COLORS = {
-  'analytics': '#10b981',
-  'injuries': '#ef4444',
-  'trades': '#f59e0b',
-  'rosters': '#8b5cf6',
-  'draft': '#ec4899',
-  'free-agency': '#6366f1',
-  'advanced-stats': '#14b8a6',
-  'beat-writers': '#3b82f6',
+const CATEGORY_COLORS: Record<string, string> = {
   'injury': '#ef4444',
+  'injuries': '#ef4444',
   'performance': '#10b981',
+  'trades': '#f59e0b',
   'value': '#8b5cf6',
-  'preview': '#f59e0b',
-  'news': '#3b82f6'
+  'preview': '#3b82f6',
+  'beat-writers': '#8b5cf6',
+  'beatwriter': '#8b5cf6',
+  'team-news': '#3b82f6',
+  'game-preview': '#f59e0b',
+  'recap': '#6b7280',
+  'interview': '#ec4899',
+  'analysis': '#14b8a6',
+  'news': '#6b7280'
 };
 
-// MOCK_PLAYER_PROPS for fallback
-const MOCK_PLAYER_PROPS: PlayerProp[] = Array.from({ length: 12 }, (_, i) => {
-  const sports = ['NBA', 'NFL', 'MLB', 'NHL'];
-  const statTypes = ['Points', 'Rebounds', 'Assists', 'Yards', 'Touchdowns', 'Home Runs'];
-  const randomSport = sports[Math.floor(Math.random() * sports.length)];
-  const randomStat = statTypes[Math.floor(Math.random() * statTypes.length)];
-  
-  return {
-    id: i + 1,
-    playerName: `Player ${i + 1}`,
-    team: ['Lakers', 'Warriors', 'Chiefs', 'Yankees', 'Bruins'][Math.floor(Math.random() * 5)],
-    sport: randomSport,
-    propType: randomStat,
-    line: Math.random() > 0.5 ? 'Over ' + (Math.floor(Math.random() * 30) + 10) : 'Under ' + (Math.floor(Math.random() * 30) + 10),
-    odds: Math.random() > 0.5 ? '+150' : '-120',
-    impliedProbability: Math.floor(Math.random() * 40) + 50,
-    matchup: 'Home vs. Away',
-    time: `${Math.floor(Math.random() * 24)}h ago`,
-    confidence: Math.floor(Math.random() * 40) + 60,
-    isBookmarked: Math.random() > 0.5,
-    aiInsights: [
-      'Trending in the right direction',
-      'Matchup favors this prop',
-      'Historical performance strong'
-    ]
-  };
-});
+const INJURY_STATUS_COLORS: Record<string, string> = {
+  'out': '#ef4444',
+  'questionable': '#f59e0b',
+  'doubtful': '#f97316',
+  'day-to-day': '#3b82f6',
+  'probable': '#10b981',
+  'healthy': '#6b7280'
+};
 
-const MOCK_TRENDING_PROPS: TrendingProp[] = [
-  {
-    id: 1,
-    playerName: 'LeBron James',
-    team: 'Lakers',
-    sport: 'NBA',
-    propType: 'Points',
-    line: 'Over 25.5',
-    odds: '+110',
-    impliedProbability: 65,
-    matchup: 'LAL @ GSW',
-    time: '1h ago',
-    confidence: 85,
-    trending: true,
-    emoji: '🏀',
-    type: 'HOT'
-  },
-  {
-    id: 2,
-    playerName: 'Patrick Mahomes',
-    team: 'Chiefs',
-    sport: 'NFL',
-    propType: 'Passing Yards',
-    line: 'Over 285.5',
-    odds: '-130',
-    impliedProbability: 72,
-    matchup: 'KC @ BUF',
-    time: '2h ago',
-    confidence: 78,
-    trending: true,
-    emoji: '🏈',
-    type: 'VALUE'
-  },
-  {
-    id: 3,
-    playerName: 'Connor McDavid',
-    team: 'Oilers',
-    sport: 'NHL',
-    propType: 'Points',
-    line: 'Over 1.5',
-    odds: '+150',
-    impliedProbability: 58,
-    matchup: 'EDM @ COL',
-    time: '4h ago',
-    confidence: 82,
-    trending: true,
-    emoji: '🏒',
-    type: 'TRENDING'
-  }
+const BEAT_WRITER_SOURCES = [
+  'The Athletic',
+  'ESPN',
+  'Bleacher Report',
+  'The Ringer',
+  'Local Reporter',
+  'Team Reporter',
+  'Beat Writer',
+  'Insider',
+  'Shams Charania',
+  'Adrian Wojnarowski',
+  'Chris Haynes',
+  'Marc Stein',
+  'Brian Windhorst',
+  'Zach Lowe',
+  'Tim Bontemps',
+  'Ramona Shelburne',
+  'Dave McMenamin',
+  'Mike Vorkunov',
+  'James Edwards III',
+  'Tony Jones',
+  'Jake Fischer'
 ];
 
-// Define types for better TypeScript support
+// Static team lists for fallback
+const STATIC_TEAMS: Record<string, string[]> = {
+  nba: ['Lakers', 'Warriors', 'Celtics', 'Bulls', 'Heat', 'Bucks', 'Suns', 'Nuggets', 'Mavericks', '76ers'],
+  nfl: ['Chiefs', '49ers', 'Cowboys', 'Packers', 'Ravens', 'Bills', 'Eagles', 'Bengals'],
+  mlb: ['Yankees', 'Dodgers', 'Red Sox', 'Astros', 'Braves', 'Mets', 'Cardinals'],
+  nhl: ['Maple Leafs', 'Oilers', 'Avalanche', 'Bruins', 'Lightning', 'Golden Knights']
+};
+
+// ============= TYPES =============
+interface NewsArticle {
+  id: string | number;
+  title: string;
+  description: string;
+  content?: string;
+  source: { name: string } | string;
+  publishedAt: string;
+  url?: string;
+  urlToImage?: string;
+  category: string;
+  sport: string;
+  confidence?: number;
+  player?: string;
+  team?: string;
+  status?: string;
+  injuryStatus?: string;
+  expectedReturn?: string;
+  author?: string;
+  beatWriter?: boolean;
+  gameInfo?: {
+    homeTeam: string;
+    awayTeam: string;
+    homeScore?: number;
+    awayScore?: number;
+    status: string;
+    time: string;
+    venue?: string;
+  };
+}
+
 interface PlayerProp {
   id: string | number;
   playerName: string;
@@ -208,395 +202,955 @@ interface PlayerProp {
   confidence: number;
   isBookmarked: boolean;
   aiInsights?: string[];
-  category?: string;
+  category: string;
   url?: string;
   image?: string;
-  originalArticle?: any;
+  injuryStatus?: string;
+  expectedReturn?: string;
+  isBeatWriter?: boolean;
+  author?: string;
+  gameInfo?: NewsArticle['gameInfo'];
+  originalArticle: NewsArticle;
 }
 
-interface TrendingProp {
-  id: string | number;
-  playerName: string;
-  team: string;
-  sport: string;
-  propType: string;
-  line: string;
-  odds: string;
-  impliedProbability: number;
-  matchup: string;
-  time: string;
-  confidence: number;
-  trending: boolean;
-  emoji?: string;
-  type?: string;
-  aiInsights?: string[];
-}
+// ============= API CLIENT =============
+const apiClient = {
+  async get(endpoint: string) {
+    const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    console.log(`🌐 Fetching: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      mode: 'cors'
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    return response.json();
+  },
+  
+  async searchAllTeams(query: string, sport: string) {
+    return this.get(`/api/search/all-teams?q=${encodeURIComponent(query)}&sport=${sport.toLowerCase()}`);
+  },
+  
+  async getTeamNews(team: string, sport: string) {
+    return this.get(`/api/team/news?team=${encodeURIComponent(team)}&sport=${sport.toLowerCase()}`);
+  },
+  
+  async getInjuryDashboard(sport: string) {
+    return this.get(`/api/injuries/dashboard?sport=${sport.toLowerCase()}`);
+  },
+  
+  async getBeatWriterNews(sport: string, team?: string) {
+    let endpoint = `/api/beat-writer-news?sport=${sport.toLowerCase()}`;
+    if (team) {
+      endpoint += `&team=${encodeURIComponent(team)}`;
+    }
+    return this.get(endpoint);
+  },
+  
+  async getEnhancedSportsWire(sport: string, includeBeatWriters = true, includeInjuries = true) {
+    return this.get(`/api/sports-wire/enhanced?sport=${sport.toLowerCase()}&include_beat_writers=${includeBeatWriters}&include_injuries=${includeInjuries}`);
+  }
+};
 
-// Inside your component, replace fetch logic with:
+// ============= MOCK DATA GENERATOR =============
+const generateMockNews = (sport: string, count = 20): PlayerProp[] => {
+  const sportUpper = sport.toUpperCase();
+  const mockNews: PlayerProp[] = [];
+  const now = new Date();
+  
+  const players = {
+    nba: ['LeBron James', 'Stephen Curry', 'Giannis Antetokounmpo', 'Kevin Durant', 'Luka Dončić', 'Jayson Tatum', 'Joel Embiid', 'Nikola Jokić'],
+    nfl: ['Patrick Mahomes', 'Josh Allen', 'Justin Jefferson', 'Travis Kelce', 'Christian McCaffrey', 'Jalen Hurts', 'Tyreek Hill'],
+    mlb: ['Shohei Ohtani', 'Aaron Judge', 'Mookie Betts', 'Ronald Acuña Jr.', 'Mike Trout', 'Bryce Harper'],
+    nhl: ['Connor McDavid', 'Auston Matthews', 'Nathan MacKinnon', 'David Pastrňák', 'Leon Draisaitl', 'Cale Makar']
+  };
+  
+  const categories = ['news', 'injury', 'beat-writers', 'game-preview', 'analysis', 'performance'];
+  const injuries = ['out', 'questionable', 'day-to-day', 'probable'];
+  const teamsBySport: Record<string, string[]> = {
+    nba: ['LAL', 'GSW', 'MIL', 'PHX', 'DAL', 'BOS', 'PHI', 'DEN'],
+    nfl: ['KC', 'BUF', 'SF', 'DAL', 'BAL', 'CIN'],
+    mlb: ['NYY', 'LAD', 'HOU', 'ATL', 'BOS'],
+    nhl: ['TOR', 'EDM', 'COL', 'BOS', 'TBL']
+  };
+  
+  const sportPlayers = players[sport as keyof typeof players] || [`${sportUpper} Player`];
+  const sportTeams = teamsBySport[sport as keyof typeof teamsBySport] || ['TEAM'];
+  
+  for (let i = 0; i < count; i++) {
+    const player = sportPlayers[Math.floor(Math.random() * sportPlayers.length)];
+    const team = sportTeams[Math.floor(Math.random() * sportTeams.length)];
+    const category = categories[Math.floor(Math.random() * categories.length)];
+    const isBeatWriter = category === 'beat-writers' || Math.random() > 0.7;
+    const isInjury = category === 'injury' || (Math.random() > 0.8 && !isBeatWriter);
+    
+    let title = '';
+    let description = '';
+    let injuryStatus = undefined;
+    let expectedReturn = undefined;
+    
+    if (isInjury) {
+      const status = injuries[Math.floor(Math.random() * injuries.length)];
+      injuryStatus = status;
+      if (status === 'out') expectedReturn = '2-3 weeks';
+      else if (status === 'day-to-day') expectedReturn = 'day-to-day';
+      else if (status === 'questionable') expectedReturn = 'game-time decision';
+      title = `${player} Injury Update: ${status.toUpperCase()}`;
+      description = `${player} is ${status} with a minor injury. ${
+        status === 'out' ? 'Expected to miss several games.' : 
+        status === 'day-to-day' ? 'Will be evaluated before next game.' :
+        'Game-time decision.'
+      }`;
+    } else if (isBeatWriter) {
+      const sources = BEAT_WRITER_SOURCES;
+      const source = sources[Math.floor(Math.random() * sources.length)];
+      title = `${player} - Exclusive: ${source} reports on team dynamics`;
+      description = `According to ${source}, ${player} is expected to have a breakout performance this week.`;
+    } else {
+      const verbs = ['shines', 'struggles', 'dominates', 'sits out', 'prepares for', 'talks about'];
+      const verb = verbs[Math.floor(Math.random() * verbs.length)];
+      title = `${player} ${verb} in latest ${sportUpper} action`;
+      description = `${player} of the ${team} had a noteworthy performance. Fans are excited.`;
+    }
+    
+    const timeAgo = Math.floor(Math.random() * 120); // minutes ago
+    const publishedAt = new Date(now.getTime() - timeAgo * 60000).toISOString();
+    let timeDisplay = '';
+    try {
+      timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
+    } catch {
+      timeDisplay = 'Recently';
+    }
+    
+    mockNews.push({
+      id: `mock-${sport}-${i}-${Date.now()}`,
+      playerName: player,
+      team,
+      sport: sportUpper,
+      propType: isInjury ? 'Injury Update' : isBeatWriter ? 'Beat Writer' : 'News',
+      line: title,
+      odds: '+100',
+      impliedProbability: 65,
+      matchup: description,
+      time: timeDisplay,
+      confidence: isInjury ? 85 : isBeatWriter ? 88 : 75,
+      isBookmarked: false,
+      category: isInjury ? 'injury' : isBeatWriter ? 'beat-writers' : 'news',
+      url: '#',
+      image: `https://picsum.photos/400/300?random=${i}&sport=${sport}`,
+      injuryStatus,
+      expectedReturn,
+      isBeatWriter,
+      author: isBeatWriter ? BEAT_WRITER_SOURCES[Math.floor(Math.random() * BEAT_WRITER_SOURCES.length)] : undefined,
+      originalArticle: {
+        id: `mock-article-${i}`,
+        title,
+        description,
+        source: { name: isBeatWriter ? BEAT_WRITER_SOURCES[Math.floor(Math.random() * BEAT_WRITER_SOURCES.length)] : 'Sports Wire' },
+        publishedAt,
+        category: isInjury ? 'injury' : isBeatWriter ? 'beat-writers' : 'news',
+        sport: sportUpper,
+        player,
+        team
+      }
+    });
+  }
+  
+  return mockNews.sort((a, b) => new Date(b.originalArticle.publishedAt).getTime() - new Date(a.originalArticle.publishedAt).getTime());
+};
+
+// ============= MAIN COMPONENT =============
 const SportsWireScreen = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   
-  // State for sport selection
-  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
-  
-  // Use React Query hook
-  const { 
-    data: hookData, 
-    isLoading, 
-    error, 
-    refetch,
-    isRefetching 
-  } = useSportsWire(selectedSport);
-  
-  // Extract news data from hook response
-  const newsData = hookData?.news || [];
-  const newsCount = Array.isArray(newsData) ? newsData.length : 0;
-  
+  // State
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [trendingFilter, setTrendingFilter] = useState('all');
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
-  const [bookmarked, setBookmarked] = useState<number[]>([]);
+  const [showInjuryModal, setShowInjuryModal] = useState(false);
+  const [showInjuryDashboardModal, setShowInjuryDashboardModal] = useState(false);
+  const [showBeatWritersModal, setShowBeatWritersModal] = useState(false);
+  const [showTeamNewsModal, setShowTeamNewsModal] = useState(false);
+  const [showSearchResultsModal, setShowSearchResultsModal] = useState(false);
+  const [bookmarked, setBookmarked] = useState<(string | number)[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [trendingProps, setTrendingProps] = useState<TrendingProp[]>(MOCK_TRENDING_PROPS);
-  const [processedPlayerProps, setProcessedPlayerProps] = useState<PlayerProp[]>([]);
+  const [processedNews, setProcessedNews] = useState<PlayerProp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [injuryNews, setInjuryNews] = useState<PlayerProp[]>([]);
+  const [beatWriterNews, setBeatWriterNews] = useState<PlayerProp[]>([]);
+  const [teams, setTeams] = useState<string[]>([]);
+  const [selectedTeam, setSelectedTeam] = useState<string>('');
+  const [teamNews, setTeamNews] = useState<PlayerProp[]>([]);
+  const [injuryDashboard, setInjuryDashboard] = useState<any>(null);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   
-  // Transform news data to player props format for compatibility with existing UI
-  useEffect(() => {
-    if (newsData && Array.isArray(newsData) && newsData.length > 0) {
-      const transformedProps = newsData.map((article: any, index: number) => {
-        // Extract data from the actual news article structure
-        const title = article.title || 'Sports News';
-        const description = article.description || article.summary || '';
-        const source = article.source?.name || article.source || 'Sports Wire';
-        const publishedAt = article.publishedAt || article.timestamp || new Date().toISOString();
-        const category = article.category || 'news';
-        const url = article.url || `#${index}`;
-        const image = article.urlToImage || article.image || `https://picsum.photos/400/300?random=${index}&sport=${selectedSport}`;
-        const playerName = article.player || source;
-        const team = article.team || source;
-        
-        // Create confidence based on article data
-        let confidence = 75;
-        if (article.confidence) confidence = article.confidence;
-        if (article.category === 'injury') confidence = 85;
-        if (article.valueScore > 90) confidence = 90;
-        
-        return {
-          id: article.id || `news-${index}`,
-          playerName: playerName,
-          team: team,
-          sport: article.sport || selectedSport.toUpperCase(),
-          propType: 'News',
-          line: title.substring(0, 60) + (title.length > 60 ? '...' : ''),
-          odds: '+100',
-          impliedProbability: 65,
-          matchup: description.substring(0, 80) + (description.length > 80 ? '...' : ''),
-          time: publishedAt ? format(new Date(publishedAt), 'MMM d, h:mm a') : 'Just now',
-          confidence: confidence,
-          isBookmarked: false,
-          aiInsights: [description.substring(0, 120) + (description.length > 120 ? '...' : '')],
-          category: category,
-          url: url,
-          image: image,
-          originalArticle: article // Keep original data
-        };
-      });
-      
-      setProcessedPlayerProps(transformedProps);
-    } else {
-      // Fallback to mock data only if there's no real data
-      console.log('No news data available, using mock data');
-      setProcessedPlayerProps(MOCK_PLAYER_PROPS);
-    }
-  }, [newsData, selectedSport]);
-  
-  // Filter props based on category and search
-  const filteredProps = React.useMemo(() => {
-    if (!processedPlayerProps || processedPlayerProps.length === 0) {
-      return [];
-    }
+  // Refs
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout>();
 
-    let filtered = [...processedPlayerProps];
+  // ============= FETCH TEAMS =============
+  useEffect(() => {
+    const fetchTeams = async () => {
+      try {
+        // Use lowercase sport for API call
+        const response = await apiClient.get(`/api/beat-writers?sport=${selectedSport.toLowerCase()}`);
+        if (response.success) {
+          setTeams(Object.keys(response.beat_writers || {}));
+        } else {
+          // If API returns success false, fallback to static teams
+          setTeams(STATIC_TEAMS[selectedSport] || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch teams, using static list:', error);
+        // Fallback to static teams
+        setTeams(STATIC_TEAMS[selectedSport] || []);
+      }
+    };
     
-    // Filter by category
+    fetchTeams();
+  }, [selectedSport]);
+
+  // ============= FETCH NEWS =============
+  const fetchNews = useCallback(async (sport: string = selectedSport) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // First try enhanced endpoint
+      const data = await apiClient.getEnhancedSportsWire(sport, true, true);
+      console.log(`📥 Received ${data.news?.length || 0} enhanced news items`);
+      console.log('📊 Breakdown:', data.breakdown);
+      
+      if (data.success && data.news) {
+        const transformed = transformNewsToProps(data.news, sport);
+        setProcessedNews(transformed);
+        
+        const injuries = transformed.filter(item => 
+          (item.category?.toLowerCase().includes('injury') || 
+           item.category?.toLowerCase() === 'injuries' ||
+           item.injuryStatus) && 
+          !item.isBeatWriter
+        );
+        setInjuryNews(injuries);
+        
+        const beatWriters = transformed.filter(item => 
+          item.isBeatWriter || 
+          item.category?.toLowerCase().includes('beat')
+        );
+        setBeatWriterNews(beatWriters);
+        
+        console.log(`🏥 Found ${injuries.length} injury updates`);
+        console.log(`✍️ Found ${beatWriters.length} beat writer updates`);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch enhanced news, trying fallback:', err);
+    }
+    
+    // Fallback to basic sports-wire
+    try {
+      const fallbackData = await apiClient.get(`/api/sports-wire?sport=${sport.toLowerCase()}`);
+      if (fallbackData.success && fallbackData.news) {
+        const transformed = transformNewsToProps(fallbackData.news, sport);
+        setProcessedNews(transformed);
+        
+        const injuries = transformed.filter(item => 
+          (item.category?.toLowerCase().includes('injury') || 
+           item.category?.toLowerCase() === 'injuries' ||
+           item.injuryStatus) && 
+          !item.isBeatWriter
+        );
+        setInjuryNews(injuries);
+        
+        const beatWriters = transformed.filter(item => 
+          item.isBeatWriter || 
+          item.category?.toLowerCase().includes('beat')
+        );
+        setBeatWriterNews(beatWriters);
+        
+        console.log(`🏥 Found ${injuries.length} injury updates (fallback)`);
+        console.log(`✍️ Found ${beatWriters.length} beat writer updates (fallback)`);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+    } catch (fallbackErr) {
+      console.error('❌ Fallback also failed, using mock data:', fallbackErr);
+    }
+    
+    // Ultimate fallback: generate mock news
+    console.log('⚠️ Using mock news data');
+    const mockNews = generateMockNews(sport, 25);
+    setProcessedNews(mockNews);
+    
+    const injuries = mockNews.filter(item => 
+      item.category === 'injury' || item.injuryStatus
+    );
+    setInjuryNews(injuries);
+    
+    const beatWriters = mockNews.filter(item => 
+      item.isBeatWriter || item.category === 'beat-writers'
+    );
+    setBeatWriterNews(beatWriters);
+    
+    setLoading(false);
+    setRefreshing(false);
+  }, [selectedSport]);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchNews();
+  }, [fetchNews]);
+
+  // ============= FETCH TEAM NEWS =============
+  const fetchTeamNews = async (team: string) => {
+    try {
+      const data = await apiClient.getTeamNews(team, selectedSport);
+      if (data.success && data.news) {
+        const transformed = transformNewsToProps(data.news, selectedSport);
+        setTeamNews(transformed);
+      } else {
+        // Fallback: filter mock news by team
+        const filtered = processedNews.filter(item => 
+          item.team?.toLowerCase() === team.toLowerCase()
+        );
+        setTeamNews(filtered.length ? filtered : generateMockNews(selectedSport, 5).map(n => ({...n, team})));
+      }
+      setShowTeamNewsModal(true);
+    } catch (error) {
+      console.error('Failed to fetch team news, using filtered mock:', error);
+      // Fallback: filter mock news by team
+      const filtered = processedNews.filter(item => 
+        item.team?.toLowerCase() === team.toLowerCase()
+      );
+      setTeamNews(filtered.length ? filtered : generateMockNews(selectedSport, 5).map(n => ({...n, team})));
+      setShowTeamNewsModal(true);
+    }
+  };
+
+  // ============= FETCH INJURY DASHBOARD =============
+  const fetchInjuryDashboard = async () => {
+    try {
+      const data = await apiClient.getInjuryDashboard(selectedSport);
+      if (data.success) {
+        setInjuryDashboard(data);
+      } else {
+        // Create mock dashboard
+        const mockInjuries = injuryNews.map(item => ({
+          player: item.playerName,
+          team: item.team,
+          status: item.injuryStatus || 'unknown',
+          injury: item.line,
+          expected_return: item.expectedReturn || 'TBD'
+        }));
+        setInjuryDashboard({
+          total_injuries: mockInjuries.length,
+          severity_breakdown: {
+            severe: mockInjuries.filter(i => i.status === 'out').length,
+            moderate: mockInjuries.filter(i => i.status === 'questionable' || i.status === 'doubtful').length,
+            mild: mockInjuries.filter(i => i.status === 'day-to-day' || i.status === 'probable').length
+          },
+          status_breakdown: {
+            out: mockInjuries.filter(i => i.status === 'out').length,
+            questionable: mockInjuries.filter(i => i.status === 'questionable').length,
+            doubtful: mockInjuries.filter(i => i.status === 'doubtful').length,
+            day_to_day: mockInjuries.filter(i => i.status === 'day-to-day').length,
+            probable: mockInjuries.filter(i => i.status === 'probable').length
+          },
+          top_injured_teams: Object.entries(
+            mockInjuries.reduce((acc: Record<string, number>, i) => {
+              acc[i.team] = (acc[i.team] || 0) + 1;
+              return acc;
+            }, {})
+          ).sort((a, b) => b[1] - a[1]).slice(0, 5),
+          injury_type_breakdown: {
+            'Knee': 3,
+            'Ankle': 2,
+            'Hamstring': 2,
+            'Back': 1,
+            'Shoulder': 1
+          },
+          injuries: mockInjuries.slice(0, 10)
+        });
+      }
+      setShowInjuryDashboardModal(true);
+    } catch (error) {
+      console.error('Failed to fetch injury dashboard, using mock:', error);
+      // Create mock dashboard from injuryNews
+      const mockInjuries = injuryNews.map(item => ({
+        player: item.playerName,
+        team: item.team,
+        status: item.injuryStatus || 'unknown',
+        injury: item.line,
+        expected_return: item.expectedReturn || 'TBD'
+      }));
+      setInjuryDashboard({
+        total_injuries: mockInjuries.length,
+        severity_breakdown: {
+          severe: mockInjuries.filter(i => i.status === 'out').length,
+          moderate: mockInjuries.filter(i => i.status === 'questionable' || i.status === 'doubtful').length,
+          mild: mockInjuries.filter(i => i.status === 'day-to-day' || i.status === 'probable').length
+        },
+        status_breakdown: {
+          out: mockInjuries.filter(i => i.status === 'out').length,
+          questionable: mockInjuries.filter(i => i.status === 'questionable').length,
+          doubtful: mockInjuries.filter(i => i.status === 'doubtful').length,
+          day_to_day: mockInjuries.filter(i => i.status === 'day-to-day').length,
+          probable: mockInjuries.filter(i => i.status === 'probable').length
+        },
+        top_injured_teams: Object.entries(
+          mockInjuries.reduce((acc: Record<string, number>, i) => {
+            acc[i.team] = (acc[i.team] || 0) + 1;
+            return acc;
+          }, {})
+        ).sort((a, b) => b[1] - a[1]).slice(0, 5),
+        injury_type_breakdown: {
+          'Knee': 3,
+          'Ankle': 2,
+          'Hamstring': 2,
+          'Back': 1,
+          'Shoulder': 1
+        },
+        injuries: mockInjuries.slice(0, 10)
+      });
+      setShowInjuryDashboardModal(true);
+    }
+  };
+
+  // ============= TRANSFORM NEWS =============
+  const transformNewsToProps = (news: NewsArticle[], sport: string): PlayerProp[] => {
+    return news.map((article, index) => {
+      const title = article.title || 'Sports News';
+      const description = article.description || article.content || '';
+      const sourceName = typeof article.source === 'string' ? article.source : article.source?.name || 'Sports Wire';
+      const publishedAt = article.publishedAt || new Date().toISOString();
+      let category = article.category || 'news';
+      const url = article.url || '#';
+      const image = article.urlToImage || `https://picsum.photos/400/300?random=${index}&sport=${sport}`;
+      
+      const isBeatWriter = 
+        article.beatWriter === true ||
+        BEAT_WRITER_SOURCES.some(source => 
+          sourceName.includes(source) || 
+          title.includes(source) ||
+          description.includes(source)
+        ) ||
+        title.toLowerCase().includes('beat writer') ||
+        title.toLowerCase().includes('insider') ||
+        title.toLowerCase().includes('sources say') ||
+        title.toLowerCase().includes('report:') ||
+        category === 'beat-writers' ||
+        category === 'beatwriter';
+      
+      let playerName = article.player || '';
+      let injuryStatus = article.injuryStatus || article.status || '';
+      let expectedReturn = article.expectedReturn || '';
+      
+      if (!playerName && (category === 'injury' || title.toLowerCase().includes('injury'))) {
+        const nameMatch = title.match(/([A-Z][a-z]+ [A-Z][a-z]+) (injured|out|questionable|update)/);
+        if (nameMatch) playerName = nameMatch[1];
+      }
+      
+      if (!injuryStatus && (category === 'injury' || title.toLowerCase().includes('injury'))) {
+        const statusMatch = (title + ' ' + description).match(/\b(out|questionable|doubtful|day-to-day|probable|healthy)\b/i);
+        if (statusMatch) {
+          injuryStatus = statusMatch[1].toLowerCase();
+        }
+      }
+      
+      if (isBeatWriter && category === 'news') {
+        category = 'beat-writers';
+      }
+      
+      let confidence = article.confidence || 75;
+      if (category === 'injury' || category === 'injuries') confidence = 85;
+      if (injuryStatus === 'out') confidence = 90;
+      if (injuryStatus === 'questionable') confidence = 80;
+      if (isBeatWriter) confidence = 88;
+      
+      let timeDisplay = '';
+      try {
+        timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
+      } catch {
+        timeDisplay = 'Recently';
+      }
+      
+      return {
+        id: article.id || `news-${index}-${Date.now()}`,
+        playerName: playerName || (isBeatWriter ? sourceName : extractDefaultName(title, index)),
+        team: article.team || extractTeam(title) || '',
+        sport: article.sport || sport.toUpperCase(),
+        propType: category === 'injury' ? 'Injury Update' : 
+                 isBeatWriter ? 'Beat Writer' : 
+                 category === 'game-preview' ? 'Game Preview' : 'News',
+        line: title,
+        odds: '+100',
+        impliedProbability: 65,
+        matchup: description,
+        time: timeDisplay,
+        confidence,
+        isBookmarked: false,
+        aiInsights: description ? [description.substring(0, 200)] : undefined,
+        category,
+        url,
+        image,
+        injuryStatus: category === 'injury' ? injuryStatus : undefined,
+        expectedReturn,
+        isBeatWriter,
+        author: article.author || (isBeatWriter ? sourceName : undefined),
+        gameInfo: article.gameInfo,
+        originalArticle: article
+      };
+    });
+  };
+
+  // Helper functions
+  const extractDefaultName = (title: string, index: number): string => {
+    const nameMatch = title.match(/([A-Z][a-z]+ [A-Z][a-z]+)/);
+    return nameMatch ? nameMatch[1] : `News Update ${index + 1}`;
+  };
+
+  const extractTeam = (title: string): string | null => {
+    const teams = ['Lakers', 'Warriors', 'Celtics', 'Bulls', 'Heat', 'Bucks', 'Suns', 'Nuggets', 
+                   'Chiefs', '49ers', 'Cowboys', 'Packers', 'Yankees', 'Dodgers', 'Red Sox'];
+    for (const team of teams) {
+      if (title.includes(team)) return team;
+    }
+    return null;
+  };
+
+  // ============= SEARCH HANDLER =============
+  const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    if (value.trim().length > 2) {
+      setIsSearching(true);
+      searchTimeoutRef.current = setTimeout(async () => {
+        try {
+          const results = await apiClient.searchAllTeams(value, selectedSport);
+          setSearchResults(results.results || []);
+          
+          if (results.count > 0) {
+            setShowSearchResultsModal(true);
+          }
+          
+          console.log(`🔍 Found ${results.count} results for "${value}"`);
+        } catch (error) {
+          console.error('Search failed, using filtered news:', error);
+          // Fallback: filter processedNews
+          const filtered = processedNews.filter(item => 
+            item.playerName.toLowerCase().includes(value.toLowerCase()) ||
+            item.team?.toLowerCase().includes(value.toLowerCase())
+          ).slice(0, 10);
+          setSearchResults(filtered.map(item => ({
+            type: 'player',
+            player: item.playerName,
+            team: item.team,
+            sport: item.sport
+          })));
+          if (filtered.length > 0) {
+            setShowSearchResultsModal(true);
+          }
+        } finally {
+          setIsSearching(false);
+        }
+      }, 500);
+    } else {
+      setSearchResults([]);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    if (searchInputRef.current) {
+      searchInputRef.current.value = '';
+    }
+  };
+
+  // ============= FILTERED NEWS =============
+  const filteredNews = useMemo(() => {
+    if (!processedNews.length) return [];
+
+    let filtered = [...processedNews];
+    
     if (selectedCategory !== 'all') {
-      if (selectedCategory === 'value') {
-        filtered = filtered.filter(prop => prop.confidence > 75);
+      if (selectedCategory === 'injuries' || selectedCategory === 'injury') {
+        filtered = filtered.filter(item => 
+          (item.category?.toLowerCase().includes('injury') || 
+           item.category === 'injuries' ||
+           item.injuryStatus) &&
+          !item.isBeatWriter
+        );
+      } else if (selectedCategory === 'beat-writers' || selectedCategory === 'beatwriter') {
+        filtered = filtered.filter(item => item.isBeatWriter === true);
+      } else if (selectedCategory === 'value') {
+        filtered = filtered.filter(item => item.confidence > 75);
       } else if (selectedCategory === 'high-confidence') {
-        filtered = filtered.filter(prop => prop.confidence > 80);
+        filtered = filtered.filter(item => item.confidence > 80);
       } else if (selectedCategory === 'live') {
-        // For live news, filter by recent time
-        filtered = filtered.filter(prop => 
-          prop.time.includes('min') || prop.time.includes('Just now') || prop.time.includes('1h')
+        filtered = filtered.filter(item => 
+          item.time.includes('minute') || 
+          item.time.includes('hour') ||
+          item.time.includes('Just now')
         );
       } else {
-        filtered = filtered.filter(prop => prop.sport === selectedCategory);
+        // Filter by sport (NBA, NFL, etc.)
+        filtered = filtered.filter(item => item.sport === selectedCategory);
       }
     }
     
-    // Filter by search query
     if (searchQuery.trim()) {
-      const searchQueryLower = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(prop => 
-        prop.playerName.toLowerCase().includes(searchQueryLower) ||
-        prop.team.toLowerCase().includes(searchQueryLower) ||
-        prop.line.toLowerCase().includes(searchQueryLower) ||
-        (prop.originalArticle?.description?.toLowerCase() || '').includes(searchQueryLower)
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(item => 
+        item.playerName.toLowerCase().includes(query) ||
+        item.team.toLowerCase().includes(query) ||
+        item.line.toLowerCase().includes(query) ||
+        item.matchup.toLowerCase().includes(query) ||
+        item.author?.toLowerCase().includes(query) ||
+        item.category?.toLowerCase().includes(query)
       );
     }
     
     return filtered;
-  }, [processedPlayerProps, selectedCategory, searchQuery]);
+  }, [processedNews, selectedCategory, searchQuery]);
 
-  const categories = [
-    { id: 'all', name: 'All Sports', icon: <LocalFireDepartment />, color: '#ef4444' },
-    { id: 'NBA', name: 'NBA', icon: <SportsBasketball />, color: '#ef4444' },
-    { id: 'NFL', name: 'NFL', icon: <SportsFootball />, color: '#3b82f6' },
-    { id: 'MLB', name: 'MLB', icon: <SportsBaseball />, color: '#10b981' },
-    { id: 'value', name: 'High Value', icon: <ShowChart />, color: '#10b981' },
-    { id: 'high-confidence', name: 'High Confidence', icon: <SparklesIcon />, color: '#8b5cf6' },
-    { id: 'live', name: 'Recent', icon: <Bolt />, color: '#f59e0b' }
-  ];  
-  
-  const trendingFilters = [
-    { id: 'all', name: 'All' },
-    { id: 'NBA', name: 'NBA' },
-    { id: 'NFL', name: 'NFL' },
-    { id: 'MLB', name: 'MLB' },
-    { id: 'high-confidence', name: 'High Confidence' },
-  ];
-
-  const [analyticsMetrics] = useState({
-    totalProps: newsCount || 0,
-    trendingScore: 78,
-    hitRate: 65,
-    avgConfidence: 68,
-    valueScore: 72,
-    hotSports: [
-      { sport: 'NBA', count: 42 },
-      { sport: 'NFL', count: 28 },
-      { sport: 'MLB', count: 19 }
-    ]
-  });
-
+  // ============= EVENT HANDLERS =============
   const handleSportChange = (event: any) => {
     setSelectedSport(event.target.value);
+    setSearchQuery('');
+    setSelectedTeam('');
+    if (searchInputRef.current) {
+      searchInputRef.current.value = '';
+    }
+    fetchNews(event.target.value);
   };
 
   const handleRefresh = () => {
-    refetch();
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    fetchNews();
   };
 
-  const getOddsColor = (odds: string) => {
-    if (!odds || typeof odds !== 'string') {
-      return '#6b7280';
-    }
+  const handleBookmark = (id: string | number) => {
+    setBookmarked(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(item => item !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
+  };
+
+  const handleShare = (prop: PlayerProp) => {
+    const shareText = `${prop.playerName}: ${prop.line}`;
     
-    if (odds.startsWith('+')) return '#10b981';
-    if (odds.startsWith('-')) return '#ef4444';
-    return '#6b7280';
+    if (navigator.share) {
+      navigator.share({
+        title: prop.playerName,
+        text: shareText,
+        url: prop.url || window.location.href,
+      }).catch(() => {
+        navigator.clipboard.writeText(shareText);
+      });
+    } else {
+      navigator.clipboard.writeText(shareText);
+    }
   };
 
+  // ============= UI HELPER FUNCTIONS =============
   const getConfidenceColor = (confidence: number) => {
     if (confidence >= 80) return '#10b981';
     if (confidence >= 60) return '#f59e0b';
     return '#ef4444';
   };
 
-  const getEmoji = (sport: string): string => {
-    const emojiMap: Record<string, string> = {
-      'NBA': '🏀',
-      'NFL': '🏈',
-      'MLB': '⚾',
-      'NHL': '🏒',
-      'SOCCER': '⚽',
-      'TENNIS': '🎾'
+  const getInjuryStatusColor = (status: string = '') => {
+    status = status.toLowerCase();
+    return INJURY_STATUS_COLORS[status] || '#ef4444';
+  };
+
+  const getInjuryStatusLabel = (status: string = '') => {
+    status = status.toLowerCase();
+    const labels: Record<string, string> = {
+      'out': '❌ OUT',
+      'questionable': '⚠️ QUESTIONABLE',
+      'doubtful': '⚠️ DOUBTFUL',
+      'day-to-day': '📅 DAY-TO-DAY',
+      'probable': '✅ PROBABLE',
+      'healthy': '💪 HEALTHY'
     };
-    
-    return emojiMap[sport] || '📰';
+    return labels[status] || '🏥 INJURY';
   };
 
-  const handleBookmark = (propId: string | number) => {
-    const numId = typeof propId === 'string' ? parseInt(propId) : propId;
-    
-    if (bookmarked.includes(numId)) {
-      setBookmarked(bookmarked.filter(id => id !== numId));
-    } else {
-      setBookmarked([...bookmarked, numId]);
-    }
-  };
-
-  const handleShare = (prop: PlayerProp) => {
-    if (navigator.share) {
-      navigator.share({
-        title: `${prop.playerName} - ${prop.line}`,
-        text: `${prop.playerName}: ${prop.line} - ${prop.matchup}`,
-        url: prop.url || window.location.href,
-      }).catch((err) => {
-        navigator.clipboard.writeText(`${prop.playerName}: ${prop.line} - ${prop.matchup}`)
-          .then(() => {
-            alert('News copied to clipboard!');
-          })
-          .catch(() => {
-            alert('News information available for sharing');
-          });
-      });
-    } else {
-      navigator.clipboard.writeText(`${prop.playerName}: ${prop.line} - ${prop.matchup}`)
-        .then(() => {
-          alert('News copied to clipboard!');
-        })
-        .catch(() => {
-          alert('News information available for sharing');
-        });
-    }
-  };
-
-  const renderTrendingCard = (prop: TrendingProp) => {
-    const oddsColor = getOddsColor(prop.odds);
-    const confidenceColor = getConfidenceColor(prop.confidence);
-    const sportColor = (SPORT_COLORS as Record<string, string>)[prop.sport] || theme.palette.primary.main;
-    
+  // ============= RENDER FUNCTIONS =============
+  const renderBeatWriterCard = (prop: PlayerProp) => {
     return (
-      <Card key={prop.id} sx={{ 
-        width: 300, 
-        mr: 2, 
-        mb: 2,
-        display: 'inline-flex',
-        flexDirection: 'column'
-      }}>
-        <Box sx={{ 
-          position: 'relative',
-          height: 120,
-          bgcolor: sportColor,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <Typography variant="h2" sx={{ fontSize: 48 }}>
-            {prop.emoji || getEmoji(prop.sport)}
-          </Typography>
-          {prop.type && (
-            <Chip 
-              label={prop.type}
-              size="small"
-              sx={{ 
-                position: 'absolute',
-                top: 10,
-                right: 10,
-                bgcolor: 'rgba(0,0,0,0.7)',
-                color: 'white',
-                fontSize: '0.7rem'
-              }}
-            />
-          )}
-          <Chip 
-              label={`${prop.confidence}%`}
-              size="small"
-              sx={{ 
-                position: 'absolute',
-                top: 10,
-                left: 10,
-                bgcolor: confidenceColor,
-                color: 'white',
-                fontSize: '0.6rem'
-              }}
-            />
-        </Box>
-        
+      <Card 
+        key={prop.id} 
+        sx={{ 
+          mb: 2,
+          borderLeft: '6px solid #8b5cf6',
+          bgcolor: '#f5f3ff',
+          '&:hover': { bgcolor: '#ede9fe' }
+        }}
+      >
         <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
-            <Person sx={{ fontSize: 12, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              {prop.playerName}
-            </Typography>
-            <Chip 
-              label={prop.sport}
-              size="small"
-              sx={{ 
-                height: 20,
-                fontSize: '0.6rem',
-                bgcolor: `${sportColor}20`,
-                color: sportColor
-              }}
-            />
-          </Box>
-          
-          <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-            {prop.propType}: {prop.line}
-          </Typography>
-          
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                icon={<Twitter />}
+                label={prop.author || 'Beat Writer'}
+                size="small"
+                sx={{ 
+                  bgcolor: '#8b5cf6',
+                  color: 'white',
+                  fontWeight: 'bold'
+                }}
+              />
+              <Chip 
+                label={prop.sport}
+                size="small"
+                sx={{ 
+                  bgcolor: `${SPORT_COLORS[prop.sport] || '#3b82f6'}20`,
+                  color: SPORT_COLORS[prop.sport] || '#3b82f6',
+                  fontWeight: 'bold'
+                }}
+              />
+              {prop.category === 'game-preview' && (
+                <Chip 
+                  icon={<Stadium />}
+                  label="Game Preview"
+                  size="small"
+                  sx={{ bgcolor: '#f59e0b', color: 'white' }}
+                />
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
               <Typography variant="caption" color="text.secondary">
-                {prop.team}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Typography variant="caption" fontWeight="bold" color={oddsColor}>
-                {prop.odds}
+                {prop.time}
               </Typography>
             </Box>
           </Box>
           
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
-            {prop.matchup}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+            <Avatar sx={{ bgcolor: '#8b5cf6', width: 48, height: 48 }}>
+              {prop.author?.charAt(0) || 'BW'}
+            </Avatar>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="h6" fontWeight="bold" gutterBottom>
+                {prop.playerName}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                {prop.team} • {prop.author || 'Beat Writer'}
+              </Typography>
+              <Typography variant="body1" sx={{ mt: 1, fontWeight: 500 }}>
+                {prop.line}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {prop.matchup}
+              </Typography>
+              
+              {prop.gameInfo && (
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'white', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    🏟️ Game Information
+                  </Typography>
+                  <Typography variant="body2">
+                    {prop.gameInfo.awayTeam} @ {prop.gameInfo.homeTeam}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {prop.gameInfo.status} • {prop.gameInfo.time}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          </Box>
           
-          <Box sx={{ display: '-flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="caption" color="text.secondary">
-              {prop.time}
-            </Typography>
-            <Chip 
-              label={`${prop.impliedProbability}%`}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+            <Button 
+              variant="contained" 
               size="small"
+              onClick={() => prop.url && prop.url !== '#' && window.open(prop.url, '_blank')}
               sx={{ 
-                bgcolor: '#f0f9ff',
-                color: '#3b82f6',
-                fontSize: '0.7rem'
+                bgcolor: '#8b5cf6',
+                '&:hover': { bgcolor: '#7c3aed' }
               }}
-            />
-          </Box>
-          
-          <Box sx={{ display: 'flex', justifyContent: 'space-around', borderTop: 1, borderColor: 'divider', pt: 1 }}>
-            <IconButton size="small" onClick={() => handleShare(prop as any)}>
-              <Share sx={{ fontSize: 16 }} />
-            </IconButton>
-            <IconButton size="small" onClick={() => alert(prop.aiInsights?.join('\n') || 'No AI insights available')}>
-              <SparklesIcon sx={{ fontSize: 16, color: '#8b5cf6' }} />
-            </IconButton>
-            <IconButton size="small">
-              <BookmarkBorder sx={{ fontSize: 16 }} />
-            </IconButton>
+              startIcon={<Article />}
+            >
+              Read Full Article
+            </Button>
+            
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <IconButton size="small" onClick={() => handleShare(prop)}>
+                <Share sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>
+                {bookmarked.includes(prop.id) ? (
+                  <Bookmark sx={{ fontSize: 18, color: '#8b5cf6' }} />
+                ) : (
+                  <BookmarkBorder sx={{ fontSize: 18 }} />
+                )}
+              </IconButton>
+            </Box>
           </Box>
         </CardContent>
       </Card>
     );
   };
 
-  const renderPropCard = (prop: PlayerProp) => {
+  const renderInjuryCard = (prop: PlayerProp) => {
+    const statusColor = getInjuryStatusColor(prop.injuryStatus);
+    const statusLabel = getInjuryStatusLabel(prop.injuryStatus);
+    
+    return (
+      <Card 
+        key={prop.id} 
+        sx={{ 
+          mb: 2,
+          borderLeft: `6px solid ${statusColor}`,
+          bgcolor: '#fff1f0',
+          '&:hover': { bgcolor: '#ffe4e2' }
+        }}
+      >
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                icon={<LocalHospital />}
+                label={statusLabel}
+                size="small"
+                sx={{ 
+                  bgcolor: statusColor,
+                  color: 'white',
+                  fontWeight: 'bold'
+                }}
+              />
+              <Chip 
+                label={prop.sport}
+                size="small"
+                sx={{ 
+                  bgcolor: `${SPORT_COLORS[prop.sport] || '#3b82f6'}20`,
+                  color: SPORT_COLORS[prop.sport] || '#3b82f6',
+                  fontWeight: 'bold'
+                }}
+              />
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
+              <Typography variant="caption" color="text.secondary">
+                {prop.time}
+              </Typography>
+            </Box>
+          </Box>
+          
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+            <Avatar sx={{ bgcolor: statusColor, width: 48, height: 48 }}>
+              <Healing />
+            </Avatar>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="h6" fontWeight="bold" gutterBottom>
+                {prop.playerName}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                {prop.team} • {prop.sport}
+              </Typography>
+              <Typography variant="body1" sx={{ mt: 1, fontWeight: 500 }}>
+                {prop.line}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {prop.matchup}
+              </Typography>
+              
+              {prop.expectedReturn && (
+                <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Healing sx={{ fontSize: 16, color: '#3b82f6' }} />
+                  <Typography variant="body2" color="#3b82f6">
+                    Expected return: {prop.expectedReturn}
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          </Box>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+            <Button 
+              variant="contained" 
+              size="small"
+              onClick={() => prop.url && prop.url !== '#' && window.open(prop.url, '_blank')}
+              sx={{ 
+                bgcolor: statusColor,
+                '&:hover': { bgcolor: statusColor, filter: 'brightness(0.9)' }
+              }}
+            >
+              View Injury Details
+            </Button>
+            
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <IconButton size="small" onClick={() => handleShare(prop)}>
+                <Share sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>
+                {bookmarked.includes(prop.id) ? (
+                  <Bookmark sx={{ fontSize: 18, color: statusColor }} />
+                ) : (
+                  <BookmarkBorder sx={{ fontSize: 18 }} />
+                )}
+              </IconButton>
+            </Box>
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const renderNewsCard = (prop: PlayerProp) => {
+    if (prop.isBeatWriter) {
+      return renderBeatWriterCard(prop);
+    }
+    
+    if (prop.category?.toLowerCase().includes('injury') || 
+        prop.category === 'injuries' || 
+        prop.injuryStatus) {
+      return renderInjuryCard(prop);
+    }
+    
     const confidenceColor = getConfidenceColor(prop.confidence);
-    const sportColor = (SPORT_COLORS as Record<string, string>)[prop.sport] || theme.palette.primary.main;
-    const isBookmarked = bookmarked.includes(typeof prop.id === 'string' ? parseInt(prop.id) : prop.id);
-    const categoryColor = (CATEGORY_COLORS as Record<string, string>)[prop.category || 'news'] || '#3b82f6';
+    const sportColor = SPORT_COLORS[prop.sport] || theme.palette.primary.main;
+    const isBookmarked = bookmarked.includes(prop.id);
+    const categoryColor = CATEGORY_COLORS[prop.category || 'news'] || '#6b7280';
     
     return (
       <Card key={prop.id} sx={{ mb: 3 }}>
         <CardContent>
-          {/* Header with category */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <Chip 
                 label={prop.category || 'News'}
                 size="small"
                 sx={{ 
                   bgcolor: categoryColor,
                   color: 'white',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  textTransform: 'capitalize'
                 }}
               />
               <Chip 
@@ -617,14 +1171,19 @@ const SportsWireScreen = () => {
             </Box>
           </Box>
           
-          {/* News content */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2, gap: 2 }}>
             {prop.image && (
               <CardMedia
                 component="img"
                 image={prop.image}
                 alt={prop.playerName}
-                sx={{ width: 80, height: 80, borderRadius: 1, objectFit: 'cover' }}
+                sx={{ 
+                  width: 100, 
+                  height: 100, 
+                  borderRadius: 2, 
+                  objectFit: 'cover',
+                  display: { xs: 'none', sm: 'block' }
+                }}
               />
             )}
             <Box sx={{ flex: 1 }}>
@@ -634,64 +1193,25 @@ const SportsWireScreen = () => {
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 {prop.team} • {prop.sport}
               </Typography>
-              <Typography variant="body1" paragraph>
+              <Typography variant="body1" paragraph sx={{ fontWeight: 500 }}>
                 {prop.line}
               </Typography>
             </Box>
           </Box>
           
-          {/* Full description if available */}
-          {prop.originalArticle?.description && (
-            <Box sx={{ mb: 2 }}>
+          {prop.matchup && (
+            <Box sx={{ mb: 2, bgcolor: '#f8f9fa', p: 2, borderRadius: 1 }}>
               <Typography variant="body2" color="text.secondary">
-                {prop.originalArticle.description}
+                {prop.matchup}
               </Typography>
             </Box>
           )}
           
-          {/* Confidence indicator */}
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                News Confidence
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={prop.confidence} 
-                  sx={{ 
-                    flex: 1, 
-                    height: 8,
-                    borderRadius: 4,
-                    bgcolor: `${confidenceColor}20`,
-                    '& .MuiLinearProgress-bar': { bgcolor: confidenceColor }
-                  }}
-                />
-                <Typography variant="body2" fontWeight="bold" color={confidenceColor}>
-                  {prop.confidence}%
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-          
-          {/* AI Insights if available */}
-          {prop.aiInsights && prop.aiInsights.length > 0 && prop.aiInsights[0] && (
-            <Box sx={{ bgcolor: '#f0f9ff', p: 2, borderRadius: 1, mb: 2 }}>
-              <Typography variant="caption" fontWeight="bold" color="#3b82f6" gutterBottom>
-                📝 Summary
-              </Typography>
-              <Typography variant="caption" color="#1e40af">
-                {prop.aiInsights[0]}
-              </Typography>
-            </Box>
-          )}
-          
-          {/* Actions */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Button 
               variant="contained" 
               size="small"
-              onClick={() => prop.url && window.open(prop.url, '_blank')}
+              onClick={() => prop.url && prop.url !== '#' && window.open(prop.url, '_blank')}
               sx={{ 
                 bgcolor: '#3b82f6',
                 '&:hover': { bgcolor: '#2563eb' }
@@ -718,163 +1238,599 @@ const SportsWireScreen = () => {
     );
   };
 
-  const AnalyticsDashboard = () => (
+  // ============= TEAM NEWS MODAL =============
+  const TeamNewsModal = () => (
+    <Dialog 
+      open={showTeamNewsModal} 
+      onClose={() => setShowTeamNewsModal(false)}
+      maxWidth="md"
+      fullWidth
+    >
+      <DialogTitle sx={{ bgcolor: '#3b82f6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <TeamIcon />
+        {selectedTeam} News
+        <IconButton 
+          onClick={() => setShowTeamNewsModal(false)}
+          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {teamNews.length > 0 ? (
+          <Box>
+            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+              Latest updates from {selectedTeam}
+            </Typography>
+            <Divider sx={{ my: 2 }} />
+            {teamNews.map(news => renderNewsCard(news))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Sports sx={{ fontSize: 60, color: '#3b82f6', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              No news for {selectedTeam}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Check back later for updates
+            </Typography>
+          </Box>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+
+  // ============= INJURY DASHBOARD MODAL =============
+  const InjuryDashboardModal = () => (
+    <Dialog 
+      open={showInjuryDashboardModal} 
+      onClose={() => setShowInjuryDashboardModal(false)}
+      maxWidth="lg"
+      fullWidth
+    >
+      <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Timeline />
+        Injury Dashboard - {selectedSport.toUpperCase()}
+        <IconButton 
+          onClick={() => setShowInjuryDashboardModal(false)}
+          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {injuryDashboard ? (
+          <Grid container spacing={3}>
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3, bgcolor: '#f8fafc' }}>
+                <Typography variant="h6" gutterBottom>
+                  📊 Injury Summary
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h3" color="#ef4444" fontWeight="bold">
+                        {injuryDashboard.total_injuries}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Total Injuries
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h3" color="#f59e0b" fontWeight="bold">
+                        {injuryDashboard.severity_breakdown?.severe || 0}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Severe Injuries
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography variant="h3" color="#10b981" fontWeight="bold">
+                        {injuryDashboard.status_breakdown?.day_to_day || 0}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Day-to-Day
+                      </Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Paper>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Paper sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  🏥 By Status
+                </Typography>
+                {Object.entries(injuryDashboard.status_breakdown || {}).map(([status, count]) => (
+                  <Box key={status} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ 
+                        width: 10, 
+                        height: 10, 
+                        borderRadius: '50%',
+                        bgcolor: getInjuryStatusColor(status)
+                      }} />
+                      <Typography variant="body2" textTransform="capitalize">
+                        {status.replace('_', ' ')}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" fontWeight="bold">
+                      {count as number}
+                    </Typography>
+                  </Box>
+                ))}
+              </Paper>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Paper sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  ⚠️ Most Impacted Teams
+                </Typography>
+                {injuryDashboard.top_injured_teams?.map(([team, count]: [string, number]) => (
+                  <Box key={team} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="body2">{team}</Typography>
+                    <Chip 
+                      label={`${count} injury${count !== 1 ? 's' : ''}`}
+                      size="small"
+                      sx={{ bgcolor: '#ef4444', color: 'white' }}
+                    />
+                  </Box>
+                ))}
+              </Paper>
+            </Grid>
+            
+            <Grid item xs={12}>
+              <Paper sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  🩺 Common Injuries
+                </Typography>
+                <Grid container spacing={1}>
+                  {Object.entries(injuryDashboard.injury_type_breakdown || {})
+                    .sort(([,a], [,b]) => (b as number) - (a as number))
+                    .slice(0, 8)
+                    .map(([type, count]) => (
+                      <Grid item xs={6} sm={3} key={type}>
+                        <Box sx={{ 
+                          p: 1.5, 
+                          bgcolor: '#f1f5f9', 
+                          borderRadius: 1,
+                          display: 'flex',
+                          justifyContent: 'space-between'
+                        }}>
+                          <Typography variant="caption" textTransform="capitalize">
+                            {type}
+                          </Typography>
+                          <Typography variant="caption" fontWeight="bold">
+                            {count as number}
+                          </Typography>
+                        </Box>
+                      </Grid>
+                    ))}
+                </Grid>
+              </Paper>
+            </Grid>
+            
+            <Grid item xs={12}>
+              <Paper sx={{ p: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  🔴 Recent Injuries
+                </Typography>
+                <List>
+                  {injuryDashboard.injuries?.slice(0, 5).map((injury: any) => (
+                    <ListItem key={injury.player} divider>
+                      <ListItemAvatar>
+                        <Avatar sx={{ bgcolor: getInjuryStatusColor(injury.status) }}>
+                          <Healing />
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <Typography variant="body2" fontWeight="bold">
+                              {injury.player}
+                            </Typography>
+                            <Chip 
+                              label={injury.status}
+                              size="small"
+                              sx={{ 
+                                bgcolor: getInjuryStatusColor(injury.status),
+                                color: 'white',
+                                height: 20,
+                                fontSize: '0.7rem'
+                              }}
+                            />
+                          </Box>
+                        }
+                        secondary={
+                          <>
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              {injury.team} • {injury.injury}
+                            </Typography>
+                            <Typography variant="caption" color="#3b82f6">
+                              Expected return: {injury.expected_return || 'TBD'}
+                            </Typography>
+                          </>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            </Grid>
+          </Grid>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <CircularProgress />
+            <Typography sx={{ mt: 2 }}>Loading injury dashboard...</Typography>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => {
+          setShowInjuryDashboardModal(false);
+          setSelectedCategory('injuries');
+        }} sx={{ color: '#ef4444' }}>
+          View All Injuries
+        </Button>
+        <Button onClick={() => setShowInjuryDashboardModal(false)}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  // ============= SEARCH RESULTS MODAL =============
+  const SearchResultsModal = () => (
+    <Dialog 
+      open={showSearchResultsModal} 
+      onClose={() => setShowSearchResultsModal(false)}
+      maxWidth="md"
+      fullWidth
+    >
+      <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <SearchIcon />
+        Search Results: "{searchQuery}"
+        <IconButton 
+          onClick={() => setShowSearchResultsModal(false)}
+          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {searchResults.length > 0 ? (
+          <List>
+            {searchResults.map((result, index) => (
+              <ListItem 
+                key={index} 
+                divider
+                secondaryAction={
+                  result.type === 'beat_writer' && (
+                    <Button 
+                      size="small" 
+                      variant="outlined"
+                      onClick={() => {
+                        setSelectedTeam(result.team);
+                        fetchTeamNews(result.team);
+                        setShowSearchResultsModal(false);
+                      }}
+                    >
+                      View Team
+                    </Button>
+                  )
+                }
+              >
+                <ListItemAvatar>
+                  <Avatar sx={{ 
+                    bgcolor: result.type === 'beat_writer' ? '#8b5cf6' : 
+                            result.type === 'injury' ? '#ef4444' : '#3b82f6'
+                  }}>
+                    {result.type === 'beat_writer' && <Twitter />}
+                    {result.type === 'injury' && <LocalHospital />}
+                    {result.type === 'player' && <Person />}
+                  </Avatar>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={
+                    <Typography variant="body2" fontWeight="bold">
+                      {result.type === 'beat_writer' && result.name}
+                      {result.type === 'player' && result.player}
+                      {result.type === 'injury' && result.player}
+                    </Typography>
+                  }
+                  secondary={
+                    <>
+                      <Typography variant="caption" display="block" color="text.secondary">
+                        {result.type === 'beat_writer' && `${result.outlet} • ${result.team}`}
+                        {result.type === 'player' && `${result.team} • ${result.sport}`}
+                        {result.type === 'injury' && `${result.team} • ${result.status} - ${result.injury}`}
+                      </Typography>
+                      {result.type === 'beat_writer' && (
+                        <Typography variant="caption" color="#8b5cf6">
+                          {result.twitter}
+                        </Typography>
+                      )}
+                    </>
+                  }
+                />
+              </ListItem>
+            ))}
+          </List>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <SearchIcon sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              No results found
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Try searching for a player, team, or beat writer
+            </Typography>
+          </Box>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+
+  // ============= BEAT WRITERS MODAL =============
+  const BeatWritersModal = () => (
+    <Dialog 
+      open={showBeatWritersModal} 
+      onClose={() => setShowBeatWritersModal(false)}
+      maxWidth="md"
+      fullWidth
+    >
+      <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Twitter />
+        Beat Writers & Insiders
+        <Box sx={{ flex: 1 }} />
+        <FormControl size="small" sx={{ minWidth: 200, bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 1 }}>
+          <Select
+            value={selectedTeam}
+            displayEmpty
+            onChange={(e) => {
+              setSelectedTeam(e.target.value);
+              if (e.target.value) {
+                fetchTeamNews(e.target.value);
+              }
+            }}
+            sx={{ color: 'white' }}
+          >
+            <MenuItem value="">All Teams</MenuItem>
+            {teams.map(team => (
+              <MenuItem key={team} value={team}>{team}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <IconButton 
+          onClick={() => setShowBeatWritersModal(false)}
+          sx={{ color: 'white' }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {beatWriterNews.length > 0 ? (
+          <Box>
+            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+              {beatWriterNews.length} Updates from Beat Writers
+              {selectedTeam && ` • ${selectedTeam}`}
+            </Typography>
+            <Divider sx={{ my: 2 }} />
+            {beatWriterNews
+              .filter(item => !selectedTeam || item.team === selectedTeam)
+              .map(writer => renderBeatWriterCard(writer))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Twitter sx={{ fontSize: 60, color: '#8b5cf6', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              No Beat Writer Updates
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {selectedTeam ? `No recent updates from ${selectedTeam} beat writers` : 'Check back later for the latest insider news'}
+            </Typography>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => {
+          setShowBeatWritersModal(false);
+          setSelectedCategory('beat-writers');
+        }} sx={{ color: '#8b5cf6' }}>
+          View All Beat News
+        </Button>
+        <Button onClick={() => setShowBeatWritersModal(false)}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  // ============= ANALYTICS DASHBOARD =============
+  const AnalyticsDashboardModal = () => (
     <Dialog 
       open={showAnalyticsModal} 
       onClose={() => setShowAnalyticsModal(false)}
       maxWidth="md"
       fullWidth
     >
-      <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white' }}>
+      <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Analytics />
         SportsWire Analytics Dashboard
+        <IconButton 
+          onClick={() => setShowAnalyticsModal(false)}
+          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
+        >
+          <Close />
+        </IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          📊 News Performance Metrics
-        </Typography>
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {newsCount || 0}
+                {processedNews.length}
               </Typography>
               <Typography variant="caption" color="text.secondary">Total News</Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={Math.min(newsCount || 0, 100)} 
-                sx={{ mt: 1 }}
-              />
+            </Paper>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fff1f0' }}>
+              <Typography variant="h4" fontWeight="bold" color="#ef4444">
+                {injuryNews.length}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">Injuries</Typography>
+            </Paper>
+          </Grid>
+          <Grid item xs={6} sm={3}>
+            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f5f3ff' }}>
+              <Typography variant="h4" fontWeight="bold" color="#8b5cf6">
+                {beatWriterNews.length}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">Beat Writers</Typography>
             </Paper>
           </Grid>
           <Grid item xs={6} sm={3}>
             <Paper sx={{ p: 2, textAlign: 'center' }}>
               <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.hitRate}%
+                {bookmarked.length}
               </Typography>
-              <Typography variant="caption" color="text.secondary">Relevance Score</Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={analyticsMetrics.hitRate} 
-                sx={{ mt: 1, bgcolor: '#10b98120', '& .MuiLinearProgress-bar': { bgcolor: '#10b981' } }}
-              />
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.avgConfidence}%
-              </Typography>
-              <Typography variant="caption" color="text.secondary">Avg Confidence</Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={analyticsMetrics.avgConfidence} 
-                sx={{ mt: 1, bgcolor: '#8b5cf620', '& .MuiLinearProgress-bar': { bgcolor: '#8b5cf6' } }}
-              />
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {analyticsMetrics.valueScore}%
-              </Typography>
-              <Typography variant="caption" color="text.secondary">Value Score</Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={analyticsMetrics.valueScore} 
-                sx={{ mt: 1, bgcolor: '#f59e0b20', '& .MuiLinearProgress-bar': { bgcolor: '#f59e0b' } }}
-              />
+              <Typography variant="caption" color="text.secondary">Bookmarks</Typography>
             </Paper>
           </Grid>
         </Grid>
         
-        <Typography variant="h6" gutterBottom>
-          🔥 News by Category
+        <Divider sx={{ my: 2 }} />
+        
+        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+          Category Breakdown
         </Typography>
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          {processedPlayerProps.reduce((acc: any[], prop) => {
-            const category = prop.category || 'news';
-            const existing = acc.find(c => c.name === category);
-            if (existing) {
-              existing.count++;
-            } else {
-              acc.push({ name: category, count: 1, color: (CATEGORY_COLORS as Record<string, string>)[category] || '#3b82f6' });
-            }
-            return acc;
-          }, []).map((category, index) => (
-            <Grid item xs={12} key={index}>
-              <Paper sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: category.color }} />
-                    <Typography variant="body2" fontWeight="bold" textTransform="capitalize">
-                      {category.name}
-                    </Typography>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    {category.count} items
-                  </Typography>
-                </Box>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={(category.count / newsCount) * 100}
-                  sx={{ 
-                    height: 8,
-                    borderRadius: 4,
-                    bgcolor: `${category.color}20`,
-                    '& .MuiLinearProgress-bar': { 
-                      bgcolor: category.color
-                    }
-                  }}
-                />
-              </Paper>
+        <Grid container spacing={1}>
+          {Object.entries(
+            processedNews.reduce((acc: Record<string, number>, item) => {
+              const cat = item.category || 'other';
+              acc[cat] = (acc[cat] || 0) + 1;
+              return acc;
+            }, {})
+          ).map(([category, count]) => (
+            <Grid item xs={6} sm={4} md={3} key={category}>
+              <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
+                <Typography variant="caption" display="block" fontWeight="bold">
+                  {category.toUpperCase()}
+                </Typography>
+                <Typography variant="h6" sx={{ color: CATEGORY_COLORS[category] || '#6b7280' }}>
+                  {count}
+                </Typography>
+              </Box>
             </Grid>
           ))}
         </Grid>
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => setShowAnalyticsModal(false)}>Close Dashboard</Button>
+        <Button onClick={() => setShowAnalyticsModal(false)}>Close</Button>
       </DialogActions>
     </Dialog>
   );
 
-  if (isLoading) return (
-    <Container maxWidth="lg">
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
-        <Typography sx={{ ml: 2 }}>Loading sports news...</Typography>
-      </Box>
-    </Container>
-  );
-  
-  if (error) return (
-    <Container maxWidth="lg">
-      <Alert severity="error" sx={{ mb: 3, mt: 3 }}>
-        <Typography variant="body1" fontWeight="bold">
-          Failed to load news
-        </Typography>
-        <Typography variant="body2">
-          {error instanceof Error ? error.message : 'Unknown error'}
-        </Typography>
-        <Button 
-          variant="outlined" 
-          size="small" 
-          onClick={() => refetch()}
-          sx={{ mt: 1 }}
+  // ============= INJURY MODAL (Legacy) =============
+  const InjuryModal = () => (
+    <Dialog 
+      open={showInjuryModal} 
+      onClose={() => setShowInjuryModal(false)}
+      maxWidth="md"
+      fullWidth
+    >
+      <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <LocalHospital />
+        Injury Report
+        <IconButton 
+          onClick={() => setShowInjuryModal(false)}
+          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
         >
-          Try Again
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {injuryNews.length > 0 ? (
+          <Box>
+            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+              {injuryNews.length} Active Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}
+            </Typography>
+            <Divider sx={{ my: 2 }} />
+            {injuryNews.map(injury => renderInjuryCard(injury))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <MonitorHeart sx={{ fontSize: 60, color: '#10b981', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              No Current Injuries
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              All {selectedSport.toUpperCase()} players are healthy
+            </Typography>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => {
+          setShowInjuryModal(false);
+          fetchInjuryDashboard();
+        }} sx={{ color: '#ef4444' }}>
+          View Dashboard
         </Button>
-      </Alert>
-    </Container>
+        <Button onClick={() => setShowInjuryModal(false)}>Close</Button>
+      </DialogActions>
+    </Dialog>
   );
 
+  // ============= LOADING STATE =============
+  if (loading && processedNews.length === 0) {
+    return (
+      <Container maxWidth="lg">
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+          <CircularProgress size={60} />
+          <Typography sx={{ mt: 3 }} variant="h6">
+            Loading {selectedSport.toUpperCase()} news...
+          </Typography>
+        </Box>
+      </Container>
+    );
+  }
+
+  // ============= ERROR STATE =============
+  if (error) {
+    return (
+      <Container maxWidth="lg">
+        <Alert 
+          severity="error" 
+          sx={{ mt: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={handleRefresh}>
+              Retry
+            </Button>
+          }
+        >
+          <Typography variant="body1" fontWeight="bold">
+            Failed to load news
+          </Typography>
+          <Typography variant="body2">{error}</Typography>
+        </Alert>
+      </Container>
+    );
+  }
+
+  // ============= MAIN RENDER =============
   return (
-    <Container maxWidth="lg">
+    <Container maxWidth="lg" sx={{ py: 3 }}>
       {/* Header */}
       <Paper sx={{ 
         mb: 3, 
-        mt: 3,
         background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
-        color: 'white'
+        color: 'white',
+        borderRadius: 2,
+        overflow: 'hidden'
       }}>
         <Box sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
@@ -883,18 +1839,71 @@ const SportsWireScreen = () => {
             </IconButton>
             <Box sx={{ flex: 1 }}>
               <Typography variant="h4" fontWeight="bold">
-                SportsWire ({newsCount || 0} news)
+                SportsWire
               </Typography>
               <Typography variant="body1">
-                Latest sports news and updates
+                Latest {selectedSport.toUpperCase()} news and updates
               </Typography>
             </Box>
-            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching} sx={{ color: 'white' }}>
-              <UpdateIcon />
-            </IconButton>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {/* Team Selector Dropdown */}
+              {teams.length > 0 && (
+                <FormControl size="small" sx={{ minWidth: 200, mr: 1 }}>
+                  <Select
+                    value={selectedTeam}
+                    displayEmpty
+                    onChange={(e) => {
+                      setSelectedTeam(e.target.value);
+                      if (e.target.value) {
+                        fetchTeamNews(e.target.value);
+                      }
+                    }}
+                    sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}
+                  >
+                    <MenuItem value="">Select Team</MenuItem>
+                    {teams.map(team => (
+                      <MenuItem key={team} value={team}>{team}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+              
+              {/* Injury Dashboard Button */}
+              <IconButton 
+                onClick={fetchInjuryDashboard}
+                sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}
+              >
+                <Timeline />
+              </IconButton>
+              
+              <Badge badgeContent={beatWriterNews.length} color="secondary">
+                <IconButton 
+                  onClick={() => setShowBeatWritersModal(true)}
+                  sx={{ color: 'white', bgcolor: 'rgba(139,92,246,0.3)' }}
+                >
+                  <Twitter />
+                </IconButton>
+              </Badge>
+              
+              <Badge badgeContent={injuryNews.length} color="error">
+                <IconButton 
+                  onClick={() => setShowInjuryModal(true)}
+                  sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}
+                >
+                  <LocalHospital />
+                </IconButton>
+              </Badge>
+              
+              <IconButton 
+                onClick={handleRefresh} 
+                disabled={refreshing}
+                sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)' }}
+              >
+                <UpdateIcon />
+              </IconButton>
+            </Box>
           </Box>
           
-          {/* Sport Selector */}
           <Grid container spacing={2} sx={{ mt: 2 }}>
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth sx={{ bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }}>
@@ -903,11 +1912,16 @@ const SportsWireScreen = () => {
                   value={selectedSport}
                   label="Sport"
                   onChange={handleSportChange}
-                  sx={{ color: 'white' }}
+                  sx={{ 
+                    color: 'white',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' },
+                    '& .MuiSvgIcon-root': { color: 'white' }
+                  }}
                 >
                   <MenuItem value="nba">NBA</MenuItem>
                   <MenuItem value="nfl">NFL</MenuItem>
                   <MenuItem value="mlb">MLB</MenuItem>
+                  <MenuItem value="nhl">NHL</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
@@ -918,7 +1932,6 @@ const SportsWireScreen = () => {
                   startIcon={<Analytics />}
                   onClick={() => setShowAnalyticsModal(true)}
                   sx={{ 
-                    justifyContent: 'center',
                     color: 'white',
                     borderColor: 'white',
                     '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
@@ -929,29 +1942,31 @@ const SportsWireScreen = () => {
                 </Button>
                 <Button 
                   fullWidth
-                  startIcon={<TrendingUp />}
+                  startIcon={<Twitter />}
+                  onClick={() => setShowBeatWritersModal(true)}
                   sx={{ 
-                    justifyContent: 'center',
                     color: 'white',
-                    borderColor: 'white',
-                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                    borderColor: '#8b5cf6',
+                    bgcolor: 'rgba(139,92,246,0.2)',
+                    '&:hover': { bgcolor: 'rgba(139,92,246,0.3)' }
                   }}
                   variant="outlined"
                 >
-                  Trending
+                  Beat Writers ({beatWriterNews.length})
                 </Button>
                 <Button 
                   fullWidth
-                  startIcon={<SparklesIcon />}
+                  startIcon={<LocalHospital />}
+                  onClick={() => setShowInjuryModal(true)}
                   sx={{ 
-                    justifyContent: 'center',
                     color: 'white',
-                    borderColor: 'white',
-                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
+                    borderColor: '#ef4444',
+                    bgcolor: 'rgba(239,68,68,0.2)',
+                    '&:hover': { bgcolor: 'rgba(239,68,68,0.3)' }
                   }}
                   variant="outlined"
                 >
-                  AI Insights
+                  Injuries ({injuryNews.length})
                 </Button>
               </Box>
             </Grid>
@@ -959,225 +1974,149 @@ const SportsWireScreen = () => {
         </Box>
       </Paper>
 
-      {/* Loading/Refreshing Indicator */}
-      {(isLoading || isRefetching || refreshing) && <LinearProgress sx={{ mb: 2 }} />}
-
-      {/* Error State */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <Typography variant="body1" fontWeight="bold">
-            Failed to load news
-          </Typography>
-          <Typography variant="body2">
-            {error instanceof Error ? error.message : 'Unknown error'}
-          </Typography>
-          <Button 
-            variant="outlined" 
-            size="small" 
-            onClick={() => refetch()}
-            sx={{ mt: 1 }}
-          >
-            Try Again
-          </Button>
-        </Alert>
-      )}
-
       {/* Search Bar */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="Search players, teams, or news..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search />
-                </InputAdornment>
-              ),
-              endAdornment: searchQuery && (
-                <InputAdornment position="end">
-                  <IconButton onClick={() => setSearchQuery('')} size="small">
+      <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="Search players, teams, beat writers, or news..."
+          defaultValue={searchQuery}
+          onChange={handleSearchChange}
+          inputRef={searchInputRef}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <InputAdornment position="end">
+                {isSearching && <CircularProgress size={20} sx={{ mr: 1 }} />}
+                {searchQuery && (
+                  <IconButton onClick={handleClearSearch} size="small">
                     <Close />
                   </IconButton>
-                </InputAdornment>
-              )
-            }}
-          />
-          <IconButton 
-            onClick={() => setShowAnalyticsModal(true)}
-            sx={{ bgcolor: '#3b82f6', color: 'white', '&:hover': { bgcolor: '#2563eb' } }}
-          >
-            <Analytics />
-          </IconButton>
-        </Box>
+                )}
+              </InputAdornment>
+            )
+          }}
+        />
       </Paper>
 
       {/* Category Tabs */}
-      <Paper sx={{ mb: 3 }}>
+      <Paper sx={{ mb: 3, borderRadius: 2, overflow: 'hidden' }}>
         <Tabs
           value={selectedCategory}
           onChange={(e, newValue) => setSelectedCategory(newValue)}
           variant="scrollable"
           scrollButtons="auto"
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
+          sx={{ 
+            borderBottom: 1, 
+            borderColor: 'divider',
+            bgcolor: 'background.paper'
+          }}
         >
-          {categories.map((category) => (
-            <Tab
-              key={category.id}
-              value={category.id}
-              label={category.name}
-              icon={category.icon}
-              iconPosition="start"
-              sx={{ 
-                color: selectedCategory === category.id ? category.color : 'text.secondary',
-                '&.Mui-selected': { color: category.color }
-              }}
-            />
-          ))}
+          <Tab value="all" label="All Sports" icon={<Bolt />} iconPosition="start" />
+          <Tab value="NBA" label="NBA" icon={<SportsBasketball />} iconPosition="start" />
+          <Tab value="NFL" label="NFL" icon={<SportsFootball />} iconPosition="start" />
+          <Tab value="MLB" label="MLB" icon={<SportsBaseball />} iconPosition="start" />
+          <Tab value="NHL" label="NHL" icon={<SportsHockey />} iconPosition="start" />
+          <Tab 
+            value="beat-writers" 
+            label="Beat Writers" 
+            icon={<Twitter />} 
+            iconPosition="start" 
+            sx={{ color: '#8b5cf6' }}
+          />
+          <Tab 
+            value="injuries" 
+            label="Injuries" 
+            icon={<LocalHospital />} 
+            iconPosition="start" 
+            sx={{ color: '#ef4444' }}
+          />
+          <Tab value="value" label="High Value" icon={<ShowChart />} iconPosition="start" />
         </Tabs>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="body2" fontWeight="bold">
-            {categories.find(c => c.id === selectedCategory)?.name} • {filteredProps.length} items
+            {filteredNews.length} {filteredNews.length === 1 ? 'item' : 'items'}
           </Typography>
-          <Badge 
-            badgeContent={newsCount || 0} 
-            color="error"
-            sx={{ cursor: 'pointer' }}
-          >
-            <Notifications sx={{ color: '#3b82f6' }} />
-          </Badge>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Badge badgeContent={beatWriterNews.length} color="secondary">
+              <Twitter sx={{ color: '#8b5cf6', cursor: 'pointer' }} onClick={() => setShowBeatWritersModal(true)} />
+            </Badge>
+            <Badge badgeContent={injuryNews.length} color="error">
+              <LocalHospital sx={{ color: '#ef4444', cursor: 'pointer' }} onClick={() => setShowInjuryModal(true)} />
+            </Badge>
+            <Badge badgeContent={teams.length} color="info">
+              <TeamIcon sx={{ color: '#3b82f6', cursor: 'pointer' }} onClick={() => teams.length > 0 && fetchTeamNews(teams[0])} />
+            </Badge>
+          </Box>
         </Box>
       </Paper>
 
-      {/* Trending Section */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box>
-            <Typography variant="h6" fontWeight="bold">
-              📈 Trending News
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Most discussed sports news
-            </Typography>
-          </Box>
-          <Button 
-            variant="outlined" 
-            onClick={() => setShowAnalyticsModal(true)}
-            size="small"
-          >
-            View Analytics
+      {/* Beat Writers Alert Banner */}
+      {beatWriterNews.length > 0 && selectedCategory !== 'beat-writers' && (
+        <Alert 
+          severity="info" 
+          sx={{ mb: 3, bgcolor: '#f5f3ff', color: '#8b5cf6' }}
+          icon={<Twitter />}
+          action={
+            <Button color="inherit" size="small" onClick={() => setSelectedCategory('beat-writers')}>
+              View {beatWriterNews.length} Beat Writer {beatWriterNews.length === 1 ? 'Update' : 'Updates'}
+            </Button>
+          }
+        >
+          <Typography variant="body2" fontWeight="bold">
+            ✍️ {beatWriterNews.length} {beatWriterNews.length === 1 ? 'Update' : 'Updates'} from Beat Writers & Insiders
+          </Typography>
+        </Alert>
+      )}
+
+      {/* Injury Alert Banner */}
+      {injuryNews.length > 0 && selectedCategory !== 'injuries' && (
+        <Alert 
+          severity="error" 
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => setSelectedCategory('injuries')}>
+              View {injuryNews.length} Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}
+            </Button>
+          }
+        >
+          <Typography variant="body2" fontWeight="bold">
+            🏥 {injuryNews.length} Active {injuryNews.length === 1 ? 'Injury' : 'Injuries'} Reported
+          </Typography>
+        </Alert>
+      )}
+
+      {/* News Feed */}
+      {refreshing && <LinearProgress sx={{ mb: 2 }} />}
+
+      {filteredNews.length > 0 ? (
+        filteredNews.map(renderNewsCard)
+      ) : (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Newspaper sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
+          <Typography variant="h6" gutterBottom>
+            No news found
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {searchQuery ? `No results for "${searchQuery}"` : `No ${selectedCategory === 'all' ? '' : selectedCategory} news available`}
+          </Typography>
+          <Button variant="contained" onClick={handleRefresh} startIcon={<UpdateIcon />}>
+            Refresh
           </Button>
-        </Box>
-        
-        {/* Quick Filters */}
-        <Box sx={{ display: 'flex', gap: 1, mb: 3, overflow: 'auto' }}>
-          {trendingFilters.map((filter) => (
-            <Chip
-              key={filter.id}
-              label={filter.name}
-              onClick={() => setTrendingFilter(filter.id)}
-              color={trendingFilter === filter.id ? 'primary' : 'default'}
-              variant={trendingFilter === filter.id ? 'filled' : 'outlined'}
-              size="small"
-            />
-          ))}
-        </Box>
-        
-        {/* Trending Cards */}
-        <Box sx={{ overflow: 'auto', whiteSpace: 'nowrap', pb: 1 }}>
-          {trendingProps.map(renderTrendingCard)}
-        </Box>
-      </Paper>
+        </Paper>
+      )}
 
-      {/* Sports News */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Box>
-            <Typography variant="h6" fontWeight="bold">
-              📰 Sports News & Updates
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {filteredProps.length} items • Latest from {selectedSport.toUpperCase()}
-            </Typography>
-          </Box>
-          <Chip 
-            icon={<Analytics />}
-            label="Analytics"
-            onClick={() => setShowAnalyticsModal(true)}
-            sx={{ bgcolor: '#3b82f6', color: 'white' }}
-          />
-        </Box>
-        
-        {isLoading || isRefetching || refreshing ? (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <CircularProgress size={60} />
-            <Typography variant="h6" sx={{ mt: 2 }}>
-              Loading {selectedSport.toUpperCase()} news...
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Fetching the latest sports updates
-            </Typography>
-          </Box>
-        ) : error ? (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <ErrorIcon sx={{ fontSize: 60, color: '#ef4444', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              Failed to load news
-            </Typography>
-            <Typography variant="body2" color="text-secondary" sx={{ mb: 3 }}>
-              {error instanceof Error ? error.message : 'Unable to fetch sports news'}
-            </Typography>
-            <Button 
-              variant="contained" 
-              onClick={() => refetch()}
-              startIcon={<UpdateIcon />}
-            >
-              Retry
-            </Button>
-          </Box>
-        ) : filteredProps.length > 0 ? (
-          filteredProps.map(renderPropCard)
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <Newspaper sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              No news available
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchQuery 
-                ? `No results found for "${searchQuery}"` 
-                : `No ${selectedSport.toUpperCase()} news available at the moment`}
-            </Typography>
-            <Button 
-              variant="outlined" 
-              onClick={handleRefresh}
-              startIcon={<UpdateIcon />}
-            >
-              Refresh News
-            </Button>
-          </Box>
-        )}
-        
-        {!isLoading && !isRefetching && !refreshing && filteredProps.length > 0 && (
-          <Box sx={{ textAlign: 'center', py: 3 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Showing {filteredProps.length} of {newsCount || 0} news items
-            </Typography>
-            <Button 
-              startIcon={<Analytics />}
-              onClick={() => setShowAnalyticsModal(true)}
-              variant="outlined"
-            >
-              View Analytics Dashboard
-            </Button>
-          </Box>
-        )}
-      </Paper>
-
-      <AnalyticsDashboard />
+      {/* Modals */}
+      <BeatWritersModal />
+      <InjuryDashboardModal />
+      <InjuryModal />
+      <TeamNewsModal />
+      <SearchResultsModal />
+      <AnalyticsDashboardModal />
     </Container>
   );
 };

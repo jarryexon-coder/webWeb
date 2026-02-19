@@ -1,7 +1,8 @@
-// src/hooks/useParlayAPI.ts - FIXED VERSION
+// src/hooks/useParlayAPI.ts - FIXED VERSION (No console errors)
 import { useState, useEffect, useCallback } from 'react';
 
 const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
+const FETCH_TIMEOUT = 5000; // 5 seconds
 
 interface ParlaySuggestion {
   id: string;
@@ -66,7 +67,12 @@ export const useParlaySuggestions = (params: { sport?: string; limit?: number })
       const url = `${API_BASE_URL}/api/parlay/suggestions?sport=${sport}&limit=${limit}`;
       console.log('🎯 Fetching parlay suggestions from:', url);
       
-      const response = await fetch(url);
+      // Create abort controller with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+      
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -95,7 +101,8 @@ export const useParlaySuggestions = (params: { sport?: string; limit?: number })
       setError(null);
       
     } catch (err) {
-      console.error('❌ useParlaySuggestions error:', err);
+      // Log as warning instead of error to avoid red console messages
+      console.warn('⚠️ useParlaySuggestions fetch failed, using mock data:', err);
       setError(err);
       
       // Provide fallback mock data
@@ -168,7 +175,11 @@ export const useOddsGames = (dateFilter?: string) => {
       const url = `${API_BASE_URL}/api/scrape/sports?source=espn&sport=nba`;
       console.log('🏀 Fetching games from:', url);
       
-      const response = await fetch(url);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+      
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -196,7 +207,7 @@ export const useOddsGames = (dateFilter?: string) => {
       setError(null);
       
     } catch (err) {
-      console.error('❌ useOddsGames error:', err);
+      console.warn('⚠️ useOddsGames fetch failed, using mock data:', err);
       setError(err);
       
       // Provide fallback mock data

@@ -73,7 +73,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { format } from 'date-fns';
 
 // Import React Query hook
-import { useOddsGames } from '../hooks/useUnifiedAPI';
+import { usePrizepicksSelections } from '../hooks/useUnifiedAPI';
 
 // Mock Data
 const MOCK_DATA = {
@@ -321,14 +321,16 @@ const MatchAnalyticsScreen = () => {
   
   // Use the prize picks hook instead of analytics
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
-  
-  const { 
-    data: prizePicksData, 
-    isLoading, 
-    error, 
-    refetch,
-    isRefetching 
-  } = usePrizePicksSelections(selectedSport);
+ 
+// Inside the component, replace the current hook call with:
+const prizepicks = usePrizepicksSelections();
+const { 
+  data: prizePicksData, 
+  isLoading, 
+  error, 
+  refetch,
+  isRefetching 
+} = prizepicks.usePrizepicksSelectionsQuery(selectedSport);
   
   // Extract selections and convert them to "games"
   const selectionsFromApi = prizePicksData?.selections || [];
@@ -854,17 +856,17 @@ const MatchAnalyticsScreen = () => {
           <Typography variant="h4" fontWeight="bold">
             Game Analytics
           </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Live scores, stats, and in-depth analysis
-            {selectionsFromApi.length > 0 && (
-              <Chip 
-                label={`${selectionsFromApi.length} real player selections`} 
-                size="small" 
-                color="success" 
-                sx={{ ml: 1 }}
-              />
-            )}
-          </Typography>
+<Typography variant="body1" color="text.secondary" component="span">
+  Live scores, stats, and in-depth analysis
+  {selectionsFromApi.length > 0 && (
+    <Chip 
+      label={`${selectionsFromApi.length} real player selections`} 
+      size="small" 
+      color="success" 
+      sx={{ ml: 1 }}
+    />
+  )}
+</Typography>
         </Box>
         
         {/* Sport Selector */}

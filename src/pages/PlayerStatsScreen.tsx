@@ -18,7 +18,6 @@ import {
   Avatar,
   Divider,
   Table,
-  TableBody,
   TableCell,
   TableContainer,
   TableHead,
@@ -88,8 +87,8 @@ import {
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 
-// Import React Query hook
-import { useOddsGames } from '../hooks/useUnifiedAPI';
+// Import React Query hook – now always using fantasy/players endpoint
+import { useFantasyPlayers } from '../hooks/useUnifiedAPI';
 
 // Mock data for players (fallback)
 const mockPlayers = {
@@ -351,12 +350,7 @@ const positionFilters = {
   mlb: ['All Positions', 'P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF']
 };
 
-const teamFilters = {
-  nfl: ['All Teams', 'Chiefs', '49ers', 'Bills', 'Vikings', 'Eagles', 'Cowboys', 'Dolphins', 'Ravens'],
-  nba: ['All Teams', 'Lakers', 'Warriors', 'Bucks', 'Mavericks', 'Celtics', 'Nuggets', 'Suns', 'Heat']
-};
-
-// Analytics Component
+// Analytics Component (unchanged)
 const AnalyticsBox = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsEvents, setAnalyticsEvents] = useState<any[]>([]);
@@ -595,10 +589,9 @@ const PlayerStatsScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
-  // Use React Query hook instead of manual fetch
+  // Use React Query hook – always fetch from fantasy/players endpoint
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   const [showApiDebug, setShowApiDebug] = useState(false);
-  const [apiEndpoint, setApiEndpoint] = useState<'players' | 'fantasy/players'>('players');
   
   const { 
     data: playersData, 
@@ -606,7 +599,7 @@ const PlayerStatsScreen = () => {
     error, 
     refetch,
     isRefetching 
-  } = useFantasyPlayers(selectedSport, apiEndpoint);
+  } = useFantasyPlayers(selectedSport, 'fantasy/players');
   
   // Extract players from hook response
   const playersFromApi = playersData?.players || [];
@@ -625,7 +618,6 @@ const PlayerStatsScreen = () => {
   useEffect(() => {
     console.log('🔍 PlayerStatsScreen Debug:', {
       selectedSport,
-      apiEndpoint,
       playersFromApiCount: playersFromApi.length,
       playersData: playersData,
       isLoading,
@@ -634,15 +626,67 @@ const PlayerStatsScreen = () => {
     
     if (playersFromApi.length > 0) {
       console.log('✅ First player from API:', playersFromApi[0]);
-      console.log('📊 Players structure:', {
-        name: playersFromApi[0]?.name,
-        team: playersFromApi[0]?.team,
-        position: playersFromApi[0]?.position,
-        stats: playersFromApi[0]?.stats,
-        is_real_data: playersData?.is_real_data
-      });
+      // We'll log after transformation in the memo
     }
-  }, [playersFromApi, playersData, selectedSport, apiEndpoint, isLoading, error]);
+  }, [playersFromApi, playersData, selectedSport, isLoading, error]);
+
+  // Helper to build stats object based on sport and raw API fields
+  const buildStats = (player: any, sport: string) => {
+    // Try to map common stat fields. The API may have them directly on the player object.
+    // If player.stats already exists and is an object, use it (legacy support)
+    if (player.stats && typeof player.stats === 'object' && Object.keys(player.stats).length > 0) {
+      return player.stats;
+    }
+
+    const stats: any = {};
+
+    if (sport === 'nba') {
+      stats.points = player.points || player.pts || 0;
+      stats.rebounds = player.rebounds || player.reb || 0;
+      stats.assists = player.assists || player.ast || 0;
+      stats.steals = player.steals || player.stl || 0;
+      stats.blocks = player.blocks || player.blk || 0;
+      stats.fgPct = player.fgPct || player.fg_percentage || 0;
+      stats.threePtPct = player.threePtPct || player.three_pt_percentage || 0;
+      stats.turnovers = player.turnovers || player.tov || 0;
+    } else if (sport === 'nfl') {
+      // For NFL, you'll need to map based on your API fields
+      // Example placeholders
+      stats.passingYards = player.passingYards || 0;
+      stats.passingTDs = player.passingTDs || 0;
+      stats.interceptions = player.interceptions || 0;
+      stats.rushingYards = player.rushingYards || 0;
+      stats.rushingTDs = player.rushingTDs || 0;
+      stats.completionPct = player.completionPct || 0;
+      stats.qbRating = player.qbRating || 0;
+      stats.fumbles = player.fumbles || 0;
+    } else if (sport === 'nhl') {
+      // Example NHL stats
+      stats.goals = player.goals || 0;
+      stats.assists = player.assists || 0;
+      stats.points = player.points || 0;
+      stats.plusMinus = player.plusMinus || 0;
+      stats.pim = player.pim || 0;
+      // For goalies
+      stats.wins = player.wins || 0;
+      stats.gaa = player.gaa || 0;
+      stats.savePct = player.savePct || 0;
+    } else if (sport === 'mlb') {
+      // Example MLB stats
+      stats.avg = player.avg || 0;
+      stats.hr = player.hr || 0;
+      stats.rbi = player.rbi || 0;
+      stats.obp = player.obp || 0;
+      stats.slg = player.slg || 0;
+      stats.ops = player.ops || 0;
+      // Pitching
+      stats.era = player.era || 0;
+      stats.wins = player.wins || 0;
+      stats.strikeouts = player.strikeouts || 0;
+    }
+
+    return stats;
+  };
 
   // Transform API data to match expected format or use fallback
   const players = React.useMemo(() => {
@@ -655,62 +699,26 @@ const PlayerStatsScreen = () => {
 
     // Use API data if available and valid
     if (playersFromApi && playersFromApi.length > 0 && playersData?.is_real_data) {
-      console.log(`✅ Using REAL player data: ${playersFromApi.length} players from ${apiEndpoint}`);
+      console.log(`✅ Using REAL player data: ${playersFromApi.length} players from fantasy/players`);
       
       return playersFromApi.map((player: any, index: number) => {
-        // Log each player for debugging
-        console.log(`Player ${index}:`, {
-          name: player.name,
-          team: player.team,
-          position: player.position,
-          hasStats: !!player.stats,
-          stats: player.stats
-        });
+        // Build stats from top-level fields
+        const stats = buildStats(player, selectedSport);
 
-        // Create a fallback mock player for missing data
+        // Fallback mock data for missing fields (salary, contract, etc.)
         const sportUpper = selectedSport.toUpperCase();
         const mockSportData = mockPlayers[sportUpper as keyof typeof mockPlayers] || [];
-        const mockPlayer = mockSportData[index] || mockSportData[0] || mockPlayers.NBA[0];
-        
-        // Extract stats from API or use mock
-        let stats = player.stats || mockPlayer.stats;
-        
-        // If stats is an object but empty, use mock stats
-        if (stats && typeof stats === 'object' && Object.keys(stats).length === 0) {
-          stats = mockPlayer.stats;
-        }
-        
-        // If stats is not an object (e.g., string or number), use mock stats
-        if (!stats || typeof stats !== 'object') {
-          stats = mockPlayer.stats;
-        }
+        const mockPlayer = mockSportData[index % mockSportData.length] || mockSportData[0] || mockPlayers.NBA[0];
 
-        // If API stats exist but have different structure, map them
-        if (player.stats && typeof player.stats === 'object') {
-          // Try to map API stats to expected format
-          if (selectedSport === 'nba') {
-            stats = {
-              points: player.stats.points || player.stats.pts || mockPlayer.stats.points,
-              rebounds: player.stats.rebounds || player.stats.reb || mockPlayer.stats.rebounds,
-              assists: player.stats.assists || player.stats.ast || mockPlayer.stats.assists,
-              steals: player.stats.steals || mockPlayer.stats.steals,
-              blocks: player.stats.blocks || mockPlayer.stats.blocks,
-              fgPct: player.stats.fgPct || player.stats.fg_percentage || mockPlayer.stats.fgPct,
-              threePtPct: player.stats.threePtPct || player.stats.three_pt_percentage || mockPlayer.stats.threePtPct,
-              turnovers: player.stats.turnovers || mockPlayer.stats.turnovers
-            };
-          } else if (selectedSport === 'nfl') {
-            stats = {
-              passingYards: player.stats.passingYards || mockPlayer.stats.passingYards,
-              passingTDs: player.stats.passingTDs || mockPlayer.stats.passingTDs,
-              interceptions: player.stats.interceptions || mockPlayer.stats.interceptions,
-              rushingYards: player.stats.rushingYards || mockPlayer.stats.rushingYards,
-              rushingTDs: player.stats.rushingTDs || mockPlayer.stats.rushingTDs,
-              completionPct: player.stats.completionPct || mockPlayer.stats.completionPct,
-              qbRating: player.stats.qbRating || mockPlayer.stats.qbRating,
-              fumbles: player.stats.fumbles || mockPlayer.stats.fumbles
-            };
-          }
+        // Log the first few players for debugging
+        if (index < 3) {
+          console.log(`Player ${index} after mapping:`, {
+            name: player.name || player.playerName,
+            team: player.team,
+            position: player.position,
+            statsKeys: Object.keys(stats),
+            statsSample: stats
+          });
         }
 
         return {
@@ -735,7 +743,13 @@ const PlayerStatsScreen = () => {
       const sportUpper = selectedSport.toUpperCase();
       return mockPlayers[sportUpper as keyof typeof mockPlayers] || mockPlayers.NBA;
     }
-  }, [playersFromApi, selectedSport, playersData, apiEndpoint]);
+  }, [playersFromApi, selectedSport, playersData]);
+
+  // Dynamically generate unique team list from the players array
+  const uniqueTeams = React.useMemo(() => {
+    const teams = players.map(p => p.team).filter(Boolean);
+    return ['All Teams', ...new Set(teams)].sort();
+  }, [players]);
 
   // Filter players based on filters and search
   const filteredPlayers = React.useMemo(() => {
@@ -745,8 +759,8 @@ const PlayerStatsScreen = () => {
         return false;
       }
       
-      // Filter by team
-      if (selectedTeam !== 'All Teams' && !player.team.includes(selectedTeam)) {
+      // Filter by team – now using dynamic list
+      if (selectedTeam !== 'All Teams' && player.team !== selectedTeam) {
         return false;
       }
       
@@ -780,7 +794,7 @@ const PlayerStatsScreen = () => {
     const sportUpper = selectedSport.toUpperCase();
     
     if (sportUpper === 'NBA') {
-      // Player Efficiency Rating (PER)
+      // Player Efficiency Rating (PER) – simplified
       per = ((stats.points || 0) * 1.0 +
              (stats.rebounds || 0) * 0.8 +
              (stats.assists || 0) * 1.2 +
@@ -823,6 +837,13 @@ const PlayerStatsScreen = () => {
         vorp = (per - 10) * 0.3;
         usageRate = ((stats.targets || stats.receptions || 0) / 5) * 100;
       }
+    } else {
+      // Fallback for NHL/MLB: just use a simple efficiency sum
+      efficiency = Object.values(stats).reduce((sum: number, val: any) => sum + (Number(val) || 0), 0);
+      per = efficiency / 10;
+      winShares = per * 0.1;
+      vorp = (per - 5) * 0.2;
+      usageRate = 50;
     }
 
     return {
@@ -860,12 +881,6 @@ const PlayerStatsScreen = () => {
     // Reset filters when sport changes
     setSelectedPosition('All Positions');
     setSelectedTeam('All Teams');
-  };
-
-  const toggleApiEndpoint = () => {
-    const newEndpoint = apiEndpoint === 'players' ? 'fantasy/players' : 'players';
-    setApiEndpoint(newEndpoint);
-    console.log(`🔄 Switching to ${newEndpoint} endpoint`);
   };
 
   const renderPlayerCard = (player: any) => {
@@ -1260,16 +1275,8 @@ const PlayerStatsScreen = () => {
               variant="contained" 
               size="small" 
               onClick={handleRefresh}
-              sx={{ mr: 1 }}
             >
               Retry Loading
-            </Button>
-            <Button 
-              variant="outlined" 
-              size="small" 
-              onClick={toggleApiEndpoint}
-            >
-              Switch to {apiEndpoint === 'players' ? 'Fantasy Players' : 'Players'} Endpoint
             </Button>
           </Box>
         </Alert>
@@ -1309,27 +1316,17 @@ const PlayerStatsScreen = () => {
               {playersData?.is_real_data ? '✅ REAL DATA CONNECTED' : '⚠️ USING MOCK DATA'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Endpoint: /api/{apiEndpoint} • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
+              Endpoint: /api/fantasy/players • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
             </Typography>
           </Box>
-          <Box display="flex" gap={1}>
-            <Button 
-              size="small" 
-              variant="outlined"
-              onClick={toggleApiEndpoint}
-              startIcon={<RefreshIcon />}
-            >
-              Switch Endpoint
-            </Button>
-            <Button 
-              size="small" 
-              variant="outlined"
-              onClick={() => setShowApiDebug(!showApiDebug)}
-              startIcon={<BugReportIcon />}
-            >
-              Debug
-            </Button>
-          </Box>
+          <Button 
+            size="small" 
+            variant="outlined"
+            onClick={() => setShowApiDebug(!showApiDebug)}
+            startIcon={<BugReportIcon />}
+          >
+            Debug
+          </Button>
         </Box>
       </Paper>
 
@@ -1475,7 +1472,7 @@ const PlayerStatsScreen = () => {
                 onChange={(e) => setSelectedTeam(e.target.value)}
                 label="Filter by Team"
               >
-                {teamFilters[selectedSport as keyof typeof teamFilters]?.map((team) => (
+                {uniqueTeams.map((team) => (
                   <MenuItem key={team} value={team}>{team}</MenuItem>
                 ))}
               </Select>
@@ -1508,7 +1505,7 @@ const PlayerStatsScreen = () => {
             API Debug Information
           </Typography>
           <Box sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>
-            <div><strong>Endpoint:</strong> {apiEndpoint}</div>
+            <div><strong>Endpoint:</strong> fantasy/players</div>
             <div><strong>Sport:</strong> {selectedSport}</div>
             <div><strong>API Players:</strong> {playersFromApi.length}</div>
             <div><strong>Processed Players:</strong> {players.length}</div>
@@ -1587,9 +1584,6 @@ const PlayerStatsScreen = () => {
               <Button onClick={handleRefresh} sx={{ mr: 1 }} variant="outlined">
                 Retry Loading
               </Button>
-              <Button onClick={toggleApiEndpoint} variant="outlined">
-                Switch API Endpoint
-              </Button>
             </Box>
           </Paper>
         )}
@@ -1603,7 +1597,7 @@ const PlayerStatsScreen = () => {
           </Typography>
           {!playersData?.is_real_data && (
             <Typography variant="caption" display="block" color="warning.main">
-              Try switching API endpoints or check your backend connection
+              Please ensure the backend is running and the fantasy/players endpoint is available.
             </Typography>
           )}
         </Box>

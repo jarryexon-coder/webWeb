@@ -1,195 +1,86 @@
 // src/layouts/Layout.tsx
-import React, { useState } from 'react'
-import { Outlet, Link } from 'react-router-dom'
+import React, { useState } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
-  Box,
-  CssBaseline,
-  Drawer,
-  IconButton,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
   Toolbar,
   Typography,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material'
-import {
-  SportsFootball as SportsFootballIcon,
-  Newspaper as NewspaperIcon,
-  EmojiEvents as EmojiEventsIcon,
-  Person as PersonIcon,
-  Feed as FeedIcon,
-  AcUnit as AcUnitIcon,
-  Analytics as AnalyticsIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  AccountTree as AccountTreeIcon,
-  Insights as InsightsIcon,
-  Timeline as TimelineIcon,
-  ShowChart as ShowChartIcon,
-  Key as KeyIcon,
-  Casino as CasinoIcon,
-  Menu as MenuIcon,
-  Home as HomeIcon,
-  FlashOn as FlashIcon,
-  TrendingUp as StatsChartIcon,
-  AutoAwesome as SparklesIcon,
-  Security as ShieldIcon,
-  Star as StarIcon,
-  Login as LoginIcon,
-  BugReport as BugReportIcon,
-  SportsBasketball as SportsBasketballIcon,
-} from '@mui/icons-material'
+  Tabs,
+  Tab,
+  Menu,
+  MenuItem,
+  Box,
+  Container,
+} from '@mui/material';
+import { navigationGroups } from '../config/navigation';
 
-const drawerWidth = 240
+const Layout: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [activeGroupIndex, setActiveGroupIndex] = useState<number | null>(null);
 
-const menuItems = [
-  { text: 'Home', icon: <HomeIcon />, path: '/' },
-  { text: 'Live Games', icon: <FlashIcon />, path: '/live-games' },
-  { text: 'NFL Analytics', icon: <SportsFootballIcon />, path: '/nfl-analytics' },
-  { text: 'News Desk', icon: <NewspaperIcon />, path: '/news-desk' },
-  { text: 'Fantasy Hub', icon: <EmojiEventsIcon />, path: '/fantasy-hub' },
-  { text: 'Player Stats', icon: <PersonIcon />, path: '/player-stats' },
-  { text: 'Sports Wire', icon: <FeedIcon />, path: '/sports-wire' },
-  { text: 'NHL Trends', icon: <AcUnitIcon />, path: '/nhl-trends' },
-  { text: 'Match Analytics', icon: <AnalyticsIcon />, path: '/match-analytics' },
-  { text: 'Daily Picks', icon: <SparklesIcon />, path: '/daily-picks' },
-  { text: 'Parlay Architect', icon: <AccountTreeIcon />, path: '/parlay-architect' },
-  { text: 'Advanced Analytics', icon: <InsightsIcon />, path: '/advanced-analytics' },
-  { text: 'Predictions Outcome', icon: <TimelineIcon />, path: '/predictions-outcome' },
-  { text: 'Kalshi Predictions', icon: <ShowChartIcon />, path: '/kalshi-predictions' },
-  { text: 'Secret Phrases', icon: <KeyIcon />, path: '/secret-phrases' },
-  { text: 'Prize Picks', icon: <CasinoIcon />, path: '/prize-picks' },
-  { text: 'Subscription', icon: <StarIcon />, path: '/subscription' },
-  { text: 'Login', icon: <LoginIcon />, path: '/login' },
-  { text: 'Diagnostic', icon: <BugReportIcon />, path: '/diagnostic' },
-]
+  const handleTabClick = (event: React.MouseEvent<HTMLElement>, index: number) => {
+    setAnchorEl(event.currentTarget);
+    setActiveGroupIndex(index);
+  };
 
-const Layout = () => {
-  const theme = useTheme()
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'))
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+    setActiveGroupIndex(null);
+  };
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen)
-  }
+  const handleMenuItemClick = (path: string) => {
+    navigate(path);
+    handleMenuClose();
+  };
 
-  const drawer = (
-    <Box>
-      <Toolbar sx={{ bgcolor: 'primary.main', color: 'white' }}>
-        <Typography variant="h6" noWrap>
-          🏀 NBA Fantasy
-        </Typography>
-      </Toolbar>
-      <List>
-        {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
-            <ListItemButton component={Link} to={item.path}>
-              <ListItemIcon sx={{ color: 'primary.main' }}>
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText primary={item.text} />
-            </ListItemButton>
-          </ListItem>
-        ))}
-      </List>
-    </Box>
-  )
+  // Find which tab might be active based on current path (optional highlighting)
+  // For simplicity we don't highlight the tab itself.
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      <CssBaseline />
-      
-      {/* App Bar */}
-      <AppBar
-        position="fixed"
-        sx={{
-          width: { md: `calc(100% - ${drawerWidth}px)` },
-          ml: { md: `${drawerWidth}px` },
-          bgcolor: 'background.paper',
-          color: 'text.primary',
-          borderBottom: 1,
-          borderColor: 'divider',
-        }}
-      >
+    <>
+      <AppBar position="static">
         <Toolbar>
-          {isMobile && (
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
-          )}
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            NBA Fantasy Dashboard
+          <Typography variant="h6" sx={{ flexGrow: 1, cursor: 'pointer' }} onClick={() => navigate('/')}>
+            Sports App
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {'1.0.0'}
-          </Typography>
+          <Tabs value={false} textColor="inherit">
+            {navigationGroups.map((group, index) => (
+              <Tab
+                key={group.title}
+                label={group.title}
+                onClick={(e) => handleTabClick(e, index)}
+              />
+            ))}
+          </Tabs>
         </Toolbar>
       </AppBar>
 
-      {/* Drawer */}
-      <Box
-        component="nav"
-        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
+      {/* Dropdown menu for the selected group */}
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={handleMenuClose}
       >
-        {isMobile ? (
-          <Drawer
-            variant="temporary"
-            open={mobileOpen}
-            onClose={handleDrawerToggle}
-            ModalProps={{ keepMounted: true }}
-            sx={{
-              display: { xs: 'block', md: 'none' },
-              '& .MuiDrawer-paper': {
-                boxSizing: 'border-box',
-                width: drawerWidth,
-              },
-            }}
-          >
-            {drawer}
-          </Drawer>
-        ) : (
-          <Drawer
-            variant="permanent"
-            sx={{
-              display: { xs: 'none', md: 'block' },
-              '& .MuiDrawer-paper': {
-                boxSizing: 'border-box',
-                width: drawerWidth,
-              },
-            }}
-            open
-          >
-            {drawer}
-          </Drawer>
-        )}
-      </Box>
+        {activeGroupIndex !== null &&
+          navigationGroups[activeGroupIndex].items.map((item) => (
+            <MenuItem
+              key={item.path}
+              onClick={() => handleMenuItemClick(item.path)}
+              selected={location.pathname === item.path}
+            >
+              {item.label}
+            </MenuItem>
+          ))}
+      </Menu>
 
-      {/* Main Content */}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { md: `calc(100% - ${drawerWidth}px)` },
-          mt: '64px', // AppBar height
-          minHeight: 'calc(100vh - 64px)',
-          background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)',
-        }}
-      >
+      {/* Page content */}
+      <Container maxWidth="xl" sx={{ mt: 4 }}>
         <Outlet />
-      </Box>
-    </Box>
-  )
-}
+      </Container>
+    </>
+  );
+};
 
-export default Layout
+export default Layout;

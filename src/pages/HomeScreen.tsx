@@ -12,6 +12,8 @@ import {
 } from '@mui/material';
 import { Link } from 'react-router-dom';
 import SportsBasketballIcon from '@mui/icons-material/SportsBasketball';
+import SportsTennisIcon from '@mui/icons-material/SportsTennis';
+import SportsGolfIcon from '@mui/icons-material/SportsGolf';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import SecurityIcon from '@mui/icons-material/Security';
@@ -70,6 +72,16 @@ const HomeScreen = () => {
       icon: <TrendingUpIcon fontSize="large" />,
       color: '#ec4899'
     }
+  ];
+
+  // New tennis and golf pages
+  const racquetSportsPages = [
+    { sport: 'tennis', title: 'Tennis Players', path: '/tennis/players', icon: <SportsTennisIcon fontSize="large" />, color: '#2e7d32' },
+    { sport: 'tennis', title: 'Tennis Tournaments', path: '/tennis/tournaments', icon: <SportsTennisIcon fontSize="large" />, color: '#2e7d32' },
+    { sport: 'tennis', title: 'Tennis Matches', path: '/tennis/matches', icon: <SportsTennisIcon fontSize="large" />, color: '#2e7d32' },
+    { sport: 'golf', title: 'Golf Players', path: '/golf/players', icon: <SportsGolfIcon fontSize="large" />, color: '#1565c0' },
+    { sport: 'golf', title: 'Golf Tournaments', path: '/golf/tournaments', icon: <SportsGolfIcon fontSize="large" />, color: '#1565c0' },
+    { sport: 'golf', title: 'Golf Leaderboard', path: '/golf/leaderboard', icon: <SportsGolfIcon fontSize="large" />, color: '#1565c0' },
   ];
 
   return (
@@ -172,6 +184,49 @@ const HomeScreen = () => {
                   sx={{ borderColor: category.color, color: category.color }}
                 >
                   Explore
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Racquet Sports Section (New) */}
+      <Typography variant="h4" gutterBottom sx={{ mt: 6, mb: 3, color: 'text.primary' }}>
+        Racquet Sports
+      </Typography>
+      <Grid container spacing={4} sx={{ mb: 8 }}>
+        {racquetSportsPages.map((page, index) => (
+          <Grid item xs={12} sm={6} md={4} key={index}>
+            <Card 
+              sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                transition: 'transform 0.2s',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow: 6
+                }
+              }}
+            >
+              <CardContent sx={{ flexGrow: 1, textAlign: 'center' }}>
+                <Box sx={{ color: page.color, mb: 2 }}>
+                  {page.icon}
+                </Box>
+                <Typography variant="h5" component="h2" gutterBottom>
+                  {page.title}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  {page.sport === 'tennis' ? 'ATP & WTA stats and analytics' : 'PGA Tour insights and leaderboards'}
+                </Typography>
+                <Button
+                  component={Link}
+                  to={page.path}
+                  variant="outlined"
+                  sx={{ borderColor: page.color, color: page.color }}
+                >
+                  View
                 </Button>
               </CardContent>
             </Card>
