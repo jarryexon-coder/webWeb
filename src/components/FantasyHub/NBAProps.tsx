@@ -14,7 +14,7 @@ import { Player } from '../../types/fantasy.types';
 
 interface NBAPropsProps {
   onAddToLineup: (player: Player) => void;
-  allPlayers: Player[]; // full player list from parent
+  allPlayers: Player[];
 }
 
 interface PropItem {
@@ -66,26 +66,27 @@ const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
     fetchProps();
   }, []);
 
-  // Find full player from allPlayers by name
-const getFullPlayer = (playerName: string): Player | undefined => {
-  if (!allPlayers) return undefined; // ← add this guard
-  return allPlayers.find(p => p.name === playerName);
-};
+  const getFullPlayer = (playerName: string): Player | undefined => {
+    if (!allPlayers) return undefined;
+    return allPlayers.find(p => p.name === playerName);
+  };
 
   const handleAdd = (propPlayer: PlayerProps) => {
     const full = getFullPlayer(propPlayer.player);
     if (full) {
       onAddToLineup(full);
     } else {
-      // Fallback: create a player using the first prop's line as projection
+      // Improved fallback: estimate salary based on projection
       const firstProp = propPlayer.props[0];
+      const estimatedProjection = firstProp?.projected || firstProp?.line || 15;
+      const estimatedSalary = Math.min(15000, Math.max(3000, Math.round(estimatedProjection * 250 + 2000)));
       onAddToLineup({
         id: propPlayer.id,
         name: propPlayer.player,
         team: propPlayer.team,
         position: propPlayer.position,
-        salary: 5000,
-        fantasy_projection: firstProp?.projected || firstProp?.line || 15,
+        salary: estimatedSalary,
+        fantasy_projection: estimatedProjection,
       });
     }
   };
@@ -106,15 +107,17 @@ const getFullPlayer = (playerName: string): Player | undefined => {
     );
   }
 
-  if (propsData.length === 0) {
+  // Filter out players with no valid props (line > 0)
+  const validProps = propsData.filter(p => p.props.some(prop => prop.line > 0));
+  if (validProps.length === 0) {
     return (
-      <Alert severity="info">No player props available at this time.</Alert>
+      <Alert severity="info">No real-time player props available at this time.</Alert>
     );
   }
 
   return (
     <Box>
-      {propsData.map(playerProps => (
+      {validProps.map(playerProps => (
         <Card key={playerProps.id} sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>

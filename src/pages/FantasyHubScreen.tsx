@@ -67,7 +67,7 @@ import MonetizationOnIcon from '@mui/icons-material/MonetizationOn'; // for odds
 import { useTheme } from '@mui/material/styles';
 
 // Import your existing components (NBAProps/NHLProps are now replaced with custom component)
-import FantasyHubDashboard from '../components/FantasyHub/FantasyHubDashboard';
+import FantasyHubDashboard from '../components/FantasyHub/FantasyHubDashBoard';
 import FantasyLineupBuilder from '../components/FantasyHub/FantasyLineupBuilder';
 import PlayerTrends from '../components/FantasyHub/PlayerTrends';
 
