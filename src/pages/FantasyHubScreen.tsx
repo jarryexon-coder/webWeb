@@ -303,7 +303,8 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
     setError(null);
 
     try {
-      const url = `${API_BASE}/api/fantasy/players?sport=${activeSport}&limit=100`;
+      // Updated URL to include realtime=true as per File 1 example
+      const url = `${API_BASE}/api/fantasy/players?sport=${activeSport}&realtime=true&limit=100`;
       console.log('[FETCH] Fetching players from:', url);
       const response = await fetch(url);
 
@@ -607,77 +608,76 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
     }
   };
 
-  const generateSingleLineup = (playerPool: Player2026[], sport: Sport, strategy: string): FantasyLineup | null => {
-    // Sort according to strategy
-    let sorted = [...playerPool];
-    if (strategy === 'value') {
-      sorted.sort((a, b) => (b.value || 0) - (a.value || 0));
-    } else if (strategy === 'projection') {
-      sorted.sort((a, b) => (b.projection || 0) - (a.projection || 0));
-    } else if (strategy === 'balanced') {
-      // Weighted combination
-      sorted.sort((a, b) => {
-        const scoreA = (a.value || 0) * 0.5 + (a.projection || 0) * 0.5;
-        const scoreB = (b.value || 0) * 0.5 + (b.projection || 0) * 0.5;
-        return scoreB - scoreA;
-      });
+const generateSingleLineup = (playerPool: Player2026[], sport: Sport, strategy: string): FantasyLineup | null => {
+  // Create a mutable copy of the full player pool
+  let availablePlayers = [...playerPool];
+
+  // Sort according to strategy using actual player stats
+  if (strategy === 'value') {
+    availablePlayers.sort((a, b) => (b.value || 0) - (a.value || 0));
+  } else if (strategy === 'projection') {
+    availablePlayers.sort((a, b) => (b.projection || 0) - (a.projection || 0));
+  } else if (strategy === 'balanced') {
+    // Weighted combination
+    availablePlayers.sort((a, b) => {
+      const scoreA = (a.value || 0) * 0.5 + (a.projection || 0) * 0.5;
+      const scoreB = (b.value || 0) * 0.5 + (b.projection || 0) * 0.5;
+      return scoreB - scoreA;
+    });
+  }
+
+  const newSlots = createEmptyLineup(sport).slots;
+  let remainingCap = SALARY_CAP;
+  const usedIds = new Set<string>();
+
+  for (let i = 0; i < newSlots.length; i++) {
+    const slot = newSlots[i];
+
+    // Find the first eligible player from the sorted, full list
+    const playerIndex = availablePlayers.findIndex(p =>
+      !usedIds.has(p.id) &&
+      p.salary <= remainingCap &&
+      canPlayPosition(p.position, slot.position, sport)
+    );
+
+    if (playerIndex === -1) {
+      console.warn(`[Generate] No eligible player found for slot ${slot.position} under cap $${remainingCap}`);
+      continue; // skip this slot but try to fill others
     }
 
-    const newSlots = createEmptyLineup(sport).slots;
-    let remainingCap = SALARY_CAP;
-    let filled = 0;
-    const usedIds = new Set<string>();
+    const selectedPlayer = availablePlayers[playerIndex];
+    usedIds.add(selectedPlayer.id);
+    availablePlayers.splice(playerIndex, 1); // remove from pool
 
-    for (let i = 0; i < newSlots.length && filled < MAX_PLAYERS; i++) {
-      const slot = newSlots[i];
-      const playerIndex = sorted.findIndex(p => 
-        !usedIds.has(p.id) &&
-        p.salary <= remainingCap && 
-        canPlayPosition(p.position, slot.position, sport)
-      );
-
-      if (playerIndex === -1) {
-        console.warn(`[Generate] No player found for slot ${slot.position}`);
-        continue;
-      }
-
-      const player = sorted[playerIndex];
-      usedIds.add(player.id);
-      sorted.splice(playerIndex, 1);
-
-      slot.player = {
-        id: player.id,
-        name: player.name,
-        team: player.team,
-        position: player.position,
-        salary: player.salary,
-        fantasy_projection: player.projection,
-        points: player.points,
-        assists: player.assists,
-        rebounds: player.rebounds,
-        goals: player.goals,
-      };
-
-      remainingCap -= player.salary;
-      filled++;
-    }
-
-    const totalSalary = SALARY_CAP - remainingCap;
-    const totalProjection = newSlots.reduce((sum, slot) => sum + (slot.player?.fantasy_projection || 0), 0);
-
-    if (filled === 0) return null;
-
-    return {
-      id: `lineup-${Date.now()}-${Math.random()}`,
-      sport,
-      slots: newSlots,
-      total_salary: totalSalary,
-      total_projection: totalProjection,
-      remaining_cap: remainingCap,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    // Assign the FULL player object to the slot
+    // Spread all fields and ensure fantasy_projection is set (if needed by your Player type)
+    slot.player = {
+      ...selectedPlayer,
+      fantasy_projection: selectedPlayer.projection, // map projection to fantasy_projection if required
     };
+    remainingCap -= selectedPlayer.salary;
+  }
+
+  const totalSalary = SALARY_CAP - remainingCap;
+  const totalProjection = newSlots.reduce(
+    (sum, slot) => sum + (slot.player?.fantasy_projection || 0),
+    0
+  );
+
+  // If no players were added, return null
+  if (usedIds.size === 0) return null;
+
+  return {
+    id: `lineup-${Date.now()}-${Math.random()}`,
+    sport,
+    slots: newSlots,
+    total_salary: totalSalary,
+    total_projection: totalProjection,
+    remaining_cap: remainingCap,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
+};
 
   const generateMultipleLineups = (
     playerPool: Player2026[],
@@ -721,59 +721,58 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   };
 
   // ============= AI NATURAL LANGUAGE LINEUP GENERATOR =============
-  const filterPlayersByQuery = (pool: Player2026[], query: string): Player2026[] => {
-    const lower = query.toLowerCase();
-    let filtered = pool;
-    
-    // Team filters (common abbreviations)
-    const teamMap: Record<string, string[]> = {
-      lakers: ['LAL'],
-      warriors: ['GSW'],
-      celtics: ['BOS'],
-      bucks: ['MIL'],
-      suns: ['PHX'],
-      nuggets: ['DEN'],
-      sixers: ['PHI'],
-      '76ers': ['PHI'],
-      mavericks: ['DAL'],
-      mavs: ['DAL'],
-      clippers: ['LAC'],
-      heat: ['MIA'],
-      bulls: ['CHI'],
-      hawks: ['ATL'],
-      // add more as needed
-    };
-    for (const [key, codes] of Object.entries(teamMap)) {
-      if (lower.includes(key)) {
-        filtered = filtered.filter(p => codes.includes(p.team));
-      }
-    }
-    
-    // Position filters
-    if (lower.includes('point guard') || lower.includes('pg')) {
-      filtered = filtered.filter(p => p.position === 'PG');
-    }
-    if (lower.includes('shooting guard') || lower.includes('sg')) {
-      filtered = filtered.filter(p => p.position === 'SG');
-    }
-    if (lower.includes('small forward') || lower.includes('sf')) {
-      filtered = filtered.filter(p => p.position === 'SF');
-    }
-    if (lower.includes('power forward') || lower.includes('pf')) {
-      filtered = filtered.filter(p => p.position === 'PF');
-    }
-    if (lower.includes('center') || lower.includes('c')) {
-      filtered = filtered.filter(p => p.position === 'C');
-    }
-    
-    // Rookie filter
-    if (lower.includes('rookie') || lower.includes('rookies')) {
-      filtered = filtered.filter(p => p.is_rookie === true);
-    }
-    
-    // Value/projection keywords – we don't filter, just influence strategy later
-    return filtered;
+const filterPlayersByQuery = (pool: Player2026[], query: string): Player2026[] => {
+  const lower = query.toLowerCase();
+  let filtered = pool; // start with full player objects
+
+  // Team filters (common abbreviations)
+  const teamMap: Record<string, string[]> = {
+    lakers: ['LAL'],
+    warriors: ['GSW'],
+    celtics: ['BOS'],
+    bucks: ['MIL'],
+    suns: ['PHX'],
+    nuggets: ['DEN'],
+    sixers: ['PHI'],
+    '76ers': ['PHI'],
+    mavericks: ['DAL'],
+    mavs: ['DAL'],
+    clippers: ['LAC'],
+    heat: ['MIA'],
+    bulls: ['CHI'],
+    hawks: ['ATL'],
+    // add more as needed
   };
+  for (const [key, codes] of Object.entries(teamMap)) {
+    if (lower.includes(key)) {
+      filtered = filtered.filter(p => codes.includes(p.team));
+    }
+  }
+
+  // Position filters
+  if (lower.includes('point guard') || lower.includes('pg')) {
+    filtered = filtered.filter(p => p.position === 'PG');
+  }
+  if (lower.includes('shooting guard') || lower.includes('sg')) {
+    filtered = filtered.filter(p => p.position === 'SG');
+  }
+  if (lower.includes('small forward') || lower.includes('sf')) {
+    filtered = filtered.filter(p => p.position === 'SF');
+  }
+  if (lower.includes('power forward') || lower.includes('pf')) {
+    filtered = filtered.filter(p => p.position === 'PF');
+  }
+  if (lower.includes('center') || lower.includes('c')) {
+    filtered = filtered.filter(p => p.position === 'C');
+  }
+
+  // Rookie filter
+  if (lower.includes('rookie') || lower.includes('rookies')) {
+    filtered = filtered.filter(p => p.is_rookie === true);
+  }
+
+  return filtered;
+};
 
   const determineStrategyFromQuery = (query: string): 'value' | 'projection' | 'balanced' => {
     const lower = query.toLowerCase();
@@ -782,73 +781,44 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
     return 'balanced';
   };
 
-  const handleGenerateFantasyLineup = async () => {
-    if (!customQuery.trim()) {
-      alert('Please enter a lineup prompt');
-      return;
-    }
-
-    setGeneratingLineup(true);
-    setShowGeneratorModal(true);
-
-    try {
-      // Try API first
-      const endpoint = `${API_BASE}/api/ai/fantasy-lineup`;
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: customQuery, sport: activeSport, players: players }),
+const handleGenerateFantasyLineup = async () => {
+  if (!customQuery.trim()) {
+    alert('Please enter a lineup prompt');
+    return;
+  }
+  setGeneratingLineup(true);
+  setShowGeneratorModal(true);
+  try {
+    // Skip API and go straight to local fallback
+    const pool = filterPlayersByQuery(players, customQuery);
+    if (pool.length === 0) {
+      setLineupResult({
+        success: false,
+        analysis: `No players match your query: "${customQuery}". Try different keywords.`,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.lineup) {
-          // Convert API response to our lineup format (assume it's compatible)
-          const newLineup = data.lineup as FantasyLineup;
-          setLineup(newLineup);
-          setLineupResult({
-            success: true,
-            analysis: `✅ Lineup generated for: "${customQuery}"`,
-            lineup: newLineup,
-            source: 'AI API',
-          });
-          setGeneratingLineup(false);
-          return;
-        }
-      }
-      throw new Error('API failed or no lineup');
-    } catch (error) {
-      console.error('❌ Error generating fantasy lineup:', error);
-      // Fallback: filter players based on query and use built-in generator
-      const pool = filterPlayersByQuery(players, customQuery);
-      if (pool.length === 0) {
+    } else {
+      const strategy = determineStrategyFromQuery(customQuery);
+      const lineups = generateMultipleLineups(pool, activeSport, strategy, 1);
+      if (lineups.length > 0) {
+        const newLineup = lineups[0];
+        setLineup(newLineup);
         setLineupResult({
-          success: false,
-          analysis: `No players match your query: "${customQuery}". Try different keywords.`,
+          success: true,
+          analysis: `🎯 Lineup generated based on your query using ${strategy} strategy.`,
+          lineup: newLineup,
+          source: 'Local Generator',
         });
       } else {
-        const strategy = determineStrategyFromQuery(customQuery);
-        const lineups = generateMultipleLineups(pool, activeSport, strategy, 1);
-        if (lineups.length > 0) {
-          const newLineup = lineups[0];
-          setLineup(newLineup);
-          setLineupResult({
-            success: true,
-            analysis: `🎯 Lineup generated based on your query using ${strategy} strategy.`,
-            lineup: newLineup,
-            source: 'Local Generator',
-          });
-        } else {
-          setLineupResult({
-            success: false,
-            analysis: 'Could not generate a valid lineup with the current player pool.',
-          });
-        }
+        setLineupResult({
+          success: false,
+          analysis: 'Could not generate a valid lineup with the current player pool.',
+        });
       }
-    } finally {
-      setGeneratingLineup(false);
     }
-  };
+  } finally {
+    setGeneratingLineup(false);
+  }
+};
 
   // ============= FILTERING LOGIC FOR PLAYER GRID =============
   // Derived ranges for sliders
@@ -1587,6 +1557,7 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
                     lineup={lineup}
                     onRemovePlayer={handleRemovePlayer}
                     onClearLineup={handleClearLineup}
+                    allPlayers={players}
                   />
                 </ErrorBoundary>
               </Box>
