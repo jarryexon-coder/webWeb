@@ -67,9 +67,10 @@ const NHLProps: React.FC<NHLPropsProps> = ({ onAddToLineup, allPlayers }) => {
   }, []);
 
   // Find full player from allPlayers by name
-  const getFullPlayer = (playerName: string): Player | undefined => {
-    return allPlayers.find(p => p.name === playerName);
-  };
+const getFullPlayer = (playerName: string): Player | undefined => {
+  if (!allPlayers) return undefined;
+  return allPlayers.find(p => p.name === playerName);
+};
 
   const handleAdd = (propPlayer: PlayerProps) => {
     const full = getFullPlayer(propPlayer.player);

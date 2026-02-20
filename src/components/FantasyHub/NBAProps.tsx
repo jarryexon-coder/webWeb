@@ -67,9 +67,10 @@ const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
   }, []);
 
   // Find full player from allPlayers by name
-  const getFullPlayer = (playerName: string): Player | undefined => {
-    return allPlayers.find(p => p.name === playerName);
-  };
+const getFullPlayer = (playerName: string): Player | undefined => {
+  if (!allPlayers) return undefined; // ← add this guard
+  return allPlayers.find(p => p.name === playerName);
+};
 
   const handleAdd = (propPlayer: PlayerProps) => {
     const full = getFullPlayer(propPlayer.player);

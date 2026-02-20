@@ -355,8 +355,18 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
         return enhanced;
       });
 
-      setPlayers(enhancedPlayers);
-      setFilteredPlayers(enhancedPlayers);
+// Deduplicate players by name + team, keep the one with highest salary
+const uniqueMap = new Map<string, Player2026>();
+enhancedPlayers.forEach(player => {
+  const key = `${player.name}-${player.team}`;
+  const existing = uniqueMap.get(key);
+  if (!existing || player.salary > existing.salary) {
+    uniqueMap.set(key, player);
+  }
+});
+const uniquePlayers = Array.from(uniqueMap.values());
+setPlayers(uniquePlayers);
+setFilteredPlayers(uniquePlayers);
 
       // Update filter ranges
       const salaries = enhancedPlayers.map((p: Player2026) => p.salary).filter(Boolean);
@@ -1420,14 +1430,18 @@ const handleGenerateFantasyLineup = async () => {
       {/* AI Lineup Generator */}
       {renderLineupGenerator()}
       
-      <ErrorBoundary componentName="FantasyHubDashboard">
-        <Box sx={{ mb: 4 }}>
-          <FantasyHubDashboard sport={activeSport} lineup={lineup} onAddPlayer={handleAddPlayer} />
-        </Box>
-      </ErrorBoundary>
-      
-      {/* NEW: Odds Section */}
-      {renderOddsSection()}
+<ErrorBoundary componentName="FantasyHubDashboard">
+  <Box sx={{ mb: 4 }}>
+    <FantasyHubDashboard 
+      sport={activeSport} 
+      lineup={lineup} 
+      onAddPlayer={handleAddPlayer}
+      onRemovePlayer={handleRemovePlayer}
+      onClearLineup={handleClearLineup}
+      allPlayers={players}   // ← critical: pass the deduplicated player list
+    />
+  </Box>
+</ErrorBoundary>
       
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {/* Props Section with Filter Bar */}
