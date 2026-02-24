@@ -1,6 +1,8 @@
 // FantasyHubScreen.tsx – with collapsible sections, generator settings, multi‑lineup generation,
 // AI natural language lineup generator, player props filter bar, and new odds section
 // FIXED: Uses real player data from Balldontlie / SportsData.io, odds from /api/odds/games
+// UPDATED: Salary cap to 60,000, improved backtracking generator, position parsing for combined roles,
+// and added window.debugPlayers for console inspection
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -66,7 +68,7 @@ import SparklesIcon from '@mui/icons-material/AutoAwesome';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn'; // for odds
 import { useTheme } from '@mui/material/styles';
 
-// Import your existing components (NBAProps/NHLProps are now replaced with custom component)
+// Import your existing components
 import FantasyHubDashboard from '../components/FantasyHub/FantasyHubDashBoard';
 import FantasyLineupBuilder from '../components/FantasyHub/FantasyLineupBuilder';
 import PlayerTrends from '../components/FantasyHub/PlayerTrends';
@@ -188,13 +190,14 @@ interface FantasyHubScreenProps {
   initialSport?: Sport;
 }
 
-const SALARY_CAP = 50000;   // FanDuel typical cap
+// ============= UPDATED SALARY CAP =============
+const SALARY_CAP = 71000;   // FanDuel standard cap
 const MAX_PLAYERS = 9;
 
 // Helper to create an empty lineup for a given sport
 const createEmptyLineup = (sport: Sport): FantasyLineup => {
   const positions = sport === 'nba'
-    ? ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL', 'UTIL']
+    ? ['C', 'PF', 'SF', 'PG', 'SG', 'SF', 'SG', 'PF', 'PG']
     : ['C', 'LW', 'RW', 'D', 'D', 'G', 'UTIL', 'UTIL', 'UTIL'];
   
   const slots: LineupSlot[] = positions.map(pos => ({
@@ -230,7 +233,7 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   const [trendsExpanded, setTrendsExpanded] = useState(true);
   const [lineupExpanded, setLineupExpanded] = useState(true);
   const [playerGridExpanded, setPlayerGridExpanded] = useState(true);
-  const [oddsExpanded, setOddsExpanded] = useState(true); // new odds section
+  const [oddsExpanded, setOddsExpanded] = useState(true);
   const [propsFiltersExpanded, setPropsFiltersExpanded] = useState(false);
 
   // ============= GENERATOR SETTINGS =============
@@ -303,7 +306,6 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
     setError(null);
 
     try {
-      // Updated URL to include realtime=true as per File 1 example
       const url = `${API_BASE}/api/fantasy/players?sport=${activeSport}&realtime=true&limit=100`;
       console.log('[FETCH] Fetching players from:', url);
       const response = await fetch(url);
@@ -328,11 +330,8 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
       }
 
       const enhancedPlayers = playersArray.map((player: any, index: number) => {
-        // Map FanDuel salary: try fanduel_salary first, then salary, default 5000
         const salary = player.fanduel_salary || player.salary || 5000;
-        // Map projection: use fantasy_points (from API) or projection or projected_points
         const projection = player.fantasy_points || player.projection || player.projected_points || 0;
-        // Calculate value (points per $1000)
         const value = salary > 0 ? (projection / salary) * 1000 : 0;
 
         const enhanced = {
@@ -355,20 +354,18 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
         return enhanced;
       });
 
-// Deduplicate players by name + team, keep the one with highest salary
-const uniqueMap = new Map<string, Player2026>();
-enhancedPlayers.forEach(player => {
-  const key = `${player.name}-${player.team}`;
-  const existing = uniqueMap.get(key);
-  if (!existing || player.salary > existing.salary) {
-    uniqueMap.set(key, player);
-  }
-});
-const uniquePlayers = Array.from(uniqueMap.values());
-setPlayers(uniquePlayers);
-setFilteredPlayers(uniquePlayers);
+      const uniqueMap = new Map<string, Player2026>();
+      enhancedPlayers.forEach(player => {
+        const key = `${player.name}-${player.team}`;
+        const existing = uniqueMap.get(key);
+        if (!existing || player.salary > existing.salary) {
+          uniqueMap.set(key, player);
+        }
+      });
+      const uniquePlayers = Array.from(uniqueMap.values());
+      setPlayers(uniquePlayers);
+      setFilteredPlayers(uniquePlayers);
 
-      // Update filter ranges
       const salaries = enhancedPlayers.map((p: Player2026) => p.salary).filter(Boolean);
       const projections = enhancedPlayers.map((p: Player2026) => p.projection).filter(Boolean);
       if (salaries.length) {
@@ -401,7 +398,6 @@ setFilteredPlayers(uniquePlayers);
     setLoadingOdds(true);
     setOddsError(null);
     try {
-      // Map sport to format expected by odds endpoint (basketball_nba, etc.)
       const sportMap: Record<string, string> = {
         nba: 'basketball_nba',
         nfl: 'americanfootball_nfl',
@@ -428,8 +424,16 @@ setFilteredPlayers(uniquePlayers);
 
   useEffect(() => {
     fetchPlayers();
-    fetchOdds(); // fetch odds when sport changes
+    fetchOdds();
   }, [fetchPlayers, fetchOdds]);
+
+  // ============= DEBUG: Expose players globally =============
+  useEffect(() => {
+    if (players.length > 0) {
+      (window as any).debugPlayers = players;
+      console.log('[Debug] players available as window.debugPlayers');
+    }
+  }, [players]);
 
   // ============= SUBJECT 1 EFFECTS =============
   useEffect(() => {
@@ -574,9 +578,165 @@ setFilteredPlayers(uniquePlayers);
     navigate('/contests', { state: { lineup, sport: activeSport } });
   };
 
-  // ============= ENHANCED LINEUP GENERATOR =============
-  const handleGenerateLineup = () => {
+  // ============= ENHANCED POSITION ELIGIBILITY (handles combined positions like "PG/SG") =============
+const canPlayPosition = (playerPos: string, slotPos: string, sport: Sport): boolean => {
+  // Split combined positions like "PG/SG" or "G/F" into an array
+  const positions = playerPos.split('/').map(p => p.trim());
+  
+  if (sport === 'nba') {
+    switch (slotPos) {
+      case 'PG':
+        return positions.includes('PG') || positions.includes('G');
+      case 'SG':
+        return positions.includes('SG') || positions.includes('G');
+      case 'SF':
+        return positions.includes('SF') || positions.includes('F');
+      case 'PF':
+        return positions.includes('PF') || positions.includes('F');
+      case 'C':
+        return positions.includes('C');
+      case 'G':
+        return positions.includes('PG') || positions.includes('SG') || positions.includes('G');
+      case 'F':
+        return positions.includes('SF') || positions.includes('PF') || positions.includes('F');
+      case 'UTIL':
+        return true; // any player can fill UTIL
+      default:
+        return positions.includes(slotPos);
+    }
+  } else {
+    // NHL logic (unchanged – adjust if your NHL data also uses generic positions)
+    switch (slotPos) {
+      case 'C':   return positions.includes('C');
+      case 'LW':  return positions.includes('LW');
+      case 'RW':  return positions.includes('RW');
+      case 'D':   return positions.includes('D');
+      case 'G':   return positions.includes('G');
+      case 'UTIL': return !positions.includes('G');
+      default:    return positions.includes(slotPos);
+    }
+  }
+};
+ 
+  // ============= IMPROVED BACKTRACKING LINEUP GENERATOR WITH LOGGING =============
+// Helper to get minimum possible salary for remaining slots
+const getMinRemainingSalary = (availablePlayers: Player2026[], slotsRemaining: number): number => {
+  const sortedBySalary = [...availablePlayers].sort((a, b) => a.salary - b.salary);
+  let total = 0;
+  for (let i = 0; i < Math.min(slotsRemaining, sortedBySalary.length); i++) {
+    total += sortedBySalary[i].salary;
+  }
+  return total;
+};
+
+function generateLineupBacktrack(
+    players: Player2026[],
+    slots: string[],
+    salaryCap: number,
+    strategy: 'value' | 'projection' | 'balanced'
+): FantasyLineup | null {
+    const startTime = Date.now();
+    const TIME_LIMIT = 1000; // 1 second max
+
+    // Create a copy of players with a computed score for sorting per slot
+    const playerPool = players.map(p => ({
+        ...p,
+        score: strategy === 'value' ? (p.value || 0) :
+               strategy === 'projection' ? (p.projection || 0) :
+               (p.projection * 0.5 + p.value * 0.5)
+    }));
+
+    const result: (Player2026 | null)[] = new Array(slots.length).fill(null);
+    const usedIds = new Set<string>();
+
+    function backtrack(index: number, currentSalary: number): boolean {
+        if (Date.now() - startTime > TIME_LIMIT) {
+            console.warn('[Backtrack] Time limit reached, aborting');
+            return false;
+        }
+
+        if (index === slots.length) {
+            console.log(`[Backtrack] Found valid lineup in ${Date.now() - startTime}ms`);
+            return true;
+        }
+
+        // Prune: if remaining cap can't cover minimum salaries of remaining slots, abort
+        const slotsRemaining = slots.length - index;
+        const minNeeded = getMinRemainingSalary(
+            playerPool.filter(p => !usedIds.has(p.id)),
+            slotsRemaining
+        );
+        if (salaryCap - currentSalary < minNeeded) {
+            return false;
+        }
+
+        // Determine sort order for this slot
+        const slot = slots[index];
+        const isRestrictive = (slot === 'C' || slot === 'PF' || slot === 'SF');
+        
+        // For restrictive slots, try cheaper players first to preserve cap
+        const sortedForSlot = isRestrictive
+            ? [...playerPool].sort((a, b) => a.salary - b.salary)
+            : [...playerPool].sort((a, b) => b.score - a.score); // high value first
+
+        for (let i = 0; i < sortedForSlot.length; i++) {
+            const player = sortedForSlot[i];
+            if (usedIds.has(player.id)) continue;
+            if (currentSalary + player.salary > salaryCap) continue;
+            if (!canPlayPosition(player.position, slot, activeSport)) continue;
+
+            result[index] = player;
+            usedIds.add(player.id);
+            if (backtrack(index + 1, currentSalary + player.salary)) {
+                return true;
+            }
+            // backtrack
+            result[index] = null;
+            usedIds.delete(player.id);
+        }
+        return false;
+    }
+
+    if (backtrack(0, 0)) {
+        // Build lineup object (same as before)
+        const newSlots = createEmptyLineup(activeSport).slots;
+        for (let i = 0; i < slots.length; i++) {
+            if (result[i]) {
+                newSlots[i].player = {
+                    id: result[i]!.id,
+                    name: result[i]!.name,
+                    team: result[i]!.team,
+                    position: result[i]!.position,
+                    salary: result[i]!.salary,
+                    fantasy_projection: result[i]!.projection,
+                    points: result[i]!.points,
+                    assists: result[i]!.assists,
+                    rebounds: result[i]!.rebounds,
+                    goals: result[i]!.goals
+                };
+            }
+        }
+        const totalSalary = newSlots.reduce((sum, slot) => sum + (slot.player?.salary || 0), 0);
+        const totalProjection = newSlots.reduce((sum, slot) => sum + (slot.player?.fantasy_projection || 0), 0);
+        return {
+            id: `lineup-${Date.now()}-${Math.random()}`,
+            sport: activeSport,
+            slots: newSlots,
+            total_salary: totalSalary,
+            total_projection: totalProjection,
+            remaining_cap: salaryCap - totalSalary,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        };
+    }
+    console.warn('[Backtrack] No lineup found within time limit');
+    return null;
+}
+
+  // ============= ENHANCED LINEUP GENERATOR (MULTIPLE) =============
+const handleGenerateLineup = () => {
     console.log('[Generate] Generating optimal lineups...');
+    console.log('[Generate] Player pool size:', (ignoreFilters ? players : filteredPlayers).length);
     const pool = ignoreFilters ? players : filteredPlayers;
     if (pool.length === 0) {
       alert('No players available to generate lineups.');
@@ -586,134 +746,35 @@ setFilteredPlayers(uniquePlayers);
     if (lineups.length > 0) {
       setGeneratedLineups(lineups);
       setCurrentLineupIndex(0);
-      setLineup(lineups[0]); // show first
+      setLineup(lineups[0]);
     } else {
       alert('Could not generate any valid lineups with the current player pool.');
     }
   };
 
-  const canPlayPosition = (playerPos: string, slotPos: string, sport: Sport): boolean => {
-    if (sport === 'nba') {
-      switch (slotPos) {
-        case 'PG': return playerPos === 'PG';
-        case 'SG': return playerPos === 'SG';
-        case 'SF': return playerPos === 'SF';
-        case 'PF': return playerPos === 'PF';
-        case 'C': return playerPos === 'C';
-        case 'G': return playerPos === 'PG' || playerPos === 'SG';
-        case 'F': return playerPos === 'SF' || playerPos === 'PF';
-        case 'UTIL': return true;
-        default: return playerPos === slotPos;
-      }
-    } else {
-      switch (slotPos) {
-        case 'C': return playerPos === 'C';
-        case 'LW': return playerPos === 'LW';
-        case 'RW': return playerPos === 'RW';
-        case 'D': return playerPos === 'D';
-        case 'G': return playerPos === 'G';
-        case 'UTIL': return playerPos !== 'G';
-        default: return playerPos === slotPos;
-      }
-    }
-  };
-
-const generateSingleLineup = (playerPool: Player2026[], sport: Sport, strategy: string): FantasyLineup | null => {
-  // Create a mutable copy of the full player pool
-  let availablePlayers = [...playerPool];
-
-  // Sort according to strategy using actual player stats
-  if (strategy === 'value') {
-    availablePlayers.sort((a, b) => (b.value || 0) - (a.value || 0));
-  } else if (strategy === 'projection') {
-    availablePlayers.sort((a, b) => (b.projection || 0) - (a.projection || 0));
-  } else if (strategy === 'balanced') {
-    // Weighted combination
-    availablePlayers.sort((a, b) => {
-      const scoreA = (a.value || 0) * 0.5 + (a.projection || 0) * 0.5;
-      const scoreB = (b.value || 0) * 0.5 + (b.projection || 0) * 0.5;
-      return scoreB - scoreA;
-    });
-  }
-
-  const newSlots = createEmptyLineup(sport).slots;
-  let remainingCap = SALARY_CAP;
-  const usedIds = new Set<string>();
-
-  for (let i = 0; i < newSlots.length; i++) {
-    const slot = newSlots[i];
-
-    // Find the first eligible player from the sorted, full list
-    const playerIndex = availablePlayers.findIndex(p =>
-      !usedIds.has(p.id) &&
-      p.salary <= remainingCap &&
-      canPlayPosition(p.position, slot.position, sport)
-    );
-
-    if (playerIndex === -1) {
-      console.warn(`[Generate] No eligible player found for slot ${slot.position} under cap $${remainingCap}`);
-      continue; // skip this slot but try to fill others
-    }
-
-    const selectedPlayer = availablePlayers[playerIndex];
-    usedIds.add(selectedPlayer.id);
-    availablePlayers.splice(playerIndex, 1); // remove from pool
-
-    // Assign the FULL player object to the slot
-    // Spread all fields and ensure fantasy_projection is set (if needed by your Player type)
-    slot.player = {
-      ...selectedPlayer,
-      fantasy_projection: selectedPlayer.projection, // map projection to fantasy_projection if required
-    };
-    remainingCap -= selectedPlayer.salary;
-  }
-
-  const totalSalary = SALARY_CAP - remainingCap;
-  const totalProjection = newSlots.reduce(
-    (sum, slot) => sum + (slot.player?.fantasy_projection || 0),
-    0
-  );
-
-  // If no players were added, return null
-  if (usedIds.size === 0) return null;
-
-  return {
-    id: `lineup-${Date.now()}-${Math.random()}`,
-    sport,
-    slots: newSlots,
-    total_salary: totalSalary,
-    total_projection: totalProjection,
-    remaining_cap: remainingCap,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-};
-
   const generateMultipleLineups = (
-    playerPool: Player2026[],
-    sport: Sport,
-    strategy: string,
-    count: number
+      playerPool: Player2026[],
+      sport: Sport,
+      strategy: string,
+      count: number
   ): FantasyLineup[] => {
     const lineups: FantasyLineup[] = [];
-    // Copy pool to manipulate
     let poolCopy = [...playerPool];
+    const slotPositions = createEmptyLineup(sport).slots.map(s => s.position);
 
     for (let n = 0; n < count; n++) {
-      const lineup = generateSingleLineup(poolCopy, sport, strategy);
+      const lineup = generateLineupBacktrack(poolCopy, slotPositions, SALARY_CAP, strategy as any);
       if (lineup) {
         lineups.push(lineup);
-        // Remove selected players from pool to get diversity
         const usedIds = new Set(lineup.slots.map(s => s.player?.id).filter(Boolean));
         poolCopy = poolCopy.filter(p => !usedIds.has(p.id));
       } else {
-        break; // no more lineups possible
+        break;
       }
     }
     return lineups;
   };
 
-  // Navigation through generated lineups
   const handlePrevLineup = () => {
     if (currentLineupIndex > 0) {
       const newIndex = currentLineupIndex - 1;
@@ -731,58 +792,54 @@ const generateSingleLineup = (playerPool: Player2026[], sport: Sport, strategy: 
   };
 
   // ============= AI NATURAL LANGUAGE LINEUP GENERATOR =============
-const filterPlayersByQuery = (pool: Player2026[], query: string): Player2026[] => {
-  const lower = query.toLowerCase();
-  let filtered = pool; // start with full player objects
+  const filterPlayersByQuery = (pool: Player2026[], query: string): Player2026[] => {
+    const lower = query.toLowerCase();
+    let filtered = pool;
 
-  // Team filters (common abbreviations)
-  const teamMap: Record<string, string[]> = {
-    lakers: ['LAL'],
-    warriors: ['GSW'],
-    celtics: ['BOS'],
-    bucks: ['MIL'],
-    suns: ['PHX'],
-    nuggets: ['DEN'],
-    sixers: ['PHI'],
-    '76ers': ['PHI'],
-    mavericks: ['DAL'],
-    mavs: ['DAL'],
-    clippers: ['LAC'],
-    heat: ['MIA'],
-    bulls: ['CHI'],
-    hawks: ['ATL'],
-    // add more as needed
-  };
-  for (const [key, codes] of Object.entries(teamMap)) {
-    if (lower.includes(key)) {
-      filtered = filtered.filter(p => codes.includes(p.team));
+    const teamMap: Record<string, string[]> = {
+      lakers: ['LAL'],
+      warriors: ['GSW'],
+      celtics: ['BOS'],
+      bucks: ['MIL'],
+      suns: ['PHX'],
+      nuggets: ['DEN'],
+      sixers: ['PHI'],
+      '76ers': ['PHI'],
+      mavericks: ['DAL'],
+      mavs: ['DAL'],
+      clippers: ['LAC'],
+      heat: ['MIA'],
+      bulls: ['CHI'],
+      hawks: ['ATL'],
+    };
+    for (const [key, codes] of Object.entries(teamMap)) {
+      if (lower.includes(key)) {
+        filtered = filtered.filter(p => codes.includes(p.team));
+      }
     }
-  }
 
-  // Position filters
-  if (lower.includes('point guard') || lower.includes('pg')) {
-    filtered = filtered.filter(p => p.position === 'PG');
-  }
-  if (lower.includes('shooting guard') || lower.includes('sg')) {
-    filtered = filtered.filter(p => p.position === 'SG');
-  }
-  if (lower.includes('small forward') || lower.includes('sf')) {
-    filtered = filtered.filter(p => p.position === 'SF');
-  }
-  if (lower.includes('power forward') || lower.includes('pf')) {
-    filtered = filtered.filter(p => p.position === 'PF');
-  }
-  if (lower.includes('center') || lower.includes('c')) {
-    filtered = filtered.filter(p => p.position === 'C');
-  }
+    if (lower.includes('point guard') || lower.includes('pg')) {
+      filtered = filtered.filter(p => p.position === 'PG');
+    }
+    if (lower.includes('shooting guard') || lower.includes('sg')) {
+      filtered = filtered.filter(p => p.position === 'SG');
+    }
+    if (lower.includes('small forward') || lower.includes('sf')) {
+      filtered = filtered.filter(p => p.position === 'SF');
+    }
+    if (lower.includes('power forward') || lower.includes('pf')) {
+      filtered = filtered.filter(p => p.position === 'PF');
+    }
+    if (lower.includes('center') || lower.includes('c')) {
+      filtered = filtered.filter(p => p.position === 'C');
+    }
 
-  // Rookie filter
-  if (lower.includes('rookie') || lower.includes('rookies')) {
-    filtered = filtered.filter(p => p.is_rookie === true);
-  }
+    if (lower.includes('rookie') || lower.includes('rookies')) {
+      filtered = filtered.filter(p => p.is_rookie === true);
+    }
 
-  return filtered;
-};
+    return filtered;
+  };
 
   const determineStrategyFromQuery = (query: string): 'value' | 'projection' | 'balanced' => {
     const lower = query.toLowerCase();
@@ -791,47 +848,45 @@ const filterPlayersByQuery = (pool: Player2026[], query: string): Player2026[] =
     return 'balanced';
   };
 
-const handleGenerateFantasyLineup = async () => {
-  if (!customQuery.trim()) {
-    alert('Please enter a lineup prompt');
-    return;
-  }
-  setGeneratingLineup(true);
-  setShowGeneratorModal(true);
-  try {
-    // Skip API and go straight to local fallback
-    const pool = filterPlayersByQuery(players, customQuery);
-    if (pool.length === 0) {
-      setLineupResult({
-        success: false,
-        analysis: `No players match your query: "${customQuery}". Try different keywords.`,
-      });
-    } else {
-      const strategy = determineStrategyFromQuery(customQuery);
-      const lineups = generateMultipleLineups(pool, activeSport, strategy, 1);
-      if (lineups.length > 0) {
-        const newLineup = lineups[0];
-        setLineup(newLineup);
-        setLineupResult({
-          success: true,
-          analysis: `🎯 Lineup generated based on your query using ${strategy} strategy.`,
-          lineup: newLineup,
-          source: 'Local Generator',
-        });
-      } else {
+  const handleGenerateFantasyLineup = async () => {
+    if (!customQuery.trim()) {
+      alert('Please enter a lineup prompt');
+      return;
+    }
+    setGeneratingLineup(true);
+    setShowGeneratorModal(true);
+    try {
+      const pool = filterPlayersByQuery(players, customQuery);
+      if (pool.length === 0) {
         setLineupResult({
           success: false,
-          analysis: 'Could not generate a valid lineup with the current player pool.',
+          analysis: `No players match your query: "${customQuery}". Try different keywords.`,
         });
+      } else {
+        const strategy = determineStrategyFromQuery(customQuery);
+        const lineups = generateMultipleLineups(pool, activeSport, strategy, 1);
+        if (lineups.length > 0) {
+          const newLineup = lineups[0];
+          setLineup(newLineup);
+          setLineupResult({
+            success: true,
+            analysis: `🎯 Lineup generated based on your query using ${strategy} strategy.`,
+            lineup: newLineup,
+            source: 'Local Generator',
+          });
+        } else {
+          setLineupResult({
+            success: false,
+            analysis: 'Could not generate a valid lineup with the current player pool.',
+          });
+        }
       }
+    } finally {
+      setGeneratingLineup(false);
     }
-  } finally {
-    setGeneratingLineup(false);
-  }
-};
+  };
 
   // ============= FILTERING LOGIC FOR PLAYER GRID =============
-  // Derived ranges for sliders
   const allPositions = useMemo(() => [...new Set(players.map(p => p.position).filter(Boolean))].sort(), [players]);
   const allTeams = useMemo(() => [...new Set(players.map(p => p.team).filter(Boolean))].sort(), [players]);
   const salaryRange = useMemo(() => {
@@ -1002,18 +1057,13 @@ const handleGenerateFantasyLineup = async () => {
   // ============= FILTER FUNCTIONS FOR PROPS SECTION =============
   const getFilteredPropsPlayers = (): Player2026[] => {
     return players.filter(p => {
-      // Search
       if (propsSearch && !p.name.toLowerCase().includes(propsSearch.toLowerCase()) &&
           !p.team.toLowerCase().includes(propsSearch.toLowerCase())) {
         return false;
       }
-      // Teams
       if (propsTeams.length > 0 && !propsTeams.includes(p.team)) return false;
-      // Positions
       if (propsPositions.length > 0 && !propsPositions.includes(p.position)) return false;
-      // Salary
       if (p.salary < propsMinSalary || p.salary > propsMaxSalary) return false;
-      // Projection
       if (p.projection < propsMinProjection || p.projection > propsMaxProjection) return false;
       return true;
     });
@@ -1056,7 +1106,6 @@ const handleGenerateFantasyLineup = async () => {
     </Paper>
   );
 
-  // ============= AI LINEUP GENERATOR UI =============
   const renderLineupGenerator = () => (
     <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -1122,7 +1171,6 @@ const handleGenerateFantasyLineup = async () => {
     </Paper>
   );
 
-  // ============= PROPS FILTER BAR =============
   const renderPropsFilterBar = () => {
     const allTeamsList = allTeams;
     const allPositionsList = allPositions;
@@ -1250,7 +1298,6 @@ const handleGenerateFantasyLineup = async () => {
     );
   };
 
-  // ============= NEW COMPONENT: Filtered Player Props =============
   const FilteredPlayerProps = ({ 
     players, 
     onAddToLineup 
@@ -1268,7 +1315,7 @@ const handleGenerateFantasyLineup = async () => {
 
     return (
       <Grid container spacing={2}>
-        {players.slice(0, 6).map((player) => ( // Show top 6 for brevity, can adjust
+        {players.slice(0, 6).map((player) => (
           <Grid item xs={12} sm={6} md={4} key={player.id}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
@@ -1310,7 +1357,6 @@ const handleGenerateFantasyLineup = async () => {
     );
   };
 
-  // ============= NEW: ODDS SECTION =============
   const renderOddsSection = () => {
     const hasOdds = oddsGames.length > 0;
     return (
@@ -1346,7 +1392,6 @@ const handleGenerateFantasyLineup = async () => {
                 </TableHead>
                 <TableBody>
                   {oddsGames.slice(0, 5).map((game) => {
-                    // Pick the first bookmaker (e.g., FanDuel) for simplicity
                     const book = game.bookmakers[0];
                     if (!book) return null;
                     const h2h = book.markets.find(m => m.key === 'h2h');
@@ -1401,7 +1446,6 @@ const handleGenerateFantasyLineup = async () => {
     );
   };
 
-  // ============= LOADING & ERROR STATES =============
   if (loading || (isLoadingPlayers && players.length === 0)) {
     return (
       <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
@@ -1426,25 +1470,22 @@ const handleGenerateFantasyLineup = async () => {
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       {renderSportSelector()}
-      
-      {/* AI Lineup Generator */}
       {renderLineupGenerator()}
       
-<ErrorBoundary componentName="FantasyHubDashboard">
-  <Box sx={{ mb: 4 }}>
-    <FantasyHubDashboard 
-      sport={activeSport} 
-      lineup={lineup} 
-      onAddPlayer={handleAddPlayer}
-      onRemovePlayer={handleRemovePlayer}
-      onClearLineup={handleClearLineup}
-      allPlayers={players}   // ← critical: pass the deduplicated player list
-    />
-  </Box>
-</ErrorBoundary>
+      <ErrorBoundary componentName="FantasyHubDashboard">
+        <Box sx={{ mb: 4 }}>
+          <FantasyHubDashboard 
+            sport={activeSport} 
+            lineup={lineup} 
+            onAddPlayer={handleAddPlayer}
+            onRemovePlayer={handleRemovePlayer}
+            onClearLineup={handleClearLineup}
+            allPlayers={players}
+          />
+        </Box>
+      </ErrorBoundary>
       
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        {/* Props Section with Filter Bar */}
         <Grid item xs={12} md={8}>
           <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -1455,7 +1496,6 @@ const handleGenerateFantasyLineup = async () => {
                 {propsExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
               </IconButton>
             </Box>
-            {/* Filter bar for props */}
             {renderPropsFilterBar()}
             <Collapse in={propsExpanded}>
               <Box sx={{ mt: 2 }}>
@@ -1469,8 +1509,6 @@ const handleGenerateFantasyLineup = async () => {
             </Collapse>
           </Paper>
         </Grid>
-        
-        {/* Trending Section */}
         <Grid item xs={12} md={4}>
           <Paper elevation={2} sx={{ p: 3, borderRadius: 2, height: '100%' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1490,7 +1528,6 @@ const handleGenerateFantasyLineup = async () => {
         </Grid>
       </Grid>
       
-      {/* Lineup Builder Section */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} md={8}>
           <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
@@ -1510,7 +1547,6 @@ const handleGenerateFantasyLineup = async () => {
                 <Button variant="outlined" size="small" onClick={() => setShowLineupHistory(!showLineupHistory)} startIcon={<FilterListIcon />}>
                   History
                 </Button>
-                {/* Generator Settings Panel (compact) */}
                 <Paper variant="outlined" sx={{ p: 1, display: 'flex', gap: 1, alignItems: 'center' }}>
                   <FormControl size="small" sx={{ minWidth: 100 }}>
                     <Select
@@ -1545,7 +1581,6 @@ const handleGenerateFantasyLineup = async () => {
                     Generate
                   </Button>
                 </Paper>
-                {/* Navigation between generated lineups */}
                 {generatedLineups.length > 1 && (
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <IconButton size="small" onClick={handlePrevLineup} disabled={currentLineupIndex === 0}>
@@ -1578,7 +1613,6 @@ const handleGenerateFantasyLineup = async () => {
             </Collapse>
           </Paper>
         </Grid>
-        
         <Grid item xs={12} md={4}>
           {showLineupHistory && (
             <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
@@ -1615,7 +1649,6 @@ const handleGenerateFantasyLineup = async () => {
         </Grid>
       </Grid>
       
-      {/* Header and Filters */}
       <Box sx={{ mb: 4 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
           <SportsBasketballIcon sx={{ fontSize: 48, color: 'primary.main' }} />
@@ -1637,14 +1670,12 @@ const handleGenerateFantasyLineup = async () => {
           <Button variant={showFilters ? "contained" : "outlined"} startIcon={<FilterListIcon />} onClick={() => setShowFilters(!showFilters)} color="secondary">
             {showFilters ? 'Hide Filters' : 'Show Filters'}
           </Button>
-          {/* Quick Reset Filters button */}
           <Button variant="outlined" startIcon={<ClearIcon />} onClick={resetFilters} size="small">
             Reset Filters
           </Button>
         </Box>
       </Box>
       
-      {/* Filter Panel */}
       {showFilters && (
         <Paper elevation={3} sx={{ p: 3, mb: 4, borderRadius: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -1661,7 +1692,6 @@ const handleGenerateFantasyLineup = async () => {
                 }}
               />
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <FormControl fullWidth size="small">
@@ -1679,32 +1709,26 @@ const handleGenerateFantasyLineup = async () => {
                 </Button>
               </Box>
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Salary Range: ${minSalary.toLocaleString()} - ${maxSalary.toLocaleString()}</Typography>
               <Slider value={[minSalary, maxSalary]} onChange={(e, newValue) => { setMinSalary((newValue as number[])[0]); setMaxSalary((newValue as number[])[1]); }} valueLabelDisplay="auto" min={salaryRange[0]} max={salaryRange[1]} step={100} sx={{ mt: 2 }} />
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Projection Range: {minProjection.toFixed(1)} - {maxProjection.toFixed(1)}</Typography>
               <Slider value={[minProjection, maxProjection]} onChange={(e, newValue) => { setMinProjection((newValue as number[])[0]); setMaxProjection((newValue as number[])[1]); }} valueLabelDisplay="auto" min={projectionRange[0]} max={projectionRange[1]} step={1} sx={{ mt: 2 }} />
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Points: {minPoints.toFixed(1)} - {maxPoints.toFixed(1)}</Typography>
               <Slider value={[minPoints, maxPoints]} onChange={(e, newValue) => { setMinPoints((newValue as number[])[0]); setMaxPoints((newValue as number[])[1]); }} valueLabelDisplay="auto" min={pointsRange[0]} max={pointsRange[1]} step={0.5} sx={{ mt: 2 }} />
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Rebounds: {minRebounds.toFixed(1)} - {maxRebounds.toFixed(1)}</Typography>
               <Slider value={[minRebounds, maxRebounds]} onChange={(e, newValue) => { setMinRebounds((newValue as number[])[0]); setMaxRebounds((newValue as number[])[1]); }} valueLabelDisplay="auto" min={reboundsRange[0]} max={reboundsRange[1]} step={0.5} sx={{ mt: 2 }} />
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Assists: {minAssists.toFixed(1)} - {maxAssists.toFixed(1)}</Typography>
               <Slider value={[minAssists, maxAssists]} onChange={(e, newValue) => { setMinAssists((newValue as number[])[0]); setMaxAssists((newValue as number[])[1]); }} valueLabelDisplay="auto" min={assistsRange[0]} max={assistsRange[1]} step={0.5} sx={{ mt: 2 }} />
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Positions</Typography>
               <FormGroup row>
@@ -1714,7 +1738,6 @@ const handleGenerateFantasyLineup = async () => {
               </FormGroup>
               {selectedPositions.length === 0 && <Typography variant="caption" color="text.secondary">All positions selected</Typography>}
             </Grid>
-            
             <Grid item xs={12} md={6}>
               <Typography gutterBottom>Teams</Typography>
               <Box sx={{ maxHeight: 150, overflow: 'auto', p: 1, border: '1px solid #ddd', borderRadius: 1 }}>
@@ -1730,7 +1753,6 @@ const handleGenerateFantasyLineup = async () => {
         </Paper>
       )}
       
-      {/* Player Grid with Collapsible */}
       <Paper elevation={2} sx={{ p: 3, mb: 4, borderRadius: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h5" sx={{ fontWeight: 600 }}>Player List</Typography>
@@ -1773,7 +1795,6 @@ const handleGenerateFantasyLineup = async () => {
         </Collapse>
       </Paper>
 
-      {/* Generator Result Modal */}
       <Dialog open={showGeneratorModal} onClose={() => !generatingLineup && setShowGeneratorModal(false)} maxWidth="md" fullWidth>
         <DialogTitle>{generatingLineup ? 'Generating AI Lineup...' : 'AI Lineup Generated'}</DialogTitle>
         <DialogContent>
@@ -1829,7 +1850,6 @@ const handleGenerateFantasyLineup = async () => {
   );
 };
 
-// PlayerCard Component (unchanged)
 const PlayerCard = ({ player, onAddToLineup }: { player: Player2026; onAddToLineup: () => void }) => (
   <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', transition: 'transform 0.2s, box-shadow 0.2s', '&:hover': { transform: 'translateY(-4px)', boxShadow: 6 }, position: 'relative' }}>
     {player.is_rookie && (

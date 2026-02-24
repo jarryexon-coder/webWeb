@@ -156,7 +156,8 @@ const PropsDetailsScreen: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
-  const { propId } = useParams<{ propId: string }>();
+const { propId } = useParams();
+// then fetch prop by ID 
 
   // Contexts
   const bookmarks = useBookmarks();
@@ -315,6 +316,8 @@ const PropsDetailsScreen: React.FC = () => {
         setLoading(false);
         return;
       }
+
+      if (!propId) return <div>No prop ID provided</div>;
 
       // Map to PlayerPropData
       const propData: PlayerPropData = {

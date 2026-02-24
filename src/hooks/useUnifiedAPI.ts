@@ -1,127 +1,59 @@
-// src/hooks/useUnifiedAPI.ts - UPDATED TO USE PYTHON BACKEND
-import { useState, useEffect, useCallback } from 'react';
+// src/hooks/useUnifiedAPI.ts - FIXED: increased timeout, memoized return values, stable references
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios, { AxiosResponse, AxiosError } from 'axios';
-
-// ... [keep your PerformanceTracker and API_LOGGER code] ...
+import axios from 'axios';
 
 // ========== BACKEND CONFIGURATION ==========
-// Get backend URLs from environment variables
 const NBA_BACKEND_URL = import.meta.env.VITE_API_BASE_NBA_BACKEND || 
   'https://pleasing-determination-production.up.railway.app';
 const PYTHON_BACKEND_URL = import.meta.env.VITE_API_BASE_PYTHON || 
   'https://python-api-fresh-production.up.railway.app';
 
 // Configuration from environment
-const USE_BACKEND = import.meta.env.VITE_USE_BACKEND || 'python'; // DEFAULT TO 'python'
-const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '10000');
+const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '30000'); // increased to 30s
 const ENABLE_CACHE = import.meta.env.VITE_ENABLE_CACHE !== 'false';
 
-// ========== CACHE AND PERFORMANCE TRACKER ==========
+// ========== CACHE ==========
 const apiCache = new Map();
-const performanceTracker = { 
-  logFetch: () => {}, 
-  getAverageDuration: () => 0, 
-  getSuccessRate: () => 1, 
-  metrics: {} 
-};
-const API_LOGGER = { 
-  logCall: () => {}, 
-  getStats: () => [] 
-};
-
 const getCacheKey = (endpoint: string, params: any) => 
   `${endpoint}:${JSON.stringify(params || {})}`;
-
 const isCacheValid = (cached: any) => 
   cached && cached.expires && Date.now() < cached.expires;
 
-// ========== BACKEND SELECTION LOGIC ==========
+// ========== BACKEND SELECTION ==========
 const getBackendForEndpoint = (endpoint: string): string => {
   const pythonBackendEndpoints = [
-    '/api/players',
-    '/api/fantasy/teams',
-    '/api/fantasy/players',
-    '/api/health',
-    '/api/info',
-    '/api/news',
-    '/api/analytics',
-    '/api/debug',
-    '/api/odds/games',
-    '/api/prizepicks/selections',
-    '/api/daily-picks',
-    '/api/player-trends',
-    '/api/advanced-analytics',
-    '/api/parlay-suggestions',
-    '/api/sports-wire'
+    '/api/players', '/api/fantasy/teams', '/api/fantasy/players',
+    '/api/health', '/api/info', '/api/news', '/api/analytics',
+    '/api/debug', '/api/odds/games', '/api/prizepicks/selections',
+    '/api/daily-picks', '/api/player-trends', '/api/advanced-analytics',
+    '/api/parlay-suggestions', '/api/sports-wire'
   ];
   
-  const nbaBackendEndpoints = [
-    '/api/nba/games',
-    '/api/nba/stats'
-  ];
+  const nbaBackendEndpoints = ['/api/nba/games', '/api/nba/stats'];
   
   if (pythonBackendEndpoints.some(e => endpoint.includes(e))) {
     console.log(`🎯 Using Python backend for: ${endpoint}`);
     return PYTHON_BACKEND_URL;
   }
-  
   if (nbaBackendEndpoints.some(e => endpoint.includes(e))) {
     console.log(`🏀 Using NBA backend for: ${endpoint}`);
     return NBA_BACKEND_URL;
   }
-  
-  console.log(`⚡ Defaulting to Python backend for: ${endpoint}`);
   return PYTHON_BACKEND_URL;
 };
 
-// ========== HEALTH CHECK FUNCTION ==========
+// ========== HEALTH CHECK ==========
 const checkBackendHealth = async (backendUrl: string): Promise<boolean> => {
   try {
     const startTime = performance.now();
-    const response = await axios.get(`${backendUrl}/api/health`, {
-      timeout: 3000
-    });
-    const duration = performance.now() - startTime;
-    
-    console.log(`🏥 ${backendUrl}: ${response.status} (${duration.toFixed(0)}ms)`);
+    const response = await axios.get(`${backendUrl}/api/health`, { timeout: 3000 });
+    console.log(`🏥 ${backendUrl}: ${response.status} (${(performance.now() - startTime).toFixed(0)}ms)`);
     return response.status === 200 && response.data?.status === 'healthy';
-  } catch (error) {
-    console.log(`❌ ${backendUrl}: Unavailable`);
+  } catch {
     return false;
   }
 };
-
-// ========== DIRECT FETCH FUNCTION ==========
-const fetchDirectly = async <T>(
-  endpoint: string, 
-  options?: any
-): Promise<T> => {
-  const backendUrl = getBackendForEndpoint(endpoint);
-  
-  try {
-    const response = await axios({
-      url: `${backendUrl}${endpoint}`,
-      method: options?.method || 'GET',
-      params: options?.params,
-      data: options?.data,
-      timeout: options?.timeout || API_TIMEOUT,
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    });
-    
-    return response.data;
-  } catch (error: any) {
-    console.error(`❌ API Error (${endpoint}):`, error.message);
-    throw error;
-  }
-};
-
-// src/hooks/useUnifiedAPI.ts - UPDATED TO RETURN REACT QUERY RESULT SHAPE
-
-// ... keep all the imports and utility functions (getBackendForEndpoint, checkBackendHealth, etc.) the same ...
 
 // ========== ODDS GAMES HOOK ==========
 export const useOddsGames = (sport?: string) => {
@@ -130,284 +62,172 @@ export const useOddsGames = (sport?: string) => {
   
   useEffect(() => {
     const checkBackends = async () => {
-      console.log('🔍 Checking backend health...');
-      
       const healthChecks = await Promise.allSettled([
         checkBackendHealth(PYTHON_BACKEND_URL),
         checkBackendHealth(NBA_BACKEND_URL)
       ]);
-      
-      const health = {
-        python: healthChecks[0].status === 'fulfilled' && (healthChecks[0] as PromiseFulfilledResult<boolean>).value,
-        nba: healthChecks[1].status === 'fulfilled' && (healthChecks[1] as PromiseFulfilledResult<boolean>).value
-      };
-      
-      setBackendHealth(health);
+      setBackendHealth({
+        python: healthChecks[0].status === 'fulfilled' && healthChecks[0].value,
+        nba: healthChecks[1].status === 'fulfilled' && healthChecks[1].value,
+      });
       setIsInitialized(true);
-      
-      console.log('✅ Backend Health Status:', health);
     };
-    
     checkBackends();
   }, []);
   
   const fetchAPI = useCallback(async <T>(
-    endpoint: string, 
-    options: {
-      method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-      params?: any;
-      data?: any;
-      timeout?: number;
-      useCache?: boolean;
-    } = {}
+    endpoint: string,
+    options: any = {}
   ): Promise<T> => {
     const cacheKey = getCacheKey(endpoint, options.params);
-    const useCache = options.useCache ?? ENABLE_CACHE;
-    
-    if (useCache && apiCache.has(cacheKey)) {
-      const cached = apiCache.get(cacheKey)!;
-      if (isCacheValid(cached)) {
-        console.log(`💾 Cache hit for ${endpoint}`);
-        return cached.data;
-      } else {
-        apiCache.delete(cacheKey);
-      }
+    if (ENABLE_CACHE && apiCache.has(cacheKey)) {
+      const cached = apiCache.get(cacheKey);
+      if (isCacheValid(cached)) return cached.data;
+      apiCache.delete(cacheKey);
     }
-    
-    try {
-      const backendUrl = getBackendForEndpoint(endpoint);
-      
-      console.log(`🌐 Fetching: ${backendUrl}${endpoint}`, options.params || '');
-      
-      const response = await axios({
-        url: `${backendUrl}${endpoint}`,
-        method: options.method || 'GET',
-        params: options.params,
-        data: options.data,
-        timeout: options.timeout || API_TIMEOUT,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
+    const backendUrl = getBackendForEndpoint(endpoint);
+    const response = await axios({
+      url: `${backendUrl}${endpoint}`,
+      method: options.method || 'GET',
+      params: options.params,
+      data: options.data,
+      timeout: options.timeout || API_TIMEOUT,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (ENABLE_CACHE && (!options.method || options.method === 'GET')) {
+      apiCache.set(cacheKey, {
+        data: response.data,
+        expires: Date.now() + 5 * 60 * 1000,
       });
-      
-      if (useCache && (!options.method || options.method === 'GET') && response.data) {
-        apiCache.set(cacheKey, {
-          data: response.data,
-          timestamp: Date.now(),
-          expires: Date.now() + (5 * 60 * 1000)
-        });
-      }
-      
-      return response.data;
-      
-    } catch (error: any) {
-      console.error(`❌ API Error (${endpoint}):`, {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      
-      throw error;
     }
+    return response.data;
   }, []);
 
   const query = useQuery({
     queryKey: ['oddsGames', sport],
-    queryFn: () => fetchAPI('/api/odds/games', {
-      params: sport ? { sport } : undefined,
-      useCache: true
-    }),
+    queryFn: () => fetchAPI('/api/odds/games', { params: sport ? { sport } : undefined }),
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    enabled: isInitialized
+    enabled: isInitialized,
   });
 
-  // Return the React Query result plus extra info
-  return {
+  // ✅ MEMOIZED RETURN VALUE – stable reference across renders
+  return useMemo(() => ({
     ...query,
     isInitialized,
-    backendHealth
-  };
+    backendHealth,
+  }), [query, isInitialized, backendHealth]);
 };
 
 // ========== PLAYER TRENDS HOOK ==========
 export const usePlayerTrends = (sport?: string, playerId?: string) => {
   const [isInitialized, setIsInitialized] = useState(false);
-  
-  useEffect(() => {
-    setIsInitialized(true);
-  }, []);
-  
-  const fetchAPI = useCallback(async <T>(
-    endpoint: string, 
-    options: any = {}
-  ): Promise<T> => {
+  useEffect(() => { setIsInitialized(true); }, []);
+
+  const fetchAPI = useCallback(async <T>(endpoint: string, options: any = {}): Promise<T> => {
     const backendUrl = getBackendForEndpoint(endpoint);
-    
-    try {
-      const response = await axios({
-        url: `${backendUrl}${endpoint}`,
-        method: options.method || 'GET',
-        params: options.params,
-        data: options.data,
-        timeout: options.timeout || API_TIMEOUT,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
-      
-      return response.data;
-    } catch (error: any) {
-      console.error(`❌ API Error (${endpoint}):`, error.message);
-      throw error;
-    }
+    const response = await axios({
+      url: `${backendUrl}${endpoint}`,
+      method: options.method || 'GET',
+      params: options.params,
+      data: options.data,
+      timeout: options.timeout || API_TIMEOUT,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
   }, []);
 
   const query = useQuery({
     queryKey: ['playerTrends', sport, playerId],
     queryFn: () => fetchAPI('/api/player-trends', {
-      params: { 
-        sport: sport || 'nba',
-        playerId: playerId
-      },
-      useCache: true
+      params: { sport: sport || 'nba', playerId }
     }),
     staleTime: 10 * 60 * 1000,
-    enabled: isInitialized && !!playerId // only fetch if playerId provided
+    enabled: isInitialized && !!playerId,
   });
 
-  return {
+  return useMemo(() => ({
     ...query,
-    isInitialized
-  };
+    isInitialized,
+  }), [query, isInitialized]);
 };
 
 // ========== ADVANCED ANALYTICS HOOK ==========
 export const useAdvancedAnalytics = (sport?: string, metric?: string) => {
   const [isInitialized, setIsInitialized] = useState(false);
-  
-  useEffect(() => {
-    setIsInitialized(true);
-  }, []);
-  
-  const fetchAPI = useCallback(async <T>(
-    endpoint: string, 
-    options: any = {}
-  ): Promise<T> => {
+  useEffect(() => { setIsInitialized(true); }, []);
+
+  const fetchAPI = useCallback(async <T>(endpoint: string, options: any = {}): Promise<T> => {
     const backendUrl = getBackendForEndpoint(endpoint);
-    
-    try {
-      const response = await axios({
-        url: `${backendUrl}${endpoint}`,
-        method: options.method || 'GET',
-        params: options.params,
-        data: options.data,
-        timeout: options.timeout || API_TIMEOUT,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
-      
-      return response.data;
-    } catch (error: any) {
-      console.error(`❌ API Error (${endpoint}):`, error.message);
-      throw error;
-    }
+    const response = await axios({
+      url: `${backendUrl}${endpoint}`,
+      method: options.method || 'GET',
+      params: options.params,
+      data: options.data,
+      timeout: options.timeout || API_TIMEOUT,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
   }, []);
 
   const query = useQuery({
     queryKey: ['advancedAnalytics', sport, metric],
     queryFn: () => fetchAPI('/api/advanced-analytics', {
-      params: { 
-        sport: sport || 'nba',
-        metric: metric || 'all'
-      },
-      useCache: true
+      params: { sport: sport || 'nba', metric: metric || 'all' }
     }),
     staleTime: 10 * 60 * 1000,
-    enabled: isInitialized
+    enabled: isInitialized,
   });
 
-  return {
+  return useMemo(() => ({
     ...query,
-    isInitialized
-  };
+    isInitialized,
+  }), [query, isInitialized]);
 };
 
 // ========== PARLAY SUGGESTIONS HOOK ==========
-// ========== PARLAY SUGGESTIONS HOOK ==========
 export const useParlaySuggestions = (sport?: string, riskLevel?: string) => {
   const [isInitialized, setIsInitialized] = useState(false);
+  useEffect(() => { setIsInitialized(true); }, []);
 
-  useEffect(() => {
-    setIsInitialized(true);
-  }, []);
-
-  const fetchAPI = useCallback(async <T>(
-    endpoint: string,
-    options: any = {}
-  ): Promise<T> => {
+  const fetchAPI = useCallback(async <T>(endpoint: string, options: any = {}): Promise<T> => {
     const backendUrl = getBackendForEndpoint(endpoint);
-
-    try {
-      const response = await axios({
-        url: `${backendUrl}${endpoint}`,
-        method: options.method || 'GET',
-        params: options.params,
-        data: options.data,
-        timeout: options.timeout || API_TIMEOUT,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
-
-      return response.data;
-    } catch (error: any) {
-      console.error(`❌ API Error (${endpoint}):`, error.message);
-      throw error;
-    }
+    const response = await axios({
+      url: `${backendUrl}${endpoint}`,
+      method: options.method || 'GET',
+      params: options.params,
+      data: options.data,
+      timeout: options.timeout || API_TIMEOUT,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
   }, []);
 
   const query = useQuery({
     queryKey: ['parlaySuggestions', sport, riskLevel],
     queryFn: () => fetchAPI('/api/parlay-suggestions', {
-      params: {
-        sport: sport || 'nba',
-        riskLevel: riskLevel || 'medium'
-      },
-      useCache: true
+      params: { sport: sport || 'nba', riskLevel: riskLevel || 'medium' }
     }),
-    staleTime: 10 * 60 * 1000, // 10 minutes
-    gcTime: 15 * 60 * 1000, // 15 minutes (formerly cacheTime)
-    refetchOnWindowFocus: false, // Don't refetch on window focus
-    refetchOnMount: false, // Don't refetch on mount if data exists
-    refetchOnReconnect: false, // Don't refetch on reconnect
+    staleTime: 10 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     retry: (failureCount, error: any) => {
-      // For 429 (rate limit), retry up to 2 times with backoff
-      if (error?.response?.status === 429) {
-        return failureCount < 2;
-      }
-      // For other errors, retry once
+      if (error?.response?.status === 429) return failureCount < 2;
       return failureCount < 1;
     },
-    retryDelay: (attemptIndex) => {
-      // Exponential backoff: 1s, 2s, 4s, ...
-      return Math.min(1000 * 2 ** attemptIndex, 30000);
-    },
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 30000),
     enabled: isInitialized,
-    // Optional: placeholder data to avoid loading states
-    placeholderData: { suggestions: [], count: 0, success: true } as any,
+    placeholderData: { suggestions: [], count: 0, success: true },
   });
 
-  return {
+  return useMemo(() => ({
     ...query,
-    isInitialized
-  };
+    isInitialized,
+  }), [query, isInitialized]);
 };
+
 
 // ========== FANTASY PLAYERS HOOK ==========
 export const useFantasyPlayers = (sport: string = 'nba', endpoint: string = 'players') => {
@@ -807,3 +627,5 @@ export const api = {
 // Re-export specific hooks with alternative names for compatibility
 export const usePlayerProps = usePlayerTrends;
 export const useAnalytics = useAdvancedAnalytics;
+
+

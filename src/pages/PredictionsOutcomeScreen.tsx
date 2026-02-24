@@ -388,7 +388,9 @@ const processResult = (result: any, source: string, endpoint: string, isCached: 
         line: line,
         actual_value: actual,
         projection: projected || line, // fallback to line if no separate projection
-        edge: o.edge || (o.confidence ? `+${o.confidence}%` : '+8.4%'),
+        edge: o.edge
+        ? (typeof o.edge === 'number' ? (o.edge > 0 ? `+${o.edge}` : `${o.edge}`) : o.edge)
+        : (o.confidence ? `+${o.confidence}%` : '+8.4%'),       
         units: o.units || '0',
         market_type: o.market_type || marketType,
         season_phase: o.season_phase || seasonPhase,
@@ -749,139 +751,154 @@ if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phras
   };
 
   // Render card
-  const renderOutcomeCard = (outcome: any, index: number) => {
-    const outcomeColor = getOutcomeColor(outcome.outcome);
-    const isExpanded = expandedCard === outcome.id;
-    const isAllStar = outcome.prediction?.includes('All-Star') || outcome.prop?.includes('All-Star') || outcome.season_phase === 'all-star' || outcome.market_type === 'special';
-    const isFutures = outcome.prediction?.includes('ROTY') || outcome.prediction?.includes('MVP') || outcome.prediction?.includes('Cy Young') || outcome.market_type === 'futures' || outcome.season_phase === 'futures';
-    const isPlayoff = outcome.season_phase === 'playoffs';
-    const isWorldCup = outcome.prediction?.includes('World Cup') || outcome.tournament === 'World Cup 2026' || outcome.sport === 'world cup';
-    
-    return (
-      <Grid item xs={12} md={6} lg={4} key={outcome.id || `outcome-${index}-${Date.now()}`}>
-        <Card sx={{ 
-          height: '100%', 
-          display: 'flex', 
-          flexDirection: 'column',
-          transition: 'all 0.3s',
-          border: `1px solid ${alpha(outcomeColor, 0.2)}`,
-          ...(isAllStar && { borderLeftWidth: 4, borderLeftColor: '#FFD700', background: 'linear-gradient(to right, rgba(255,215,0,0.05), transparent)' }),
-          ...(isFutures && { borderTopWidth: 2, borderTopColor: '#4CAF50', background: 'linear-gradient(to bottom, rgba(76,175,80,0.05), transparent)' }),
-          ...(isPlayoff && { borderLeftWidth: 4, borderLeftColor: '#0066CC', background: 'linear-gradient(to right, rgba(0,102,204,0.05), transparent)' }),
-          ...(isWorldCup && { borderLeftWidth: 4, borderLeftColor: '#00BCD4', background: 'linear-gradient(to right, rgba(0,188,212,0.05), transparent)' }),
-          '&:hover': { borderColor: outcomeColor, boxShadow: `0 4px 20px ${alpha(outcomeColor, 0.15)}` }
-        }}>
-          <CardContent sx={{ flexGrow: 1, p: 3 }}>
-            {isFutures && (
-              <Box sx={{ bgcolor: '#1a2a1a', px: 2, py: 0.75, borderRadius: 1, display: 'inline-block', mb: 2 }}>
-                <Typography variant="caption" sx={{ color: '#4CAF50', fontWeight: 700 }}>🏆 2026 FUTURES</Typography>
-              </Box>
-            )}
-            {isAllStar && !isFutures && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#2a2a1a', px: 2, py: 0.75, borderRadius: 1, mb: 2 }}>
-                <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />
-                <Typography variant="caption" sx={{ color: '#FFD700', fontWeight: 600 }}>2026 ALL-STAR</Typography>
-              </Box>
-            )}
-            
-            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-              <Box>
-                <Typography variant="h6" fontWeight="bold" gutterBottom>
-                  {outcome.game || `${outcome.player || 'Player'} Prediction`}
-                </Typography>
-                <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
-                  <Chip label={outcome.sport?.toUpperCase() || 'NBA'} size="small" icon={getSportIcon(outcome.sport || 'nba')} sx={{ bgcolor: alpha('#3b82f6', 0.1), color: '#3b82f6' }} />
-                  {outcome.player && <Chip label={outcome.player} size="small" variant="outlined" />}
-                  {outcome.season && <Chip label={outcome.season} size="small" sx={{ bgcolor: alpha('#4CAF50', 0.1), color: '#4CAF50', fontSize: '0.65rem' }} />}
-                </Box>
-              </Box>
-              <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
-                <Chip label={outcome.outcome?.toUpperCase() || 'PENDING'} size="small" sx={{ bgcolor: outcomeColor, color: 'white', fontWeight: 'bold', fontSize: '0.7rem' }} />
-                {outcome.units && outcome.units !== '0' && <Typography variant="caption" fontWeight="bold" color={outcomeColor}>{outcome.units} units</Typography>}
-              </Box>
-            </Box>
-            
-            <Typography variant="body1" fontWeight="medium" color="primary" mb={2}>
-              {outcome.prediction || outcome.prop || 'No prediction details available'}
-            </Typography>
-            
-            <Grid container spacing={2} mb={2}>
-              <Grid item xs={6}>
-                <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
-                  <Typography variant="caption" color="text.secondary">Confidence</Typography>
-                  <LinearProgress variant="determinate" value={outcome.confidence_pre_game || outcome.confidence || 70} sx={{ height: 8, borderRadius: 4, mt: 1, mb: 1, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: (outcome.confidence_pre_game || outcome.confidence) >= 80 ? '#10b981' : (outcome.confidence_pre_game || outcome.confidence) >= 70 ? '#f59e0b' : '#ef4444' } }} />
-                  <Typography variant="body2" fontWeight="bold">{outcome.confidence_pre_game || outcome.confidence || 70}%</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={6}>
-                <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
-                  <Typography variant="caption" color="text.secondary">Result</Typography>
-                  <Typography variant="body1" fontWeight="bold" color={outcomeColor} sx={{ mt: 0.5 }}>{outcome.actual_result || outcome.outcome?.charAt(0).toUpperCase() + outcome.outcome?.slice(1) || 'Pending'}</Typography>
-                </Box>
-              </Grid>
-            </Grid>
-            
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#4CAF50', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary">Edge:</Typography>
-              <Typography variant="body2" fontWeight="bold" color={outcome.edge?.startsWith('+') ? '#4CAF50' : '#FF4444'}>{outcome.edge || '+8.4%'}</Typography>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary">Accuracy:</Typography>
-              <Typography variant="body2" fontWeight="bold" color="#4CAF50">{outcome.accuracy || 75}%</Typography>
-            </Box>
-            
-            {/* Accordion - controlled locally */}
-            <Accordion 
-              expanded={isExpanded}
-              onChange={() => setExpandedCard(isExpanded ? null : outcome.id)}
-              sx={{ mb: 2, '&:before': { display: 'none' }, boxShadow: 'none', bgcolor: 'transparent' }}
-            >
-              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 'auto', p: 0, '& .MuiAccordionSummary-content': { my: 1 } }}>
-                <Typography variant="body2" color="primary" fontWeight="medium">
-                  {isExpanded ? 'Show Less' : 'View Details'}
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails sx={{ p: 0 }}>
-                {outcome.key_factors && outcome.key_factors.length > 0 && (
-                  <Box mb={2}>
-                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Key Factors</Typography>
-                    <ul style={{ margin: 0, paddingLeft: 16 }}>
-                      {outcome.key_factors.map((factor: string, i: number) => (
-                        <li key={i}><Typography variant="body2" color="text.secondary">{factor}</Typography></li>
-                      ))}
-                    </ul>
-                  </Box>
-                )}
-                {/* Prediction Details including projection */}
-                {(outcome.line || outcome.stat_type || outcome.actual_value || outcome.projection) && (
-                  <Box mb={2}>
-                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Prediction Details</Typography>
-                    <Grid container spacing={1}>
-                      {outcome.line && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Line</Typography><Typography variant="body2">{outcome.line}</Typography></Grid>}
-                      {outcome.stat_type && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Stat Type</Typography><Typography variant="body2">{outcome.stat_type}</Typography></Grid>}
-                      {outcome.projection && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Projection</Typography><Typography variant="body2">{outcome.projection}</Typography></Grid>}
-                      {outcome.actual_value && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Actual</Typography><Typography variant="body2" fontWeight="bold">{outcome.actual_value}</Typography></Grid>}
-                    </Grid>
-                  </Box>
-                )}
-              </AccordionDetails>
-            </Accordion>
-            
-            <Box sx={{ mt: 'auto' }}>
-              <Box display="flex" justifyContent="space-between" alignItems="center">
-                <Typography variant="caption" color="text.secondary">
-                  {outcome.timestamp ? format(new Date(outcome.timestamp), 'MMM d, yyyy') : outcome.date || AS_OF_DATE}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {outcome.source && `Source: ${outcome.source}`}
-                </Typography>
-              </Box>
-              {outcome.asOf && <Typography variant="caption" color="#4CAF50" sx={{ display: 'block', mt: 0.5 }}>📅 Data as of {outcome.asOf}</Typography>}
-            </Box>
-          </CardContent>
-        </Card>
-      </Grid>
-    );
-  };
+const renderOutcomeCard = (outcome: any, index: number) => {
+  const outcomeColor = getOutcomeColor(outcome.outcome);
+  const isExpanded = expandedCard === outcome.id;
+  const isAllStar = outcome.prediction?.includes('All-Star') || outcome.prop?.includes('All-Star') || outcome.season_phase === 'all-star' || outcome.market_type === 'special';
+  const isFutures = outcome.prediction?.includes('ROTY') || outcome.prediction?.includes('MVP') || outcome.prediction?.includes('Cy Young') || outcome.market_type === 'futures' || outcome.season_phase === 'futures';
+  const isPlayoff = outcome.season_phase === 'playoffs';
+  const isWorldCup = outcome.prediction?.includes('World Cup') || outcome.tournament === 'World Cup 2026' || outcome.sport === 'world cup';
 
+  return (
+    <Grid item xs={12} md={6} lg={4} key={outcome.id || `outcome-${index}-${Date.now()}`}>
+      <Card sx={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        transition: 'all 0.3s',
+        border: `1px solid ${alpha(outcomeColor, 0.2)}`,
+        ...(isAllStar && { borderLeftWidth: 4, borderLeftColor: '#FFD700', background: 'linear-gradient(to right, rgba(255,215,0,0.05), transparent)' }),
+        ...(isFutures && { borderTopWidth: 2, borderTopColor: '#4CAF50', background: 'linear-gradient(to bottom, rgba(76,175,80,0.05), transparent)' }),
+        ...(isPlayoff && { borderLeftWidth: 4, borderLeftColor: '#0066CC', background: 'linear-gradient(to right, rgba(0,102,204,0.05), transparent)' }),
+        ...(isWorldCup && { borderLeftWidth: 4, borderLeftColor: '#00BCD4', background: 'linear-gradient(to right, rgba(0,188,212,0.05), transparent)' }),
+        '&:hover': { borderColor: outcomeColor, boxShadow: `0 4px 20px ${alpha(outcomeColor, 0.15)}` }
+      }}>
+        <CardContent sx={{ flexGrow: 1, p: 3 }}>
+          {isFutures && (
+            <Box sx={{ bgcolor: '#1a2a1a', px: 2, py: 0.75, borderRadius: 1, display: 'inline-block', mb: 2 }}>
+              <Typography variant="caption" sx={{ color: '#4CAF50', fontWeight: 700 }}>🏆 2026 FUTURES</Typography>
+            </Box>
+          )}
+          {isAllStar && !isFutures && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#2a2a1a', px: 2, py: 0.75, borderRadius: 1, mb: 2 }}>
+              <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />
+              <Typography variant="caption" sx={{ color: '#FFD700', fontWeight: 600 }}>2026 ALL-STAR</Typography>
+            </Box>
+          )}
+
+          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+            <Box>
+              <Typography variant="h6" fontWeight="bold" gutterBottom>
+                {outcome.game || `${outcome.player || 'Player'} Prediction`}
+              </Typography>
+              <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
+                <Chip label={outcome.sport?.toUpperCase() || 'NBA'} size="small" icon={getSportIcon(outcome.sport || 'nba')} sx={{ bgcolor: alpha('#3b82f6', 0.1), color: '#3b82f6' }} />
+                {outcome.player && <Chip label={outcome.player} size="small" variant="outlined" />}
+                {outcome.season && <Chip label={outcome.season} size="small" sx={{ bgcolor: alpha('#4CAF50', 0.1), color: '#4CAF50', fontSize: '0.65rem' }} />}
+              </Box>
+            </Box>
+            <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
+              <Chip label={outcome.outcome?.toUpperCase() || 'PENDING'} size="small" sx={{ bgcolor: outcomeColor, color: 'white', fontWeight: 'bold', fontSize: '0.7rem' }} />
+              {outcome.units && outcome.units !== '0' && <Typography variant="caption" fontWeight="bold" color={outcomeColor}>{outcome.units} units</Typography>}
+            </Box>
+          </Box>
+
+          <Typography variant="body1" fontWeight="medium" color="primary" mb={2}>
+            {outcome.prediction || outcome.prop || 'No prediction details available'}
+          </Typography>
+
+          <Grid container spacing={2} mb={2}>
+            <Grid item xs={6}>
+              <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
+                <Typography variant="caption" color="text.secondary">Confidence</Typography>
+                <LinearProgress variant="determinate" value={outcome.confidence_pre_game || outcome.confidence || 70} sx={{ height: 8, borderRadius: 4, mt: 1, mb: 1, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: (outcome.confidence_pre_game || outcome.confidence) >= 80 ? '#10b981' : (outcome.confidence_pre_game || outcome.confidence) >= 70 ? '#f59e0b' : '#ef4444' } }} />
+                <Typography variant="body2" fontWeight="bold">{outcome.confidence_pre_game || outcome.confidence || 70}%</Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={6}>
+              <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
+                <Typography variant="caption" color="text.secondary">Result</Typography>
+                <Typography variant="body1" fontWeight="bold" color={outcomeColor} sx={{ mt: 0.5 }}>{outcome.actual_result || outcome.outcome?.charAt(0).toUpperCase() + outcome.outcome?.slice(1) || 'Pending'}</Typography>
+              </Box>
+            </Grid>
+          </Grid>
+
+          {/* Edge and Accuracy - with safe edge sign check */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#4CAF50', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
+            <Typography variant="caption" fontWeight="bold" color="text.secondary">Edge:</Typography>
+            <Typography variant="body2" fontWeight="bold" color={
+              (() => {
+                const edgeVal = outcome.edge;
+                if (typeof edgeVal === 'string' && edgeVal.startsWith('+')) return '#4CAF50';
+                if (typeof edgeVal === 'number' && edgeVal > 0) return '#4CAF50';
+                if (typeof edgeVal === 'string') {
+                  // Try to parse a number from strings like "8.4%" or "8.4"
+                  const num = parseFloat(edgeVal.replace(/[^0-9.-]/g, ''));
+                  if (!isNaN(num) && num > 0) return '#4CAF50';
+                }
+                return '#FF4444';
+              })()
+            }>
+              {outcome.edge || '+8.4%'}
+            </Typography>
+            <Typography variant="caption" fontWeight="bold" color="text.secondary">Accuracy:</Typography>
+            <Typography variant="body2" fontWeight="bold" color="#4CAF50">{outcome.accuracy || 75}%</Typography>
+          </Box>
+
+          {/* Accordion - controlled locally */}
+          <Accordion 
+            expanded={isExpanded}
+            onChange={() => setExpandedCard(isExpanded ? null : outcome.id)}
+            sx={{ mb: 2, '&:before': { display: 'none' }, boxShadow: 'none', bgcolor: 'transparent' }}
+          >
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 'auto', p: 0, '& .MuiAccordionSummary-content': { my: 1 } }}>
+              <Typography variant="body2" color="primary" fontWeight="medium">
+                {isExpanded ? 'Show Less' : 'View Details'}
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ p: 0 }}>
+              {outcome.key_factors && outcome.key_factors.length > 0 && (
+                <Box mb={2}>
+                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Key Factors</Typography>
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {outcome.key_factors.map((factor: string, i: number) => (
+                      <li key={i}><Typography variant="body2" color="text.secondary">{factor}</Typography></li>
+                    ))}
+                  </ul>
+                </Box>
+              )}
+              {/* Prediction Details including projection */}
+              {(outcome.line || outcome.stat_type || outcome.actual_value || outcome.projection) && (
+                <Box mb={2}>
+                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Prediction Details</Typography>
+                  <Grid container spacing={1}>
+                    {outcome.line && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Line</Typography><Typography variant="body2">{outcome.line}</Typography></Grid>}
+                    {outcome.stat_type && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Stat Type</Typography><Typography variant="body2">{outcome.stat_type}</Typography></Grid>}
+                    {outcome.projection && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Projection</Typography><Typography variant="body2">{outcome.projection}</Typography></Grid>}
+                    {outcome.actual_value && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Actual</Typography><Typography variant="body2" fontWeight="bold">{outcome.actual_value}</Typography></Grid>}
+                  </Grid>
+                </Box>
+              )}
+            </AccordionDetails>
+          </Accordion>
+
+          <Box sx={{ mt: 'auto' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Typography variant="caption" color="text.secondary">
+                {outcome.timestamp ? format(new Date(outcome.timestamp), 'MMM d, yyyy') : outcome.date || AS_OF_DATE}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {outcome.source && `Source: ${outcome.source}`}
+              </Typography>
+            </Box>
+            {outcome.asOf && <Typography variant="caption" color="#4CAF50" sx={{ display: 'block', mt: 0.5 }}>📅 Data as of {outcome.asOf}</Typography>}
+          </Box>
+        </CardContent>
+      </Card>
+    </Grid>
+  );
+};
+  
   // Render generator
   const renderGenerator = () => (
     <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>

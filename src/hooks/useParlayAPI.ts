@@ -1,4 +1,4 @@
-// src/hooks/useParlayAPI.ts - FIXED VERSION (No console errors)
+// src/hooks/useParlayAPI.ts - INTEGRATED VERSION
 import { useState, useEffect, useCallback } from 'react';
 
 const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
@@ -85,13 +85,16 @@ export const useParlaySuggestions = (params: { sport?: string; limit?: number })
         suggestions: result.suggestions?.length || 0
       });
       
-      // Extract suggestions from response
+      // Extract suggestions from response (integrating File 1's extraction logic)
       let suggestions: ParlaySuggestion[] = [];
       
       if (Array.isArray(result)) {
         suggestions = result;
       } else if (result.suggestions && Array.isArray(result.suggestions)) {
         suggestions = result.suggestions;
+      } else if (result.data?.suggestions && Array.isArray(result.data.suggestions)) {
+        // File 1's specific extraction path
+        suggestions = result.data.suggestions;
       } else if (result.data && Array.isArray(result.data)) {
         suggestions = result.data;
       }
@@ -105,7 +108,7 @@ export const useParlaySuggestions = (params: { sport?: string; limit?: number })
       console.warn('⚠️ useParlaySuggestions fetch failed, using mock data:', err);
       setError(err);
       
-      // Provide fallback mock data
+      // Provide fallback mock data (same as File 2)
       const mockSuggestions: ParlaySuggestion[] = [
         {
           id: 'mock-1',

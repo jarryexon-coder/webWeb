@@ -50,7 +50,7 @@ interface AnalyticsMetric {
   id: string;
   title: string;
   metric: string;
-  value: number | string;
+  value: number | string | Record<string, any>; // Allow object for flexibility
   change: string;
   trend: 'up' | 'down' | 'stable' | 'warning';
   sport: string;
@@ -361,6 +361,23 @@ const AnalyticsDashboardScreen: React.FC = () => {
     }
   };
 
+  // Helper to safely render a metric value that might be an object
+  const renderMetricValue = (metric: AnalyticsMetric) => {
+    const { value, metric: metricType } = metric;
+    if (typeof value === 'object' && value !== null) {
+      // Log the unexpected object for debugging
+      console.warn(`Metric "${metric.title}" received an object value:`, value);
+      // Try to extract a common property like avg_points, or fallback to JSON
+      if ('avg_points' in value) {
+        return value.avg_points;
+      }
+      // If you know other possible properties, add them here
+      // Otherwise, return a string representation to avoid crash
+      return JSON.stringify(value);
+    }
+    return value;
+  };
+
   const renderMetricCards = () => (
     <Grid container spacing={3}>
       {metrics.map((metric) => (
@@ -379,7 +396,7 @@ const AnalyticsDashboardScreen: React.FC = () => {
                 />
               </Box>
               <Typography variant="h5" component="div" sx={{ fontWeight: 600, mt: 1 }}>
-                {metric.value}
+                {renderMetricValue(metric)}
               </Typography>
               <Box display="flex" alignItems="center" mt={1}>
                 {renderTrendIcon(metric.trend)}

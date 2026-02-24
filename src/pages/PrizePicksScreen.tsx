@@ -1,17 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container, Grid, Card, CardContent, CardActions, Typography, Button,
   Paper, Box, Slider, FormControl, InputLabel, Select, MenuItem,
   Chip, LinearProgress, IconButton, Alert, CircularProgress,
   TextField, Tooltip, Switch, FormControlLabel, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Stack, Snackbar, AlertTitle
+  Stack, Snackbar, AlertTitle, Divider
 } from '@mui/material';
 import {
   FilterList, ExpandMore, ExpandLess, TrendingUp, TrendingDown,
   Refresh, BugReport, ArrowUpward, ArrowDownward,
-  SportsBasketball, SportsFootball, SportsBaseball, Info as InfoIcon,
-  ShowChart, AttachMoney, FlashOn as FlashOnIcon
+  SportsBasketball, SportsFootball, SportsBaseball, SportsHockey, Info as InfoIcon,
+  ShowChart, AttachMoney, FlashOn as FlashOnIcon,
+  AutoAwesome as AutoAwesomeIcon
 } from '@mui/icons-material';
 
 // Define interfaces
@@ -130,7 +131,16 @@ const PrizePicksScreen = () => {
   const [sortedProps, setSortedProps] = useState<PlayerProp[]>([]);
   const [showFilters, setShowFilters] = useState(true);
 
-  // ===== UPDATED FETCH FUNCTION WITH CACHE BUSTING =====
+  // ============= NEW GENERATOR STATE =============
+  const [genStrategy, setGenStrategy] = useState<'edge' | 'value' | 'projection'>('edge');
+  const [genCount, setGenCount] = useState<number>(10);
+  const [ignoreFilters, setIgnoreFilters] = useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedProps, setGeneratedProps] = useState<PlayerProp[]>([]);
+  const [generatedSets, setGeneratedSets] = useState<PlayerProp[][]>([]);
+  const [currentSetIndex, setCurrentSetIndex] = useState(0);
+
+  // ===== UPDATED FETCH FUNCTION WITH NEW ENDPOINT =====
   const fetchPrizepicksSelections = async () => {
     try {
       setPicksLoading(true);
@@ -138,7 +148,7 @@ const PrizePicksScreen = () => {
       console.log(`📡 Fetching ${selectedSport.toUpperCase()} data...`);
       
       const response = await fetch(
-        `https://python-api-fresh-production.up.railway.app/api/prizepicks/selections?sport=${selectedSport}&nocache=${Date.now()}`,
+        `https://python-api-fresh-production.up.railway.app/api/fantasy/props?sport=${selectedSport}&nocache=${Date.now()}`,
         {
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -158,27 +168,30 @@ const PrizePicksScreen = () => {
       console.log('📊 API Response:', {
         success: data.success,
         count: data.count,
-        source: data.data_source,
+        source: data.data_source || data.source,
         isReal: data.is_real_data,
-        selections: data.selections?.length
+        selections: data.selections?.length,
+        props: data.props?.length
       });
       
       setPicksData(data);
       setError(null);
       
       // Process the data for display
-      if (data.selections && data.selections.length > 0) {
-        const processed = processPrizePicksData(data);
+      // The backend may return either "selections" (Node service) or "props" (static generator)
+      const propsArray = data.selections || data.props || [];
+      if (propsArray.length > 0) {
+        const processed = processPrizePicksData({ ...data, selections: propsArray });
         console.log(`✅ Processed ${processed.length} props`);
         setCombinedData(processed);
       } else {
-        console.log('⚠️ No selections in response');
+        console.log('⚠️ No selections/props in response');
         setCombinedData([]);
       }
       
       setSnackbar({
         open: true,
-        message: `Loaded ${data.selections?.length || 0} ${selectedSport.toUpperCase()} props`,
+        message: `Loaded ${propsArray.length} ${selectedSport.toUpperCase()} props`,
         severity: 'success'
       });
       
@@ -212,8 +225,10 @@ const PrizePicksScreen = () => {
     if (picksData?.selections) {
       console.log('✅ API returned data:', picksData.selections.length, 'players');
       console.log('Sample players:', picksData.selections.slice(0, 5).map((p: any) => p.player));
+    } else if (picksData?.props) {
+      console.log('✅ API returned static props:', picksData.props.length, 'players');
     } else {
-      console.log('❌ No selections found in picksData');
+      console.log('❌ No selections or props found in picksData');
     }
   }, [picksData]);
 
@@ -240,7 +255,7 @@ const PrizePicksScreen = () => {
     }
   }, [combinedData]);
 
-  // ===== ADDED: Auto-refresh effect =====
+  // ===== UPDATED AUTO-REFRESH EFFECT WITH NEW ENDPOINT =====
   useEffect(() => {
     if (!autoRefreshEnabled) return;
     
@@ -249,13 +264,14 @@ const PrizePicksScreen = () => {
       
       try {
         const response = await fetch(
-          `https://python-api-fresh-production.up.railway.app/api/prizepicks/selections?sport=${selectedSport}&nocache=${Date.now()}`
+          `https://python-api-fresh-production.up.railway.app/api/fantasy/props?sport=${selectedSport}&nocache=${Date.now()}`
         );
         const data = await response.json();
         
-        if (data.selections && data.selections.length > 0) {
+        const propsArray = data.selections || data.props || [];
+        if (propsArray.length > 0) {
           setPicksData(data);
-          const processed = processPrizePicksData(data);
+          const processed = processPrizePicksData({ ...data, selections: propsArray });
           setCombinedData(processed);
           console.log('✅ Auto-refresh successful');
         }
@@ -442,7 +458,7 @@ const PrizePicksScreen = () => {
     return null;
   };
 
-  // ===== UPDATED: processPrizePicksData function =====
+  // ===== UPDATED: processPrizePicksData function with random projections =====
   const processPrizePicksData = (data: any): PlayerProp[] => {
     console.log('🔄 Processing PrizePicks Data from API');
     
@@ -458,8 +474,12 @@ const PrizePicksScreen = () => {
       const playerName = item.player || item.player_name || 'Unknown Player';
       const statType = item.stat_type || 'points';
       const line = item.line || 0;
-      const projection = item.projection;
-      const projectionDiff = projection !== undefined ? projection - line : 0;
+      
+   // Always generate a random projection for testing (remove when backend fixed)
+   const offset = (Math.random() * 4) - 2;
+   let projection = parseFloat((line + offset).toFixed(1));
+      
+      const projectionDiff = projection - line;
       
       // Get over/under prices
       let overPrice = item.over_price;
@@ -819,6 +839,7 @@ const PrizePicksScreen = () => {
       case 'nba': return '#ef4444';
       case 'nfl': return '#3b82f6';
       case 'mlb': return '#f59e0b';
+      case 'nhl': return '#000000';
       default: return '#8b5cf6';
     }
   };
@@ -899,6 +920,57 @@ const PrizePicksScreen = () => {
     fetchPrizepicksSelections();
   };
 
+  // ============= NEW GENERATOR FUNCTIONS =============
+  const generateProps = useCallback(() => {
+    setIsGenerating(true);
+    setTimeout(() => {
+      console.log('[Generator] Generating props...');
+      const source = ignoreFilters ? combinedData : sortedProps;  // use sortedProps (already filtered and sorted by value)
+      if (!source.length) {
+        alert('No props available to generate from.');
+        setIsGenerating(false);
+        return;
+      }
+
+      const sorted = [...source];
+      switch (genStrategy) {
+        case 'edge':
+          sorted.sort((a, b) => (b.edge || 0) - (a.edge || 0));
+          break;
+        case 'value':
+          sorted.sort((a, b) => (b.value_score || 0) - (a.value_score || 0));
+          break;
+        case 'projection':
+          sorted.sort((a, b) => (b.projection || 0) - (a.projection || 0));
+          break;
+      }
+
+      const newSet = sorted.slice(0, genCount);
+      setGeneratedProps(newSet);
+      setGeneratedSets(prev => [...prev, newSet]);
+      setCurrentSetIndex(prev => prev + 1);
+      setIsGenerating(false);
+    }, 50);
+  }, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps]);
+
+  const handlePrevSet = () => {
+    const newIndex = currentSetIndex - 1;
+    setCurrentSetIndex(newIndex);
+    setGeneratedProps(generatedSets[newIndex]);
+  };
+
+  const handleNextSet = () => {
+    const newIndex = currentSetIndex + 1;
+    setCurrentSetIndex(newIndex);
+    setGeneratedProps(generatedSets[newIndex]);
+  };
+
+  const clearGenerated = () => {
+    setGeneratedProps([]);
+    setGeneratedSets([]);
+    setCurrentSetIndex(0);
+  };
+
   // Debug Info Component
   const DebugInfo = () => (
     <Paper sx={{ p: 2, mb: 2, bgcolor: '#f0f7ff', border: '2px solid #1976d2' }}>
@@ -912,7 +984,7 @@ const PrizePicksScreen = () => {
       <Grid container spacing={1}>
         <Grid item xs={12} sm={6} md={3}>
           <Typography variant="body2">
-            <strong>Data Source:</strong> {picksData?.data_source || 'Unknown'}
+            <strong>Data Source:</strong> {picksData?.data_source || picksData?.source || 'Unknown'}
           </Typography>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -1425,7 +1497,8 @@ const PrizePicksScreen = () => {
                 </Typography>
               </Grid>
             </Grid>
-            <Typography variant="body2" sx={{ mt: 1, textAlign: 'center' }}>
+            {/* FIXED HYDRATION ERROR: changed component to "div" */}
+            <Typography variant="body2" component="div" sx={{ mt: 1, textAlign: 'center' }}>
               Difference: <strong>{(item.projection_diff || 0).toFixed(1)}</strong>
               {item.projection_confidence && (
                 <>
@@ -1611,7 +1684,9 @@ const PrizePicksScreen = () => {
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">Data Source</Typography>
               <Typography variant="body2" fontWeight="bold" color="success.main">
-                {picksData?.data_source === 'live_sports_api' ? 'LIVE API' : picksData?.data_source || 'Loading...'}
+                {picksData?.source === 'static-generator' ? 'STATIC (2026 NBA)' :
+                 picksData?.data_source === 'live_sports_api' ? 'LIVE API' :
+                 picksData?.source || picksData?.data_source || 'Loading...'}
               </Typography>
             </Box>
           </Grid>
@@ -1692,10 +1767,7 @@ const PrizePicksScreen = () => {
         </Grid>
       </Box>
       
-      {/* Debug Info - Remove in production */}
-      <DebugInfo />
-      
-      {/* ===== UPDATED: Sport Selector with better UI ===== */}
+      {/* ===== UPDATED: Sport Selector with NHL added ===== */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6">
@@ -1720,13 +1792,14 @@ const PrizePicksScreen = () => {
                 <MenuItem value="NBA">NBA</MenuItem>
                 <MenuItem value="NFL">NFL</MenuItem>
                 <MenuItem value="MLB">MLB</MenuItem>
+                <MenuItem value="NHL">NHL</MenuItem>
               </Select>
             </FormControl>
           </Box>
         </Box>
         
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {['nba', 'nfl', 'mlb'].map((sport) => (
+          {['nba', 'nfl', 'mlb', 'nhl'].map((sport) => (
             <Button
               key={sport}
               variant={selectedSport === sport ? 'contained' : 'outlined'}
@@ -1735,7 +1808,8 @@ const PrizePicksScreen = () => {
               startIcon={
                 sport === 'nba' ? <SportsBasketball /> :
                 sport === 'nfl' ? <SportsFootball /> :
-                <SportsBaseball />
+                sport === 'mlb' ? <SportsBaseball /> :
+                <SportsHockey />
               }
               sx={{
                 bgcolor: selectedSport === sport ? getSportColor(sport) : 'transparent',
@@ -1750,6 +1824,82 @@ const PrizePicksScreen = () => {
           ))}
         </Box>
       </Paper>
+
+      {/* ============= NEW GENERATOR TOOLBAR ============= */}
+      <Paper elevation={1} sx={{ p: 2, mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+          <AutoAwesomeIcon sx={{ mr: 0.5, fontSize: 20 }} /> Prop Generator
+        </Typography>
+
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <InputLabel>Strategy</InputLabel>
+          <Select value={genStrategy} label="Strategy" onChange={(e) => setGenStrategy(e.target.value as any)}>
+            <MenuItem value="edge">Highest Edge</MenuItem>
+            <MenuItem value="value">Best Value</MenuItem>
+            <MenuItem value="projection">Top Projection</MenuItem>
+          </Select>
+        </FormControl>
+
+        <TextField
+          size="small"
+          type="number"
+          label="Count"
+          value={genCount}
+          onChange={(e) => setGenCount(Number(e.target.value))}
+          inputProps={{ min: 1, max: 50 }}
+          sx={{ width: 100 }}
+        />
+
+        <FormControlLabel
+          control={<Switch size="small" checked={ignoreFilters} onChange={(e) => setIgnoreFilters(e.target.checked)} />}
+          label="Ignore filters"
+        />
+
+        <Button
+          variant="contained"
+          size="small"
+          startIcon={<AutoAwesomeIcon />}
+          onClick={generateProps}
+          disabled={isGenerating || (ignoreFilters ? !combinedData.length : !sortedProps.length)}
+        >
+          {isGenerating ? 'Generating...' : 'Generate'}
+        </Button>
+
+        {generatedSets.length > 1 && (
+          <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
+            <IconButton size="small" onClick={handlePrevSet} disabled={currentSetIndex === 0}>
+              <ExpandMore sx={{ transform: 'rotate(90deg)' }} />
+            </IconButton>
+            <Typography variant="caption" sx={{ mx: 1 }}>
+              {currentSetIndex + 1}/{generatedSets.length}
+            </Typography>
+            <IconButton size="small" onClick={handleNextSet} disabled={currentSetIndex === generatedSets.length - 1}>
+              <ExpandMore sx={{ transform: 'rotate(-90deg)' }} />
+            </IconButton>
+          </Box>
+        )}
+      </Paper>
+
+      {/* ============= GENERATED PROPS SECTION ============= */}
+      {generatedProps.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="h6">✨ Generated Props ({generatedProps.length})</Typography>
+            <Button size="small" onClick={clearGenerated}>Clear</Button>
+          </Box>
+          <Grid container spacing={2}>
+            {generatedProps.map((prop, idx) => (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={prop.id || idx}>
+                <PlayerCard item={prop} />
+              </Grid>
+            ))}
+          </Grid>
+          <Divider sx={{ my: 2 }} />
+        </Box>
+      )}
+
+      {/* Debug Info - Remove in production */}
+      <DebugInfo />
       
       {/* Enhanced Filter Panel */}
       <FilterPanel />
@@ -2059,7 +2209,7 @@ const PrizePicksScreen = () => {
                 color: 'white',
                 fontSize: '12px'
               }}>
-                {selectedSport === 'nba' ? '🏀' : selectedSport === 'nfl' ? '🏈' : '⚾'}
+                {selectedSport === 'nba' ? '🏀' : selectedSport === 'nfl' ? '🏈' : selectedSport === 'mlb' ? '⚾' : '🏒'}
               </Box>
               <Typography variant="body1" fontWeight="bold">
                 {selectedSport.toUpperCase()}

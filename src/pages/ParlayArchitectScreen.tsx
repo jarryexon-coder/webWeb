@@ -1,5 +1,6 @@
-// src/pages/ParlayArchitectScreen.tsx - COMPLETE FIXED VERSION WITH ENHANCED FILTERS AND 2026 FEATURES
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'; // ✅ added useRef
+// src/pages/ParlayArchitectScreen.tsx - COMPLETE FIXED VERSION WITH MANUAL FETCH
+// REPLACED broken hook with manual fetch to immediately display real data
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -90,16 +91,16 @@ import { format, parseISO, isToday } from 'date-fns';
 import { useParlayBuilder } from '../hooks/useParlayBuilder';
 import { ParlayLegCard } from '../components/ParlayLegCard';
 import { PlatformBadge } from '../components/PlatformBadge';
-import { 
-  calculateParlayOdds, 
-  calculateImpliedProbability, 
-  calculateExpectedValue 
+import {
+  calculateParlayOdds,
+  calculateImpliedProbability,
+  calculateExpectedValue
 } from '../utils/oddsCalculators';
 import OddsService from '../services/OddsService';
 import { usePredictions } from '../context/PredictionsContext';
 
-// Import the NEW fixed hooks
-import { useParlaySuggestions, useOddsGames } from '../hooks/useParlayAPI';
+// Import only the odds hook (the parlay hook is replaced by manual fetch)
+import { useOddsGames } from '../hooks/useParlayAPI';
 
 // ========== TYPES 2026 ==========
 interface ParlayLeg {
@@ -303,42 +304,42 @@ const RISK_LEVELS = [
 ];
 
 const PARLAY_TYPES_2026 = [
-  { 
-    id: 'standard', 
-    name: 'Standard Parlay', 
-    min_legs: 2, 
-    max_legs: 20, 
+  {
+    id: 'standard',
+    name: 'Standard Parlay',
+    min_legs: 2,
+    max_legs: 20,
     description: 'Traditional multi-leg betting',
     sports: ['NBA', 'NFL', 'NHL', 'MLB'],
     popularity: 95,
     is_live: true
   },
-  { 
-    id: 'same_game', 
-    name: 'Same Game Parlay', 
-    min_legs: 2, 
-    max_legs: 10, 
+  {
+    id: 'same_game',
+    name: 'Same Game Parlay',
+    min_legs: 2,
+    max_legs: 10,
     description: 'Correlated props from same game',
     sports: ['NBA', 'NFL'],
     popularity: 88,
     is_live: true
   },
-  { 
-    id: 'teaser', 
-    name: 'Teaser', 
-    min_legs: 2, 
-    max_legs: 8, 
+  {
+    id: 'teaser',
+    name: 'Teaser',
+    min_legs: 2,
+    max_legs: 8,
     description: '6, 6.5, 7-point teasers',
     sports: ['NBA', 'NFL'],
     points_available: [6, 6.5, 7],
     popularity: 76,
     is_live: true
   },
-  { 
-    id: 'round_robin', 
-    name: 'Round Robin', 
-    min_legs: 3, 
-    max_legs: 8, 
+  {
+    id: 'round_robin',
+    name: 'Round Robin',
+    min_legs: 3,
+    max_legs: 8,
     description: 'Multiple parlay combinations',
     sports: ['NBA', 'NFL', 'NHL', 'MLB'],
     combinations: ['2s', '3s', '4s'],
@@ -372,7 +373,7 @@ const pulseAnimation = `
 
 const ParlayArchitectScreen = () => {
   const navigate = useNavigate();
-  
+
   // ========== STATE MANAGEMENT 2026 ==========
   // Original state
   const [filteredSuggestions, setFilteredSuggestions] = useState<ParlaySuggestion[]>([]);
@@ -383,7 +384,7 @@ const ParlayArchitectScreen = () => {
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  
+
   // Filter states
   const [selectedSport, setSelectedSport] = useState('all');
   const [selectedType, setSelectedType] = useState('all');
@@ -392,13 +393,18 @@ const ParlayArchitectScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showTodaysGames, setShowTodaysGames] = useState(true);
   const [dateFilter, setDateFilter] = useState('today');
-  
-  // ✅ NEW: Enhanced filter state variables from File 1
+
+  // Enhanced filter state variables
   const [marketType, setMarketType] = useState('all');
   const [minEdge, setMinEdge] = useState(5);
   const [maxRisk, setMaxRisk] = useState('all');
   const [parlaySize, setParlaySize] = useState('all');
-  
+
+  // ========== MANUAL FETCH STATE FOR SUGGESTIONS ==========
+  const [manualSuggestions, setManualSuggestions] = useState<any[]>([]);
+  const [manualLoading, setManualLoading] = useState(true);
+  const [manualError, setManualError] = useState<string | null>(null);
+
   // ========== PARLAY BUILDER STATE 2026 ==========
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
   const [stake, setStake] = useState('25');
@@ -417,18 +423,8 @@ const ParlayArchitectScreen = () => {
   const [activeTab, setActiveTab] = useState('builder');
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  
-  // ✅ Use the new hooks
-  const { 
-    data: parlayData, 
-    isLoading: parlayLoading, 
-    error: parlayError, 
-    refetch: refetchParlays 
-  } = useParlaySuggestions({
-    sport: selectedSport === 'all' ? 'all' : selectedSport,
-    limit: 10
-  });
-  
+
+  // ✅ Keep odds hook (it works)
   const {
     data: oddsData,
     isLoading: oddsLoading,
@@ -436,77 +432,80 @@ const ParlayArchitectScreen = () => {
     refetch: refetchOdds
   } = useOddsGames(dateFilter);
 
-  // ========== EXTRACT SUGGESTIONS ==========
+  // ========== MANUAL FETCH EFFECT ==========
+  useEffect(() => {
+    setManualLoading(true);
+    // Build URL with current sport filter
+    const sportParam = selectedSport === 'all' ? 'all' : selectedSport;
+    fetch(`https://python-api-fresh-production.up.railway.app/api/parlay/suggestions?sport=${sportParam}&limit=10`)
+      .then(res => res.json())
+      .then(data => {
+        console.log('✅ Manual fetch succeeded:', data);
+        setManualSuggestions(data.suggestions || []);
+        setManualError(null);
+      })
+      .catch(err => {
+        console.error('❌ Manual fetch failed:', err);
+        setManualError(err.message);
+      })
+      .finally(() => setManualLoading(false));
+  }, [selectedSport]);
+
+  // ========== TRANSFORM SUGGESTIONS TO COMPONENT FORMAT ==========
   const suggestions = React.useMemo(() => {
-    if (!parlayData) return [];
-    
-    console.log('📥 Raw parlayData structure:', {
-      isArray: Array.isArray(parlayData),
-      keys: Object.keys(parlayData),
-      hasSuggestions: 'suggestions' in parlayData,
-      suggestionsLength: parlayData.suggestions?.length || 0
-    });
-    
-    let extracted: any[] = [];
-    
-    if (Array.isArray(parlayData)) {
-      extracted = parlayData;
-    } else if (parlayData.suggestions && Array.isArray(parlayData.suggestions)) {
-      extracted = parlayData.suggestions;
-    } else if (parlayData.data && Array.isArray(parlayData.data)) {
-      extracted = parlayData.data;
-    } else {
-      for (const key in parlayData) {
-        if (Array.isArray(parlayData[key])) {
-          extracted = parlayData[key];
-          break;
+    console.log('🔄 suggestions memo running, manualSuggestions length:', manualSuggestions?.length);
+    if (!manualSuggestions || manualSuggestions.length === 0) return [];
+
+    return manualSuggestions.map((suggestion: any, index: number) => {
+      // Ensure is_real_data is preserved
+      const transformed = {
+        id: suggestion.id || `parlay-${index}-${Date.now()}`,
+        name: suggestion.name || `Parlay ${index + 1}`,
+        sport: suggestion.sport || 'Mixed',
+        type: suggestion.type || 'moneyline',
+        market_type: suggestion.market_type || suggestion.type || 'mixed',
+        legs: (suggestion.legs || []).map((leg: any) => ({
+          ...leg,
+          odds_american: leg.odds_american || leg.odds || '+100',
+          confidence_level: leg.confidence_level ||
+            (leg.confidence > 80 ? 'very-high' : leg.confidence > 70 ? 'high' : leg.confidence > 60 ? 'medium' : 'low'),
+          is_star: leg.confidence > 80 || leg.is_star,
+          correlation_score: leg.correlation_score || (leg.confidence ? leg.confidence / 100 : 0.7)
+        })),
+        total_odds: suggestion.total_odds || suggestion.totalOdds || '+200',
+        total_odds_american: suggestion.total_odds_american || suggestion.total_odds || '+200',
+        confidence: typeof suggestion.confidence === 'number' ? suggestion.confidence : 70,
+        analysis: suggestion.analysis || 'No analysis available',
+        timestamp: suggestion.timestamp || new Date().toISOString(),
+        isToday: suggestion.isToday !== undefined ? suggestion.isToday : true,
+        is_real_data: suggestion.is_real_data || false,   // CRITICAL: preserve backend flag
+        has_data: suggestion.has_data !== undefined ? suggestion.has_data : true,
+        confidence_level: suggestion.confidence_level ||
+          (suggestion.confidence > 80 ? 'very-high' : suggestion.confidence > 70 ? 'high' : suggestion.confidence > 60 ? 'medium' : 'low'),
+        expected_value: suggestion.expected_value || '+5%',
+        risk_level: suggestion.risk_level || 'medium',
+        correlation_bonus: suggestion.correlation_bonus,
+        available_boosts: suggestion.available_boosts || [],
+        ai_metrics: suggestion.ai_metrics || {
+          leg_count: suggestion.legs?.length || 0,
+          avg_leg_confidence: typeof suggestion.confidence === 'number' ? suggestion.confidence : 70,
+          recommended_stake: '$5.00',
+          edge: suggestion.ai_metrics?.edge || 0.05
         }
+      };
+      if (index === 0) {
+        console.log('✅ Transformed first suggestion:', transformed);
       }
-    }
-    
-    return extracted.map((suggestion: any, index: number) => ({
-      id: suggestion.id || `parlay-${index}-${Date.now()}`,
-      name: suggestion.name || `Parlay ${index + 1}`,
-      sport: suggestion.sport || 'Mixed',
-      type: suggestion.type || 'moneyline',
-      market_type: suggestion.market_type || suggestion.type || 'mixed',
-      legs: (suggestion.legs || []).map((leg: any) => ({
-        ...leg,
-        odds_american: leg.odds_american || leg.odds || '+100',
-        confidence_level: leg.confidence_level || 
-          (leg.confidence > 80 ? 'very-high' : leg.confidence > 70 ? 'high' : leg.confidence > 60 ? 'medium' : 'low'),
-        is_star: leg.confidence > 80 || leg.is_star,
-        correlation_score: leg.correlation_score || (leg.confidence ? leg.confidence / 100 : 0.7)
-      })),
-      total_odds: suggestion.total_odds || suggestion.totalOdds || '+200',
-      total_odds_american: suggestion.total_odds_american || suggestion.total_odds || '+200',
-      confidence: typeof suggestion.confidence === 'number' ? suggestion.confidence : 70,
-      analysis: suggestion.analysis || 'No analysis available',
-      timestamp: suggestion.timestamp || new Date().toISOString(),
-      isToday: suggestion.isToday !== undefined ? suggestion.isToday : true,
-      is_real_data: suggestion.is_real_data || false,
-      has_data: suggestion.has_data !== undefined ? suggestion.has_data : true,
-      confidence_level: suggestion.confidence_level || 
-        (suggestion.confidence > 80 ? 'very-high' : suggestion.confidence > 70 ? 'high' : suggestion.confidence > 60 ? 'medium' : 'low'),
-      expected_value: suggestion.expected_value || '+5%',
-      risk_level: suggestion.risk_level || 'medium',
-      correlation_bonus: suggestion.correlation_bonus,
-      available_boosts: suggestion.available_boosts || [],
-      ai_metrics: suggestion.ai_metrics || {
-        leg_count: suggestion.legs?.length || 0,
-        avg_leg_confidence: typeof suggestion.confidence === 'number' ? suggestion.confidence : 70,
-        recommended_stake: '$5.00',
-        edge: suggestion.ai_metrics?.edge || 0.05
-      }
-    }));
-  }, [parlayData]);
+      return transformed;
+    });
+  }, [manualSuggestions]);
 
   // ========== EXTRACT TODAY'S GAMES ==========
   const todaysGames = React.useMemo(() => {
     if (!oddsData) return [];
-    
+
     let extracted: any[] = [];
-    
+
     if (Array.isArray(oddsData)) {
       extracted = oddsData;
     } else if (oddsData.games && Array.isArray(oddsData.games)) {
@@ -521,7 +520,7 @@ const ParlayArchitectScreen = () => {
         }
       }
     }
-    
+
     return extracted as Game[];
   }, [oddsData]);
 
@@ -564,9 +563,9 @@ const ParlayArchitectScreen = () => {
           sport: 'NBA'
         }
       ];
-      
+
       setAvailableProps(mockProps);
-      
+
       // Mock same game parlays
       if (selectedSport === 'NBA' || selectedSport === 'NFL') {
         setSameGameParlays([
@@ -596,10 +595,10 @@ const ParlayArchitectScreen = () => {
   const fetchTeaserOdds = useCallback(async () => {
     try {
       // Mock teaser odds
-      setTeaserOdds([{ 
-        points: teaserPoints, 
-        odds: selectedSport === 'NBA' ? -110 : -120, 
-        sport: selectedSport 
+      setTeaserOdds([{
+        points: teaserPoints,
+        odds: selectedSport === 'NBA' ? -110 : -120,
+        sport: selectedSport
       }]);
     } catch (error) {
       console.error('Error fetching teaser odds:', error);
@@ -636,10 +635,10 @@ const ParlayArchitectScreen = () => {
   const fetchParlaySuggestions = useCallback(async () => {
     try {
       setLoadingSuggestions(true);
-      
+
       // Mock AI suggestions based on sport
       const mockSuggestions = [];
-      
+
       if (selectedSport === 'NBA') {
         mockSuggestions.push({
           id: 'ai-1',
@@ -671,7 +670,7 @@ const ParlayArchitectScreen = () => {
           analysis: 'McDavid heating up before deadline, Draisaitl averaging 5.2 shots last 10 games.'
         });
       }
-      
+
       setAiSuggestions(mockSuggestions);
     } catch (error) {
       console.error('Error fetching parlay suggestions:', error);
@@ -680,154 +679,317 @@ const ParlayArchitectScreen = () => {
     }
   }, [selectedSport]);
 
-// ========== GENERATE PARLAY FROM GAMES (2026 – AI Endpoint) ==========
-const generateParlayFromGames = useCallback(async (sport: string, numLegs: number) => {
-  console.log(`🎯 Generating parlay for ${sport} with ${numLegs} legs (AI endpoint)`);
-  setGenerating(true);
+  // ========== GENERATE PARLAY FROM GAMES (2026 – AI Endpoint) ==========
+  const generateParlayFromGames = useCallback(async (sport: string, numLegs: number) => {
+    console.log(`🎯 Generating parlay for ${sport} with ${numLegs} legs (AI endpoint)`);
+    setGenerating(true);
 
-  try {
-    // --- 1. Call the AI endpoint with a natural language prompt ---
-    const prompt = `Generate a ${numLegs}-leg ${sport === 'all' ? 'NBA' : sport} parlay with player props and moneyline picks. Return as JSON with legs array.`;
-    const payload = { query: prompt };
+    try {
+      // --- 1. Call the AI endpoint with a natural language prompt ---
+      const prompt = `Generate a ${numLegs}-leg ${sport === 'all' ? 'NBA' : sport} parlay with player props and moneyline picks. Return as JSON with legs array.`;
+      const payload = { query: prompt };
 
-    console.log('📤 AI request payload:', payload);
+      console.log('📤 AI request payload:', payload);
 
-    const response = await fetch('https://python-api-fresh-production.up.railway.app/api/ai/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+      const response = await fetch('https://python-api-fresh-production.up.railway.app/api/ai/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ AI endpoint error response:', errorText);
-      throw new Error(`AI endpoint error: ${response.status} - ${errorText}`);
-    }
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ AI endpoint error response:', errorText);
+        throw new Error(`AI endpoint error: ${response.status} - ${errorText}`);
+      }
 
-    const data = await response.json();
-    console.log('📥 AI response:', data);
+      const data = await response.json();
+      console.log('📥 AI response:', data);
 
-    // --- Parse the analysis field if it contains JSON ---
-    let parsedData = data;
-    if (data.analysis && typeof data.analysis === 'string') {
-      try {
-        const jsonMatch = data.analysis.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsedData = JSON.parse(jsonMatch[0]);
-        } else {
-          parsedData = JSON.parse(data.analysis);
+      // --- Parse the analysis field if it contains JSON ---
+      let parsedData = data;
+      if (data.analysis && typeof data.analysis === 'string') {
+        try {
+          const jsonMatch = data.analysis.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsedData = JSON.parse(jsonMatch[0]);
+          } else {
+            parsedData = JSON.parse(data.analysis);
+          }
+          console.log('📥 Parsed AI data:', parsedData);
+        } catch (e) {
+          console.warn('Failed to parse analysis field, using raw data', e);
+          parsedData = { legs: [] };
         }
-        console.log('📥 Parsed AI data:', parsedData);
-      } catch (e) {
-        console.warn('Failed to parse analysis field, using raw data', e);
-        parsedData = { legs: [] };
       }
-    }
 
-    // --- 2. Map legs with flexible field extraction ---
-    const legs = (parsedData.legs || []).map((leg: any, idx: number) => {
-      // Player name
-      const player_name = leg.player_name || leg.player || leg.name || leg.playerName || `Player ${idx + 1}`;
+      // --- 2. Map legs with flexible field extraction ---
+      const legs = (parsedData.legs || []).map((leg: any, idx: number) => {
+        // Player name
+        const player_name = leg.player_name || leg.player || leg.name || leg.playerName || `Player ${idx + 1}`;
 
-      // Market / bet type
-      const market = leg.market || leg.bet_type || leg.type || leg.marketType || 'Unknown Market';
+        // Market / bet type
+        const market = leg.market || leg.bet_type || leg.type || leg.marketType || 'Unknown Market';
 
-      // Odds (handle string or number)
-      let odds_american = leg.odds_american || leg.odds;
-      if (typeof odds_american === 'number') {
-        odds_american = odds_american > 0 ? `+${odds_american}` : odds_american.toString();
+        // Odds (handle string or number)
+        let odds_american = leg.odds_american || leg.odds;
+        if (typeof odds_american === 'number') {
+          odds_american = odds_american > 0 ? `+${odds_american}` : odds_american.toString();
+        }
+        odds_american = odds_american || '+100';
+
+        // Confidence
+        const confidence = leg.confidence || leg.confidence_score || leg.probability || 70;
+
+        // Line / point
+        const line = leg.line || leg.point || leg.points;
+
+        // Description
+        const description = leg.description || `${player_name} ${market}${line ? ` over ${line}` : ''}`;
+
+        return {
+          id: leg.id || `leg-${Date.now()}-${idx}-${Math.random()}`,
+          player_name,
+          market,
+          odds: odds_american,
+          odds_american,
+          confidence,
+          sport: leg.sport || sport,
+          description,
+          correlation_score: leg.correlation_score || 0.7,
+          is_star: leg.is_star || confidence > 80,
+          confidence_level: leg.confidence_level || (
+            confidence > 80 ? 'very-high' :
+              confidence > 70 ? 'high' :
+                confidence > 60 ? 'medium' : 'low'
+          ),
+        };
+      });
+
+      // --- 3. Calculate total odds if not provided ---
+      let total_odds = parsedData.total_odds || parsedData.totalOdds || parsedData.total_odds_american;
+      if (!total_odds && legs.length > 0) {
+        let decimal = 1.0;
+        legs.forEach(leg => {
+          const oddsStr = leg.odds_american;
+          const oddsNum = parseInt(oddsStr.replace('+', ''));
+          if (oddsNum > 0) {
+            decimal *= 1 + oddsNum / 100;
+          } else {
+            decimal *= 1 - 100 / Math.abs(oddsNum);
+          }
+        });
+        total_odds = decimal >= 2.0
+          ? `+${Math.round((decimal - 1) * 100)}`
+          : Math.round(-100 / (decimal - 1)).toString();
       }
-      odds_american = odds_american || '+100';
 
-      // Confidence
-      const confidence = leg.confidence || leg.confidence_score || leg.probability || 70;
-
-      // Line / point
-      const line = leg.line || leg.point || leg.points;
-
-      // Description
-      const description = leg.description || `${player_name} ${market}${line ? ` over ${line}` : ''}`;
-
-      return {
-        id: leg.id || `leg-${Date.now()}-${idx}-${Math.random()}`,
-        player_name,
-        market,
-        odds: odds_american,
-        odds_american,
-        confidence,
-        sport: leg.sport || sport,
-        description,
-        correlation_score: leg.correlation_score || 0.7,
-        is_star: leg.is_star || confidence > 80,
-        confidence_level: leg.confidence_level || (
-          confidence > 80 ? 'very-high' :
-          confidence > 70 ? 'high' :
-          confidence > 60 ? 'medium' : 'low'
-        ),
+      // --- 4. Build final ParlaySuggestion ---
+      const aiParlay: ParlaySuggestion = {
+        id: `ai-${Date.now()}`,
+        name: parsedData.name || `${sport} AI Parlay`,
+        sport: sport === 'all' ? 'Mixed' : sport,
+        type: parsedData.type || 'standard',
+        market_type: parsedData.market_type || 'mixed',
+        legs,
+        total_odds,
+        total_odds_american: total_odds,
+        confidence: parsedData.confidence || Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length) || 75,
+        analysis: parsedData.analysis || parsedData.conclusion || 'AI‑generated parlay based on current trends.',
+        timestamp: new Date().toISOString(),
+        isGenerated: true,
+        isToday: true,
+        confidence_level: parsedData.confidence_level || 'high',
+        expected_value: parsedData.expected_value || '+6.5%',
+        risk_level: parsedData.risk_level || 'medium',
+        correlation_bonus: parsedData.correlation_bonus,
+        available_boosts: parsedData.available_boosts || [],
+        ai_metrics: parsedData.ai_metrics || {
+          leg_count: legs.length,
+          avg_leg_confidence: Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length),
+          recommended_stake: '$5.00',
+          edge: parsedData.expected_value ? parseFloat(parsedData.expected_value) / 100 : 0.065,
+        },
+        is_real_data: true,
+        has_data: true,
       };
-    });
 
-    // --- 3. Calculate total odds if not provided ---
-    let total_odds = parsedData.total_odds || parsedData.totalOdds || parsedData.total_odds_american;
-    if (!total_odds && legs.length > 0) {
+      setSelectedParlay(aiParlay);
+      setParlayLegs(aiParlay.legs as ParlayLeg[]);
+      setShowBuildModal(true);
+      setSuccessMessage(`AI generated ${legs.length}-leg parlay with ${aiParlay.confidence}% confidence!`);
+      setShowSuccessAlert(true);
+    } catch (error: any) {
+      console.error('❌ AI endpoint failed, falling back to mock generation:', error);
+
+      // --- FALLBACK MOCK GENERATION ---
+      // Use available props if they exist, otherwise create static mock legs
+      const effectiveSport = sport === 'all' ? 'NBA' : sport;
+      let mockLegs: any[] = [];
+
+      if (availableProps.length >= numLegs) {
+        // Use real available props to create legs
+        const shuffled = [...availableProps].sort(() => 0.5 - Math.random());
+        const selected = shuffled.slice(0, numLegs);
+        mockLegs = selected.map((prop, idx) => ({
+          id: `mock-leg-${idx}-${Date.now()}`,
+          player_name: prop.player,
+          market: prop.market,
+          odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
+          odds: prop.over_odds,
+          confidence: prop.confidence,
+          sport: prop.sport,
+          description: `${prop.player} ${prop.market} Over ${prop.line}`,
+          correlation_score: 0.7,
+          is_star: prop.confidence > 80,
+          confidence_level: prop.confidence > 80 ? 'very-high' : prop.confidence > 70 ? 'high' : 'medium',
+        }));
+      } else {
+        // Static fallback legs based on sport
+        if (effectiveSport === 'NBA') {
+          mockLegs = [
+            {
+              id: `mock-leg-1-${Date.now()}`,
+              player_name: 'LeBron James',
+              market: 'Points',
+              odds_american: '-115',
+              odds: -115,
+              confidence: 85,
+              sport: 'NBA',
+              description: 'LeBron James Points Over 25.5',
+              correlation_score: 0.8,
+              is_star: true,
+              confidence_level: 'very-high',
+            },
+            {
+              id: `mock-leg-2-${Date.now()}`,
+              player_name: 'Luka Doncic',
+              market: 'Points + Assists',
+              odds_american: '-110',
+              odds: -110,
+              confidence: 78,
+              sport: 'NBA',
+              description: 'Luka Doncic Points + Assists Over 35.5',
+              correlation_score: 0.75,
+              is_star: false,
+              confidence_level: 'high',
+            },
+            {
+              id: `mock-leg-3-${Date.now()}`,
+              player_name: 'Anthony Davis',
+              market: 'Rebounds',
+              odds_american: '-120',
+              odds: -120,
+              confidence: 72,
+              sport: 'NBA',
+              description: 'Anthony Davis Rebounds Over 12.5',
+              correlation_score: 0.7,
+              is_star: false,
+              confidence_level: 'medium',
+            },
+          ];
+        } else if (effectiveSport === 'NFL') {
+          mockLegs = [
+            {
+              id: `mock-leg-1-${Date.now()}`,
+              player_name: 'Patrick Mahomes',
+              market: 'Passing Yards',
+              odds_american: '-110',
+              odds: -110,
+              confidence: 82,
+              sport: 'NFL',
+              description: 'Patrick Mahomes Passing Yards Over 280.5',
+              correlation_score: 0.75,
+              is_star: true,
+              confidence_level: 'high',
+            },
+            {
+              id: `mock-leg-2-${Date.now()}`,
+              player_name: 'Travis Kelce',
+              market: 'Receiving Yards',
+              odds_american: '-115',
+              odds: -115,
+              confidence: 76,
+              sport: 'NFL',
+              description: 'Travis Kelce Receiving Yards Over 70.5',
+              correlation_score: 0.7,
+              is_star: false,
+              confidence_level: 'medium',
+            },
+          ];
+        } else {
+          // Generic fallback
+          mockLegs = Array.from({ length: numLegs }, (_, i) => ({
+            id: `mock-leg-${i}-${Date.now()}`,
+            player_name: `Player ${i + 1}`,
+            market: 'Points',
+            odds_american: i % 2 === 0 ? '-110' : '+120',
+            odds: i % 2 === 0 ? -110 : 120,
+            confidence: 70 + i * 5,
+            sport: effectiveSport,
+            description: `Player ${i + 1} Points Over 20.5`,
+            correlation_score: 0.65,
+            is_star: false,
+            confidence_level: 'medium',
+          }));
+        }
+
+        // Trim to requested number of legs
+        mockLegs = mockLegs.slice(0, numLegs);
+      }
+
+      // Calculate total odds
       let decimal = 1.0;
-      legs.forEach(leg => {
-        const oddsStr = leg.odds_american;
-        const oddsNum = parseInt(oddsStr.replace('+', ''));
+      mockLegs.forEach(leg => {
+        const oddsNum = typeof leg.odds === 'number' ? leg.odds : parseInt(leg.odds_american.replace('+', ''));
         if (oddsNum > 0) {
           decimal *= 1 + oddsNum / 100;
         } else {
           decimal *= 1 - 100 / Math.abs(oddsNum);
         }
       });
-      total_odds = decimal >= 2.0
+      const totalOdds = decimal >= 2.0
         ? `+${Math.round((decimal - 1) * 100)}`
         : Math.round(-100 / (decimal - 1)).toString();
+
+      const avgConfidence = Math.round(mockLegs.reduce((sum, leg) => sum + leg.confidence, 0) / mockLegs.length);
+
+      const mockParlay: ParlaySuggestion = {
+        id: `mock-${Date.now()}`,
+        name: `${effectiveSport} Mock Parlay`,
+        sport: effectiveSport,
+        type: 'standard',
+        market_type: 'mixed',
+        legs: mockLegs,
+        total_odds: totalOdds,
+        total_odds_american: totalOdds,
+        confidence: avgConfidence,
+        analysis: 'Fallback parlay generated due to AI endpoint unavailability.',
+        timestamp: new Date().toISOString(),
+        isGenerated: true,
+        isToday: true,
+        confidence_level: avgConfidence > 80 ? 'very-high' : avgConfidence > 70 ? 'high' : 'medium',
+        expected_value: '+5.2%',
+        risk_level: 'medium',
+        ai_metrics: {
+          leg_count: mockLegs.length,
+          avg_leg_confidence: avgConfidence,
+          recommended_stake: '$5.00',
+          edge: 0.052,
+        },
+        is_real_data: false,
+        has_data: true,
+      };
+
+      setSelectedParlay(mockParlay);
+      setParlayLegs(mockParlay.legs as ParlayLeg[]);
+      setShowBuildModal(true);
+      setSuccessMessage(`Generated fallback parlay with ${mockLegs.length} legs.`);
+      setShowSuccessAlert(true);
+    } finally {
+      setGenerating(false);
     }
-
-    // --- 4. Build final ParlaySuggestion ---
-    const aiParlay: ParlaySuggestion = {
-      id: `ai-${Date.now()}`,
-      name: parsedData.name || `${sport} AI Parlay`,
-      sport: sport === 'all' ? 'Mixed' : sport,
-      type: parsedData.type || 'standard',
-      market_type: parsedData.market_type || 'mixed',
-      legs,
-      total_odds,
-      total_odds_american: total_odds,
-      confidence: parsedData.confidence || Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length) || 75,
-      analysis: parsedData.analysis || parsedData.conclusion || 'AI‑generated parlay based on current trends.',
-      timestamp: new Date().toISOString(),
-      isGenerated: true,
-      isToday: true,
-      confidence_level: parsedData.confidence_level || 'high',
-      expected_value: parsedData.expected_value || '+6.5%',
-      risk_level: parsedData.risk_level || 'medium',
-      correlation_bonus: parsedData.correlation_bonus,
-      available_boosts: parsedData.available_boosts || [],
-      ai_metrics: parsedData.ai_metrics || {
-        leg_count: legs.length,
-        avg_leg_confidence: Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length),
-        recommended_stake: '$5.00',
-        edge: parsedData.expected_value ? parseFloat(parsedData.expected_value) / 100 : 0.065,
-      },
-      is_real_data: true,
-      has_data: true,
-    };
-
-    setSelectedParlay(aiParlay);
-    setParlayLegs(aiParlay.legs as ParlayLeg[]);
-    setShowBuildModal(true);
-    setSuccessMessage(`AI generated ${legs.length}-leg parlay with ${aiParlay.confidence}% confidence!`);
-    setShowSuccessAlert(true);
-  } catch (error: any) {
-    console.error('❌ AI endpoint failed, falling back to mock generation:', error);
-    // --- Fallback mock generation (unchanged) ---
-    // ... (keep your existing fallback code here)
-  } finally {
-    setGenerating(false);
-  }
-}, [todaysGames]);
+  }, [todaysGames, availableProps]);
 
   // ========== BUILD PARLAY ==========
   const buildParlay = useCallback(async () => {
@@ -843,7 +1005,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
 
     try {
       setBuilding(true);
-      
+
       // Calculate parlay odds
       let decimal = 1.0;
       parlayLegs.forEach(leg => {
@@ -854,16 +1016,16 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           decimal *= 1 - (100 / odds);
         }
       });
-      
-      const americanOdds = decimal >= 2.0 
+
+      const americanOdds = decimal >= 2.0
         ? Math.round((decimal - 1) * 100)
         : Math.round(-100 / (decimal - 1));
-      
+
       const stakeNum = parseFloat(stake) || 25;
       const payout = stakeNum * decimal;
       const profit = payout - stakeNum;
       const impliedProb = (1 / decimal) * 100;
-      
+
       const result: ParlayResponse = {
         id: `parlay-${Date.now()}`,
         type: selectedType === 'all' ? 'standard' : selectedType,
@@ -882,10 +1044,10 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         ],
         risk_level: impliedProb > 50 ? 'Low' : impliedProb > 30 ? 'Medium' : 'High'
       };
-      
+
       setParlayResult(result);
       setShowParlayResult(true);
-      
+
     } catch (error) {
       console.error('Error building parlay:', error);
       alert('Failed to build parlay. Please try again.');
@@ -918,7 +1080,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
       market_type: 'player_props',
       line: prop.line,
       odds: side === 'over' ? prop.over_odds : prop.under_odds,
-      odds_american: side === 'over' 
+      odds_american: side === 'over'
         ? (prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString())
         : (prop.under_odds > 0 ? `+${prop.under_odds}` : prop.under_odds.toString()),
       side: side,
@@ -960,7 +1122,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
 
   const calculateTotalOdds = useMemo(() => {
     if (parlayLegs.length === 0) return 0;
-    
+
     let decimal = 1.0;
     parlayLegs.forEach(leg => {
       const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
@@ -970,7 +1132,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         decimal *= 1 - (100 / odds);
       }
     });
-    
+
     if (decimal >= 2.0) {
       return Math.round((decimal - 1) * 100);
     } else {
@@ -982,7 +1144,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
     if (parlayLegs.length === 0 || !stake) return 0;
     const stakeNum = parseFloat(stake) || 0;
     let decimal = 1.0;
-    
+
     parlayLegs.forEach(leg => {
       const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
       if (odds > 0) {
@@ -991,14 +1153,14 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         decimal *= 1 - (100 / odds);
       }
     });
-    
+
     return stakeNum * decimal;
   }, [parlayLegs, stake]);
 
   const calculateImpliedProbabilityValue = useMemo(() => {
     if (parlayLegs.length === 0) return 0;
     let decimal = 1.0;
-    
+
     parlayLegs.forEach(leg => {
       const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
       if (odds > 0) {
@@ -1007,7 +1169,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         decimal *= 1 - (100 / odds);
       }
     });
-    
+
     return (1 / decimal) * 100;
   }, [parlayLegs]);
 
@@ -1017,9 +1179,9 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
       setFilteredSuggestions([]);
       return;
     }
-    
+
     let filtered = [...suggestions];
-    
+
     // Date filter
     if (dateFilter === 'today') {
       filtered = filtered.filter(p => {
@@ -1033,7 +1195,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         return true;
       });
     }
-    
+
     // Sport filter
     if (selectedSport !== 'all') {
       const selectedSportUpper = selectedSport.toUpperCase();
@@ -1042,65 +1204,65 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         return sportUpper.includes(selectedSportUpper) || sportUpper === selectedSportUpper;
       });
     }
-    
+
     // Type filter
     if (selectedType !== 'all') {
       filtered = filtered.filter(p => p.type === selectedType);
     }
-    
+
     // Confidence filter
     filtered = filtered.filter(p => (p.confidence || 0) >= minConfidence);
-    
+
     // Max legs filter
     filtered = filtered.filter(p => (p.legs?.length || 0) <= maxLegs);
-    
+
     // Search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(p => {
         const nameMatch = p.name?.toLowerCase().includes(query) || false;
         const analysisMatch = p.analysis?.toLowerCase().includes(query) || false;
-        const legMatch = p.legs?.some(leg => 
+        const legMatch = p.legs?.some(leg =>
           leg.description?.toLowerCase().includes(query) ||
           leg.player_name?.toLowerCase().includes(query)
         ) || false;
         return nameMatch || analysisMatch || legMatch;
       });
     }
-    
+
     // Market type filter
     if (marketType !== 'all') {
       filtered = filtered.filter(p => {
         const market = p.market_type || p.type;
-        return market === marketType || 
-               (marketType === 'player_props' && p.legs?.some(leg => leg.market === 'player_props')) ||
-               (marketType === 'game_totals' && p.legs?.some(leg => leg.market === 'totals')) ||
-               (marketType === 'moneyline' && p.legs?.some(leg => leg.market === 'h2h')) ||
-               (marketType === 'spreads' && p.legs?.some(leg => leg.market === 'spreads'));
+        return market === marketType ||
+          (marketType === 'player_props' && p.legs?.some(leg => leg.market === 'player_props')) ||
+          (marketType === 'game_totals' && p.legs?.some(leg => leg.market === 'totals')) ||
+          (marketType === 'moneyline' && p.legs?.some(leg => leg.market === 'h2h')) ||
+          (marketType === 'spreads' && p.legs?.some(leg => leg.market === 'spreads'));
       });
     }
-    
+
     // Edge filter
     filtered = filtered.filter(p => {
       const edge = p.ai_metrics?.edge || 0;
       const expectedValue = p.expected_value || '+0%';
-      const edgePercent = edge > 0 ? edge * 100 : 
-                         parseFloat(expectedValue.replace('+', '').replace('%', '')) || 0;
+      const edgePercent = edge > 0 ? edge * 100 :
+        parseFloat(expectedValue.replace('+', '').replace('%', '')) || 0;
       return edgePercent >= minEdge;
     });
-    
+
     // Risk level filter
     if (maxRisk !== 'all') {
       const riskOrder = { 'low': 1, 'medium': 2, 'high': 3 };
       const maxRiskValue = riskOrder[maxRisk as keyof typeof riskOrder] || 3;
-      
+
       filtered = filtered.filter(p => {
         const risk = p.risk_level || 'medium';
         const riskValue = riskOrder[risk as keyof typeof riskOrder] || 2;
         return riskValue <= maxRiskValue;
       });
     }
-    
+
     // Parlay size filter
     if (parlaySize !== 'all') {
       filtered = filtered.filter(p => {
@@ -1112,102 +1274,103 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         return true;
       });
     }
-    
+
     // If all filtered out, show first suggestion
     if (filtered.length === 0 && suggestions.length > 0) {
       setFilteredSuggestions([suggestions[0]]);
     } else {
       setFilteredSuggestions(filtered);
     }
+
+    // DEBUG: Log the first filtered suggestion
+    if (filtered.length > 0) {
+      console.log('📋 First filtered suggestion:', filtered[0]);
+    }
   }, [suggestions, selectedSport, selectedType, marketType, minConfidence, minEdge, maxRisk, parlaySize, maxLegs, searchQuery, dateFilter]);
 
   // ========== DEBUG PANEL ==========
-  const DebugPanel = React.memo(() => {
-    return (
-      <Collapse in={showDebugPanel}>
-        <Paper sx={{ 
-          p: 2, 
-          mb: 4, 
-          bgcolor: '#1e293b',
-          color: 'white',
-          borderRadius: 2
-        }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-            <Box display="flex" alignItems="center" gap={1}>
-              <BugReportIcon fontSize="small" />
-              <Typography variant="h6">Debug Panel</Typography>
-            </Box>
-            <Chip 
-              label="Dev Mode" 
-              size="small" 
-              sx={{ bgcolor: '#ef4444', color: 'white' }}
-            />
+const DebugPanel = () => {
+  return (
+    <Collapse in={showDebugPanel}>
+      <Paper sx={{
+        p: 2,
+        mb: 4,
+        bgcolor: '#1e293b',
+        color: 'white',
+        borderRadius: 2
+      }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+          <Box display="flex" alignItems="center" gap={1}>
+            <BugReportIcon fontSize="small" />
+            <Typography variant="h6">Debug Panel</Typography>
           </Box>
-          
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
-                Component Stats
-              </Typography>
-              <Box sx={{ pl: 2 }}>
-                <Typography variant="body2">
-                  • Total Suggestions: {suggestions.length}
-                </Typography>
-                <Typography variant="body2">
-                  • Filtered: {filteredSuggestions.length}
-                </Typography>
-                <Typography variant="body2">
-                  • Today's Games: {todaysGames.length}
-                </Typography>
-                <Typography variant="body2">
-                  • Parlay Legs: {parlayLegs.length}
-                </Typography>
-                <Typography variant="body2">
-                  • Data Source: {suggestions.some(s => s.is_real_data) ? '✅ Real API Data' : '⚠️ Mock Data'}
-                </Typography>
-                <Typography variant="body2">
-                  • Last Refresh: {lastRefresh ? format(lastRefresh, 'h:mm:ss a') : 'Never'}
-                </Typography>
-              </Box>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
-                API Status
-              </Typography>
-              <Box sx={{ pl: 2 }}>
-                <Typography variant="body2" sx={{ color: parlayError ? '#ef4444' : '#10b981' }}>
-                  • Parlay API: {parlayError ? '❌ Error' : '✅ Connected'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: oddsError ? '#ef4444' : '#10b981' }}>
-                  • Odds API: {oddsError ? '❌ Error' : '✅ Connected'}
-                </Typography>
-                <Typography variant="body2">
-                  • Odds Games: {todaysGames.length} loaded
-                </Typography>
-              </Box>
-              
-              <Box mt={2}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  sx={{ color: 'white', borderColor: '#64748b', mr: 1 }}
-                  onClick={() => {
-                    refetchParlays();
-                    refetchOdds();
-                    setLastRefresh(new Date());
-                  }}
-                >
-                  Force Refresh
-                </Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </Paper>
-      </Collapse>
-    );
-  });
+          <Chip
+            label="Dev Mode"
+            size="small"
+            sx={{ bgcolor: '#ef4444', color: 'white' }}
+          />
+        </Box>
 
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
+              Component Stats
+            </Typography>
+            <Box sx={{ pl: 2 }}>
+              <Typography variant="body2">
+                • Total Suggestions: {suggestions.length}
+              </Typography>
+              <Typography variant="body2">
+                • Filtered: {filteredSuggestions.length}
+              </Typography>
+              <Typography variant="body2">
+                • Today's Games: {todaysGames.length}
+              </Typography>
+              <Typography variant="body2">
+                • Parlay Legs: {parlayLegs.length}
+              </Typography>
+              <Typography variant="body2">
+                • Data Source: {suggestions.some(s => s.is_real_data) ? '✅ Real API Data' : '⚠️ Mock Data'}
+              </Typography>
+              <Typography variant="body2">
+                • Last Refresh: {lastRefresh ? format(lastRefresh, 'h:mm:ss a') : 'Never'}
+              </Typography>
+            </Box>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
+              API Status
+            </Typography>
+            <Box sx={{ pl: 2 }}>
+              <Typography variant="body2" sx={{ color: manualError ? '#ef4444' : '#10b981' }}>
+                • Parlay API (manual): {manualError ? '❌ Error' : '✅ Connected'}
+              </Typography>
+              <Typography variant="body2" sx={{ color: oddsError ? '#ef4444' : '#10b981' }}>
+                • Odds API: {oddsError ? '❌ Error' : '✅ Connected'}
+              </Typography>
+              <Typography variant="body2">
+                • Odds Games: {todaysGames.length} loaded
+              </Typography>
+            </Box>
+
+            <Box mt={2}>
+              <Button
+                size="small"
+                variant="outlined"
+                sx={{ color: 'white', borderColor: '#64748b', mr: 1 }}
+                onClick={handleRefresh}
+              >
+                Force Refresh
+              </Button>
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
+    </Collapse>
+  );
+};
+ 
   // ========== CONFIDENCE METER ==========
   const ConfidenceMeter = ({ score, level }: { score: number; level: string }) => {
     const colors: Record<string, string> = {
@@ -1217,14 +1380,14 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
       'low': '#ef4444',
       'very-low': '#dc2626'
     };
-    
+
     const color = colors[level] || '#64748b';
-    
+
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Box sx={{ width: 80, bgcolor: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
-          <Box 
-            sx={{ 
+          <Box
+            sx={{
               width: `${Math.min(score, 100)}%`,
               height: 8,
               bgcolor: color,
@@ -1244,7 +1407,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
     const isLoading = oddsLoading;
     const hasError = oddsError;
     const games = todaysGames;
-    
+
     return (
       <Paper sx={{ mb: 4 }}>
         <Accordion expanded={showTodaysGames} onChange={() => setShowTodaysGames(!showTodaysGames)}>
@@ -1252,15 +1415,15 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             <Box display="flex" alignItems="center" gap={2}>
               <TodayIcon color="primary" />
               <Typography variant="h6">Today's Games</Typography>
-              <Chip 
-                label={`${games.length} games`} 
-                size="small" 
+              <Chip
+                label={`${games.length} games`}
+                size="small"
                 color={isLoading ? "default" : hasError ? "error" : "success"}
               />
               {games.length > 0 && (
-                <Chip 
-                  label={games.some(g => g.bookmakers) ? "✅ Real Odds" : "⚠️ Mock Data"} 
-                  size="small" 
+                <Chip
+                  label={games.some(g => g.bookmakers) ? "✅ Real Odds" : "⚠️ Mock Data"}
+                  size="small"
                   variant="outlined"
                 />
               )}
@@ -1302,13 +1465,13 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                               }
                             })()}
                           </Typography>
-                          <Chip 
-                            label={game.sport_title || 'Unknown'} 
-                            size="small" 
+                          <Chip
+                            label={game.sport_title || 'Unknown'}
+                            size="small"
                             variant="outlined"
                           />
                         </Box>
-                        
+
                         <Box textAlign="center" mb={2}>
                           <Typography variant="body2" fontWeight="bold" color="primary">
                             {game.away_team || 'Away Team'}
@@ -1320,7 +1483,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                             {game.home_team || 'Home Team'}
                           </Typography>
                         </Box>
-                        
+
                         {game.bookmakers && game.bookmakers.length > 0 ? (
                           <Box sx={{ mb: 2, p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
                             <Typography variant="caption" color="text.secondary">
@@ -1328,9 +1491,9 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                             </Typography>
                           </Box>
                         ) : null}
-                        
-                        <Button 
-                          size="small" 
+
+                        <Button
+                          size="small"
                           variant="contained"
                           fullWidth
                           sx={{ mt: 2 }}
@@ -1403,7 +1566,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   // ========== AI SUGGESTIONS RENDERER ==========
   const renderAISuggestions = () => {
     if (aiSuggestions.length === 0) return null;
-    
+
     return (
       <Paper sx={{ p: 2, mb: 4, mt: 2, bgcolor: alpha('#6C5CE7', 0.05), border: '1px solid #6C5CE7' }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
@@ -1414,23 +1577,23 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             </Typography>
           </Box>
           {selectedSport === 'NBA' && (
-            <Chip 
+            <Chip
               icon={<StarIcon sx={{ fontSize: 14 }} />}
-              label="All-Star Week" 
-              size="small" 
+              label="All-Star Week"
+              size="small"
               sx={{ bgcolor: '#FFD700', color: '#000', fontWeight: 'bold' }}
             />
           )}
           {selectedSport === 'NHL' && (
-            <Chip 
+            <Chip
               icon={<TimerIcon sx={{ fontSize: 14 }} />}
-              label="Trade Deadline T-24d" 
-              size="small" 
+              label="Trade Deadline T-24d"
+              size="small"
               sx={{ bgcolor: '#E74C3C', color: '#fff', fontWeight: 'bold' }}
             />
           )}
         </Box>
-        
+
         <Grid container spacing={2}>
           {loadingSuggestions ? (
             <Grid item xs={12}>
@@ -1442,11 +1605,11 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           ) : (
             aiSuggestions.map((suggestion, index) => (
               <Grid item xs={12} md={6} key={suggestion.id || index}>
-                <Card sx={{ 
+                <Card sx={{
                   height: '100%',
                   borderLeft: `4px solid ${
-                    suggestion.confidence_level === 'high' ? '#4CAF50' : 
-                    suggestion.confidence_level === 'medium' ? '#FF9800' : '#F44336'
+                    suggestion.confidence_level === 'high' ? '#4CAF50' :
+                      suggestion.confidence_level === 'medium' ? '#FF9800' : '#F44336'
                   }`
                 }}>
                   <CardContent>
@@ -1455,19 +1618,19 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         <Typography variant="h5">{suggestion.icon || '🎯'}</Typography>
                         <Typography variant="h6">{suggestion.name}</Typography>
                       </Box>
-                      <Chip 
+                      <Chip
                         label={`${suggestion.confidence}%`}
                         size="small"
-                        sx={{ 
-                          bgcolor: 
-                            suggestion.confidence_level === 'high' ? '#4CAF50' : 
-                            suggestion.confidence_level === 'medium' ? '#FF9800' : '#F44336',
+                        sx={{
+                          bgcolor:
+                            suggestion.confidence_level === 'high' ? '#4CAF50' :
+                              suggestion.confidence_level === 'medium' ? '#FF9800' : '#F44336',
                           color: '#fff',
                           fontWeight: 'bold'
                         }}
                       />
                     </Box>
-                    
+
                     <Box sx={{ mb: 2 }}>
                       {suggestion.legs?.slice(0, 2).map((leg: any, i: number) => (
                         <Typography key={i} variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
@@ -1480,7 +1643,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         </Typography>
                       )}
                     </Box>
-                    
+
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                       <Box>
                         <Typography variant="caption" color="text.secondary">
@@ -1499,13 +1662,13 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         </Typography>
                       </Box>
                     </Box>
-                    
+
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
                       {suggestion.analysis.substring(0, 60)}...
                     </Typography>
-                    
-                    <Button 
-                      variant="outlined" 
+
+                    <Button
+                      variant="outlined"
                       fullWidth
                       sx={{ borderColor: '#6C5CE7', color: '#6C5CE7' }}
                       onClick={() => {
@@ -1529,7 +1692,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   // ========== PARLAY BUILDER ==========
   const renderParlayBuilder = () => {
     if (activeTab !== 'builder') return null;
-    
+
     return (
       <Paper sx={{ p: 3, mb: 4, mt: 2 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -1538,13 +1701,13 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             <Typography variant="h6">Parlay Builder</Typography>
           </Box>
           <Box display="flex" gap={1}>
-            <Chip 
+            <Chip
               label={`${parlayLegs.length}/${getMaxLegs()} legs`}
               color={parlayLegs.length >= getMinLegs() ? "success" : "default"}
             />
-            <Button 
-              size="small" 
-              variant="outlined" 
+            <Button
+              size="small"
+              variant="outlined"
               color="error"
               onClick={clearLegs}
               disabled={parlayLegs.length === 0}
@@ -1553,7 +1716,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             </Button>
           </Box>
         </Box>
-        
+
         {parlayLegs.length === 0 ? (
           <Box textAlign="center" py={4}>
             <AddCircleIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
@@ -1563,8 +1726,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Click "Add Leg" to start building your parlay
             </Typography>
-            <Button 
-              variant="contained" 
+            <Button
+              variant="contained"
               startIcon={<AddIcon />}
               onClick={() => setShowPropSelector(true)}
             >
@@ -1574,11 +1737,11 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         ) : (
           <>
             {parlayLegs.map((leg, index) => (
-              <Box 
-                key={leg.id} 
-                sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
+              <Box
+                key={leg.id}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'space-between',
                   p: 2,
                   mb: 1,
@@ -1605,14 +1768,14 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                       {leg.market} {leg.side} {leg.line}
                     </Typography>
                     {leg.correlation_score && leg.correlation_score > 0.7 && (
-                      <Chip 
+                      <Chip
                         icon={<FlashOnIcon sx={{ fontSize: 12 }} />}
-                        label="Correlated" 
+                        label="Correlated"
                         size="small"
-                        sx={{ 
-                          ml: 1, 
-                          height: 20, 
-                          bgcolor: '#FFD70020', 
+                        sx={{
+                          ml: 1,
+                          height: 20,
+                          bgcolor: '#FFD70020',
                           color: '#FFD700',
                           fontSize: '0.6rem'
                         }}
@@ -1621,8 +1784,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                   </Box>
                 </Box>
                 <Box display="flex" alignItems="center" gap={2}>
-                  <Typography 
-                    variant="body2" 
+                  <Typography
+                    variant="body2"
                     fontWeight="bold"
                     color={leg.odds > 0 ? 'success.main' : 'text.primary'}
                   >
@@ -1634,7 +1797,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                 </Box>
               </Box>
             ))}
-            
+
             {parlayLegs.length >= 2 && (
               <Box sx={{ mt: 3, p: 2, bgcolor: '#f0f9ff', borderRadius: 1 }}>
                 <Grid container spacing={2}>
@@ -1665,10 +1828,10 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                 </Grid>
               </Box>
             )}
-            
+
             <Box sx={{ mt: 3 }}>
-              <Button 
-                variant="contained" 
+              <Button
+                variant="contained"
                 fullWidth
                 size="large"
                 startIcon={building ? <CircularProgress size={20} color="inherit" /> : <BuildIcon />}
@@ -1688,7 +1851,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   // ========== TEASER OPTIONS ==========
   const renderTeaserOptions = () => {
     if (selectedType !== 'teaser' && selectedType !== 'all') return null;
-    
+
     return (
       <Paper sx={{ p: 2, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
@@ -1712,8 +1875,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               <Typography variant="body2" color="text.secondary">
                 Odds per leg:
               </Typography>
-              <Chip 
-                label={teaserOdds[0].odds} 
+              <Chip
+                label={teaserOdds[0].odds}
                 size="small"
                 color="primary"
                 sx={{ fontWeight: 'bold' }}
@@ -1729,7 +1892,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   const renderRoundRobinOptions = () => {
     if (selectedType !== 'round_robin' && selectedType !== 'all') return null;
     if (parlayLegs.length < 3) return null;
-    
+
     return (
       <Paper sx={{ p: 2, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
@@ -1749,7 +1912,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             ))}
           </ToggleButtonGroup>
         </Box>
-        
+
         {roundRobinCombos.length > 0 && (
           <>
             <Typography variant="caption" color="text.secondary" display="block" mb={2}>
@@ -1784,11 +1947,11 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   // ========== PARLAY RESULT MODAL ==========
   const renderParlayResultModal = () => {
     if (!parlayResult) return null;
-    
+
     return (
-      <Dialog 
-        open={showParlayResult} 
-        onClose={() => setShowParlayResult(false)} 
+      <Dialog
+        open={showParlayResult}
+        onClose={() => setShowParlayResult(false)}
         keepMounted
         TransitionProps={{
           onEntered: () => {
@@ -1799,10 +1962,10 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             }, 50);
           }
         }}
-        maxWidth="sm" 
+        maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ 
+        <DialogTitle sx={{
           background: 'linear-gradient(135deg, #6C5CE7 0%, #5A4ABD 100%)',
           color: 'white',
           display: 'flex',
@@ -1811,7 +1974,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
         }}>
           <TrophyIcon />
           Parlay Built Successfully!
-          <IconButton 
+          <IconButton
             onClick={() => setShowParlayResult(false)}
             sx={{ position: 'absolute', right: 16, top: 16, color: 'white' }}
           >
@@ -1869,7 +2032,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               </Typography>
             </Grid>
           </Grid>
-          
+
           {parlayResult.correlation_bonus && (
             <Box sx={{ mt: 2, p: 2, bgcolor: '#FFD70020', borderRadius: 1 }}>
               <Typography variant="body2" fontWeight="bold" color="#FFD700">
@@ -1877,7 +2040,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               </Typography>
             </Box>
           )}
-          
+
           {parlayResult.available_boosts && parlayResult.available_boosts.length > 0 && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="subtitle2" gutterBottom>
@@ -1895,8 +2058,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                   }}
                 >
                   <Typography variant="body2">{boost.name}</Typography>
-                  <Chip 
-                    label={`+${boost.boost_percentage}%`} 
+                  <Chip
+                    label={`+${boost.boost_percentage}%`}
                     size="small"
                     sx={{ bgcolor: '#FFD700', color: '#000' }}
                   />
@@ -1904,29 +2067,29 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               ))}
             </Box>
           )}
-          
+
           {parlayResult.risk_level && (
             <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-              <Chip 
+              <Chip
                 label={`${parlayResult.risk_level} RISK`}
                 color={
                   parlayResult.risk_level === 'Low' ? 'success' :
-                  parlayResult.risk_level === 'Medium' ? 'warning' : 'error'
+                    parlayResult.risk_level === 'Medium' ? 'warning' : 'error'
                 }
               />
             </Box>
           )}
         </DialogContent>
         <DialogActions sx={{ p: 3 }}>
-          <Button 
-            ref={firstFocusableRef} 
-            variant="outlined" 
+          <Button
+            ref={firstFocusableRef}
+            variant="outlined"
             onClick={() => setShowParlayResult(false)}
           >
             Save Ticket
           </Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             sx={{ bgcolor: '#4CAF50', '&:hover': { bgcolor: '#45a049' } }}
             onClick={() => {
               setShowParlayResult(false);
@@ -1944,15 +2107,15 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   // ========== PROP SELECTOR MODAL ==========
   const renderPropSelector = () => {
     const filteredProps = availableProps.filter(
-      prop => 
+      prop =>
         prop.player?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         prop.team?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     return (
-      <Dialog 
-        open={showPropSelector} 
-        onClose={() => setShowPropSelector(false)} 
+      <Dialog
+        open={showPropSelector}
+        onClose={() => setShowPropSelector(false)}
         keepMounted
         TransitionProps={{
           onEntered: () => {
@@ -1963,7 +2126,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             }, 50);
           }
         }}
-        maxWidth="md" 
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>
@@ -1988,7 +2151,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               inputRef={propSelectorFirstFocusRef}
             />
           </Box>
-          
+
           <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
             {filteredProps.length === 0 ? (
               <Box textAlign="center" py={4}>
@@ -2013,8 +2176,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                           {prop.confidence && (
                             <Box display="flex" alignItems="center" gap={1}>
                               <Box sx={{ width: 60, bgcolor: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
-                                <Box 
-                                  sx={{ 
+                                <Box
+                                  sx={{
                                     width: `${prop.confidence}%`,
                                     height: 6,
                                     bgcolor: prop.confidence > 80 ? '#4CAF50' : '#6C5CE7'
@@ -2060,9 +2223,9 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
   // ========== BUILD MODAL ==========
   const renderBuildModal = () => {
     return (
-      <Dialog 
-        open={showBuildModal} 
-        onClose={() => setShowBuildModal(false)} 
+      <Dialog
+        open={showBuildModal}
+        onClose={() => setShowBuildModal(false)}
         keepMounted
         TransitionProps={{
           onEntered: () => {
@@ -2073,7 +2236,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             }, 50);
           }
         }}
-        maxWidth="md" 
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>
@@ -2088,7 +2251,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               <Typography variant="body1" paragraph>
                 {selectedParlay.analysis}
               </Typography>
-              
+
               <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
                 <Table>
                   <TableHead>
@@ -2114,15 +2277,15 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                             {leg.line && ` • Line: ${leg.line}`}
                           </Typography>
                           {leg.correlation_score && leg.correlation_score > 0.7 && (
-                            <Chip 
-                              label="Correlated" 
+                            <Chip
+                              label="Correlated"
                               size="small"
                               sx={{ ml: 1, height: 20, bgcolor: '#FFD70020', color: '#FFD700' }}
                             />
                           )}
                         </TableCell>
                         <TableCell>
-                          <Chip 
+                          <Chip
                             label={leg.odds_american || leg.odds}
                             size="small"
                             color={leg.odds.startsWith('+') ? "success" : "default"}
@@ -2131,8 +2294,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         </TableCell>
                         <TableCell>
                           <Box display="flex" alignItems="center" gap={1}>
-                            <LinearProgress 
-                              variant="determinate" 
+                            <LinearProgress
+                              variant="determinate"
                               value={leg.confidence}
                               sx={{ width: 80, height: 8, borderRadius: 4 }}
                             />
@@ -2144,7 +2307,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                   </TableBody>
                 </Table>
               </TableContainer>
-              
+
               <Box p={2} bgcolor="#f8fafc" borderRadius={1}>
                 <Grid container spacing={2}>
                   <Grid item xs={6} md={3}>
@@ -2159,9 +2322,9 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                     <Typography variant="caption" color="text.secondary">
                       AI Confidence
                     </Typography>
-                    <ConfidenceMeter 
-                      score={selectedParlay.confidence} 
-                      level={selectedParlay.confidence_level || 'medium'} 
+                    <ConfidenceMeter
+                      score={selectedParlay.confidence}
+                      level={selectedParlay.confidence_level || 'medium'}
                     />
                   </Grid>
                   <Grid item xs={6} md={3}>
@@ -2176,24 +2339,24 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                     <Typography variant="caption" color="text.secondary">
                       Risk Level
                     </Typography>
-                    <Chip 
+                    <Chip
                       label={selectedParlay.risk_level || 'Medium'}
                       size="small"
-                      color={selectedParlay.risk_level === 'low' ? 'success' : 
-                             selectedParlay.risk_level === 'high' ? 'error' : 'warning'}
+                      color={selectedParlay.risk_level === 'low' ? 'success' :
+                        selectedParlay.risk_level === 'high' ? 'error' : 'warning'}
                     />
                   </Grid>
                 </Grid>
-                
+
                 {selectedParlay.correlation_bonus && (
                   <Box mt={2}>
-                    <Chip 
+                    <Chip
                       label={`+${selectedParlay.correlation_bonus * 100}% Correlation Bonus`}
                       sx={{ bgcolor: '#FFD70020', color: '#FFD700' }}
                     />
                   </Box>
                 )}
-                
+
                 {selectedParlay.available_boosts && selectedParlay.available_boosts.length > 0 && (
                   <Box mt={2}>
                     <Typography variant="subtitle2" gutterBottom>
@@ -2217,14 +2380,14 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           )}
         </DialogContent>
         <DialogActions>
-          <Button 
+          <Button
             ref={buildModalFirstFocusRef}
             onClick={() => setShowBuildModal(false)}
           >
             Cancel
           </Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={handleAddToBetSlip}
             sx={{ bgcolor: '#6C5CE7' }}
           >
@@ -2237,8 +2400,21 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
 
   // ========== HANDLERS ==========
   const handleRefresh = () => {
-    refetchParlays();
+    // Manual refresh for parlay suggestions
+    setManualLoading(true);
+    const sportParam = selectedSport === 'all' ? 'all' : selectedSport;
+    fetch(`https://python-api-fresh-production.up.railway.app/api/parlay/suggestions?sport=${sportParam}&limit=10`)
+      .then(res => res.json())
+      .then(data => {
+        setManualSuggestions(data.suggestions || []);
+        setManualError(null);
+      })
+      .catch(err => setManualError(err.message))
+      .finally(() => setManualLoading(false));
+    
+    // Refresh odds
     refetchOdds();
+    
     setLastRefresh(new Date());
     setSuccessMessage('Data refreshed successfully!');
     setShowSuccessAlert(true);
@@ -2260,8 +2436,26 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
     }
   };
 
+  // ========== GLOBAL DEBUG OBJECT ==========
+  useEffect(() => {
+    window.__parlayDebug = {
+      raw: manualSuggestions,
+      transformed: suggestions,
+      filtered: filteredSuggestions,
+      selectedSport,
+      selectedType,
+      minConfidence,
+      maxLegs,
+      marketType,
+      minEdge,
+      maxRisk,
+      parlaySize
+    };
+    console.log('🟢 Diagnostic data stored in window.__parlayDebug');
+  }, [manualSuggestions, suggestions, filteredSuggestions, selectedSport, selectedType, minConfidence, maxLegs, marketType, minEdge, maxRisk, parlaySize]);
+
   // ========== LOADING STATE ==========
-  if (parlayLoading && oddsLoading && suggestions.length === 0) {
+  if (manualLoading && oddsLoading && suggestions.length === 0) {
     return (
       <Container maxWidth="lg">
         <Box display="flex" justifyContent="center" alignItems="center" height="80vh" flexDirection="column">
@@ -2282,8 +2476,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
     <Container maxWidth="lg">
       {/* Success Alert */}
       {showSuccessAlert && (
-        <Alert 
-          severity="success" 
+        <Alert
+          severity="success"
           sx={{ mb: 3 }}
           onClose={() => setShowSuccessAlert(false)}
           action={
@@ -2296,9 +2490,9 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           {successMessage}
         </Alert>
       )}
-      
+
       {/* Header */}
-      <Paper sx={{ 
+      <Paper sx={{
         background: 'linear-gradient(135deg, #6C5CE7 0%, #5A4ABD 100%)',
         mb: 4,
         p: 3,
@@ -2315,12 +2509,12 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             >
               Back
             </Button>
-            
+
             <Button
               startIcon={<BugReportIcon />}
               onClick={() => setShowDebugPanel(!showDebugPanel)}
-              sx={{ 
-                color: 'white', 
+              sx={{
+                color: 'white',
                 borderColor: 'rgba(255,255,255,0.3)',
                 bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent'
               }}
@@ -2330,16 +2524,16 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               {showDebugPanel ? 'Hide Debug' : 'Debug'}
             </Button>
           </Box>
-          
+
           <Box display="flex" alignItems="center" gap={1}>
             {lastRefresh && (
-              <Chip 
+              <Chip
                 label={`Updated: ${format(lastRefresh, 'h:mm a')}`}
                 size="small"
                 sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
               />
             )}
-            <Chip 
+            <Chip
               label={`${suggestions.length} Parlays`}
               size="small"
               sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
@@ -2377,11 +2571,11 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               key={sport.id}
               variant={selectedSport === sport.id ? "contained" : "outlined"}
               onClick={() => setSelectedSport(sport.id)}
-              sx={{ 
+              sx={{
                 minWidth: 100,
                 bgcolor: selectedSport === sport.id ? sport.id === 'NBA' ? '#ef4444' :
-                         sport.id === 'NFL' ? '#3b82f6' :
-                         sport.id === 'NHL' ? '#1e40af' : '#10b981' : 'transparent'
+                  sport.id === 'NFL' ? '#3b82f6' :
+                    sport.id === 'NHL' ? '#1e40af' : '#10b981' : 'transparent'
               }}
             >
               <Box display="flex" flexDirection="column" alignItems="center">
@@ -2402,33 +2596,33 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           📋 Parlay Type
         </Typography>
         <Box display="flex" gap={1} flexWrap="wrap">
-          <Chip 
-            label="Standard" 
+          <Chip
+            label="Standard"
             onClick={() => setSelectedType('standard')}
             color={selectedType === 'standard' ? "primary" : "default"}
             variant={selectedType === 'standard' ? "filled" : "outlined"}
             sx={{ fontWeight: selectedType === 'standard' ? 'bold' : 'normal' }}
           />
-          <Chip 
-            label="Same Game" 
+          <Chip
+            label="Same Game"
             onClick={() => setSelectedType('same_game')}
             color={selectedType === 'same_game' ? "primary" : "default"}
             variant={selectedType === 'same_game' ? "filled" : "outlined"}
           />
-          <Chip 
-            label="Teaser" 
+          <Chip
+            label="Teaser"
             onClick={() => setSelectedType('teaser')}
             color={selectedType === 'teaser' ? "primary" : "default"}
             variant={selectedType === 'teaser' ? "filled" : "outlined"}
           />
-          <Chip 
-            label="Round Robin" 
+          <Chip
+            label="Round Robin"
             onClick={() => setSelectedType('round_robin')}
             color={selectedType === 'round_robin' ? "primary" : "default"}
             variant={selectedType === 'round_robin' ? "filled" : "outlined"}
           />
-          <Chip 
-            label="All Types" 
+          <Chip
+            label="All Types"
             onClick={() => setSelectedType('all')}
             color={selectedType === 'all' ? "primary" : "default"}
             variant={selectedType === 'all' ? "filled" : "outlined"}
@@ -2484,7 +2678,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                 variant="outlined"
                 startIcon={<RefreshIcon />}
                 onClick={handleRefresh}
-                disabled={parlayLoading || oddsLoading}
+                disabled={manualLoading || oddsLoading}
               >
                 Refresh
               </Button>
@@ -2527,7 +2721,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               </Select>
             </FormControl>
           </Grid>
-          
+
           {/* Parlay Size Filter */}
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
@@ -2545,7 +2739,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               </Select>
             </FormControl>
           </Grid>
-          
+
           {/* Risk Level Filter */}
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
@@ -2558,13 +2752,13 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                 {RISK_LEVELS.map((risk) => (
                   <MenuItem key={risk.id} value={risk.id}>
                     <Box display="flex" alignItems="center" gap={1}>
-                      <Box 
-                        sx={{ 
-                          width: 10, 
-                          height: 10, 
-                          borderRadius: '50%', 
-                          bgcolor: risk.color || 'transparent' 
-                        }} 
+                      <Box
+                        sx={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: '50%',
+                          bgcolor: risk.color || 'transparent'
+                        }}
                       />
                       {risk.name}
                     </Box>
@@ -2573,7 +2767,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               </Select>
             </FormControl>
           </Grid>
-          
+
           {/* Edge Filter */}
           <Grid item xs={12} sm={6} md={3}>
             <Box sx={{ px: 1 }}>
@@ -2596,7 +2790,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               />
             </Box>
           </Grid>
-          
+
           {/* Confidence Filter */}
           <Grid item xs={12} sm={6}>
             <Box sx={{ px: 1 }}>
@@ -2618,7 +2812,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
               />
             </Box>
           </Grid>
-          
+
           {/* Max Legs Filter */}
           <Grid item xs={12} sm={6}>
             <Box sx={{ px: 1 }}>
@@ -2649,8 +2843,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           ⚡ Quick Filters
         </Typography>
         <Box display="flex" flexWrap="wrap" gap={1}>
-          <Chip 
-            label="🎯 Player Props Only" 
+          <Chip
+            label="🎯 Player Props Only"
             onClick={() => {
               setMarketType('player_props');
               setMinEdge(8);
@@ -2659,8 +2853,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             color={marketType === 'player_props' ? "primary" : "default"}
             variant="outlined"
           />
-          <Chip 
-            label="💰 High Confidence (+80%)" 
+          <Chip
+            label="💰 High Confidence (+80%)"
             onClick={() => {
               setMinConfidence(80);
               setMinEdge(10);
@@ -2669,8 +2863,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             color={minConfidence === 80 ? "primary" : "default"}
             variant="outlined"
           />
-          <Chip 
-            label="🔄 Mixed Markets" 
+          <Chip
+            label="🔄 Mixed Markets"
             onClick={() => {
               setMarketType('mixed');
               setParlaySize('3');
@@ -2679,8 +2873,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             color={marketType === 'mixed' ? "primary" : "default"}
             variant="outlined"
           />
-          <Chip 
-            label="📊 Game Totals" 
+          <Chip
+            label="📊 Game Totals"
             onClick={() => {
               setMarketType('game_totals');
               setMinEdge(5);
@@ -2689,8 +2883,8 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             color={marketType === 'game_totals' ? "primary" : "default"}
             variant="outlined"
           />
-          <Chip 
-            label="⚡ Quick Parlays (2-leg)" 
+          <Chip
+            label="⚡ Quick Parlays (2-leg)"
             onClick={() => {
               setParlaySize('2');
               setMaxRisk('low');
@@ -2699,15 +2893,15 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             color={parlaySize === '2' ? "primary" : "default"}
             variant="outlined"
           />
-          <Chip 
-            label="🔍 Search" 
+          <Chip
+            label="🔍 Search"
             icon={<SearchIcon />}
             onClick={() => {}}
             color="default"
             variant="outlined"
           />
-          <Chip 
-            label="🔄 Clear Filters" 
+          <Chip
+            label="🔄 Clear Filters"
             onClick={() => {
               setMarketType('all');
               setMinConfidence(60);
@@ -2740,12 +2934,12 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
       <TodaysGamesPanel />
 
       {/* Display suggestions */}
-      {parlayLoading && suggestions.length === 0 ? (
+      {manualLoading && suggestions.length === 0 ? (
         <Box display="flex" justifyContent="center" p={4}>
           <CircularProgress />
           <Typography sx={{ ml: 2 }}>Loading parlay suggestions...</Typography>
         </Box>
-      ) : parlayError && suggestions.length === 0 ? (
+      ) : manualError && suggestions.length === 0 ? (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <AlertTitle>Parlay API Unavailable</AlertTitle>
           Using fallback data. Try again later.
@@ -2759,9 +2953,9 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
             <TrophyIcon color="primary" />
             Parlay Suggestions ({filteredSuggestions.length})
             {suggestions.some(s => s.is_real_data) && (
-              <Chip 
-                label="LIVE DATA" 
-                size="small" 
+              <Chip
+                label="LIVE DATA"
+                size="small"
                 sx={{ bgcolor: '#10b981', color: 'white', ml: 1 }}
               />
             )}
@@ -2769,7 +2963,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           <Grid container spacing={3}>
             {filteredSuggestions.map((parlay) => (
               <Grid item xs={12} md={6} key={parlay.id}>
-                <Card sx={{ 
+                <Card sx={{
                   height: '100%',
                   borderLeft: `4px solid ${parlay.is_real_data ? '#10b981' : '#f59e0b'}`,
                   transition: 'transform 0.2s, box-shadow 0.2s',
@@ -2788,10 +2982,10 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                       </Box>
                       <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
                         {parlay.is_real_data && (
-                          <Chip 
-                            label="✅ LIVE" 
-                            size="small" 
-                            sx={{ 
+                          <Chip
+                            label="✅ LIVE"
+                            size="small"
+                            sx={{
                               bgcolor: '#10b981',
                               color: 'white',
                               fontSize: '0.6rem',
@@ -2800,10 +2994,10 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                           />
                         )}
                         {parlay.correlation_bonus && (
-                          <Chip 
+                          <Chip
                             label={`+${parlay.correlation_bonus * 100}% Correlated`}
                             size="small"
-                            sx={{ 
+                            sx={{
                               bgcolor: '#FFD70020',
                               color: '#FFD700',
                               fontSize: '0.6rem',
@@ -2813,11 +3007,11 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         )}
                       </Box>
                     </Box>
-                    
+
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                       {parlay.analysis}
                     </Typography>
-                    
+
                     <Box sx={{ mb: 2, mt: 1 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: "center", mb: 0.5 }}>
                         <Typography variant="caption" color="text.secondary">
@@ -2825,17 +3019,17 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         </Typography>
                         <Box display="flex" alignItems="center" gap={1}>
                           {parlay.expected_value && (
-                            <Chip 
+                            <Chip
                               label={`EV: ${parlay.expected_value}`}
                               size="small"
-                              sx={{ 
+                              sx={{
                                 bgcolor: parlay.expected_value?.startsWith('+') ? '#10b98120' : '#ef444420',
                                 color: parlay.expected_value?.startsWith('+') ? '#10b981' : '#ef4444',
                                 fontSize: '0.7rem'
                               }}
                             />
                           )}
-                          <Chip 
+                          <Chip
                             label={parlay.total_odds_american || parlay.total_odds || parlay.totalOdds}
                             size="small"
                             color="primary"
@@ -2843,12 +3037,12 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                           />
                         </Box>
                       </Box>
-                      <ConfidenceMeter 
-                        score={parlay.confidence} 
-                        level={parlay.confidence_level || 'medium'} 
+                      <ConfidenceMeter
+                        score={parlay.confidence}
+                        level={parlay.confidence_level || 'medium'}
                       />
                     </Box>
-                    
+
                     {parlay.ai_metrics && (
                       <Box sx={{ mb: 2, p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
                         <Typography variant="caption" color="text.secondary">
@@ -2857,17 +3051,17 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
                         </Typography>
                       </Box>
                     )}
-                    
+
                     <Box display="flex" gap={1}>
-                      <Button 
-                        variant="contained" 
+                      <Button
+                        variant="contained"
                         onClick={() => handleBuildParlay(parlay)}
                         startIcon={<BuildIcon />}
                         sx={{ flex: 1 }}
                       >
                         Build
                       </Button>
-                      <Button 
+                      <Button
                         variant="outlined"
                         onClick={() => {
                           setParlayLegs(parlay.legs as ParlayLeg[]);
@@ -2896,13 +3090,13 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
 
       {/* Build Modal */}
       {renderBuildModal()}
-      
+
       {/* Parlay Result Modal */}
       {renderParlayResultModal()}
-      
+
       {/* Prop Selector Modal */}
       {renderPropSelector()}
-      
+
       {/* Debug State Button */}
       <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000 }}>
         <Tooltip title="Debug State">
@@ -2930,7 +3124,7 @@ const generateParlayFromGames = useCallback(async (sport: string, numLegs: numbe
           </Button>
         </Tooltip>
       </Box>
-      
+
       {/* Pulse Animation Style */}
       <style>{pulseAnimation}</style>
     </Container>

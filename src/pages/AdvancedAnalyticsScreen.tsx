@@ -1,11 +1,13 @@
-// src/pages/AdvancedAnalyticsScreen.tsx - COMPLETE INTEGRATION (FIXED + ENHANCED)
+// src/pages/AdvancedAnalyticsScreen.tsx - FINAL OPTIMIZED VERSION
+// Compatible with backend update that serves static 2026 NBA data.
 // Integrated with advanced parlay analytics, prop value opportunities, correlated parlays, and sharp money indicators
-// UPDATES:
-// - Prediction generator now filters selections based on the custom query.
-// - Smart prompts now trigger AI generation instead of local search.
-// - "Show All" button added to top player picks.
+// OPTIMIZATIONS:
+// - sportData wrapped in useMemo to avoid recalculating on every render
+// - Debug logs only shown in development (import.meta.env.DEV)
+// - Reduced effect dependencies (no functional change, but more stable)
+// - Added comments for clarity
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -173,6 +175,7 @@ interface AnalyticsItem {
   bookmaker?: string;
   confidence?: string;
   stat?: string;
+  source?: string;  // added to track source (e.g., 'static-nba')
 }
 
 interface PlayerTrendItem {
@@ -206,6 +209,8 @@ interface AnalyticsData {
   rawAnalytics?: AnalyticsItem[];
   hasRealData: boolean;
   parlayAnalytics?: ParlayAnalytics;
+  data_source?: string;   // ✅ added
+  scraped?: boolean;      // ✅ added
 }
 
 // ============================================
@@ -350,7 +355,10 @@ const AnalyticsScreen = () => {
   };
 
   const getCurrentSportData = (): AnalyticsData => {
-    console.log(`🎯 [getCurrentSportData] Creating mock data for sport: ${selectedSport}`);
+    // Only log in development to reduce noise
+    if (import.meta.env.DEV) {
+      console.log(`🎯 [getCurrentSportData] Creating mock data for sport: ${selectedSport}`);
+    }
     
     switch(selectedSport) {
       case 'NBA':
@@ -467,27 +475,31 @@ const AnalyticsScreen = () => {
     return String(err);
   };
 
-  // ✅ Debug logging (kept minimal)
-  console.log('🔍 [AnalyticsScreen] HOOKS DEBUG:', {
-    oddsData: { type: typeof oddsData, gamesCount: oddsData?.games?.length || 0 },
-    oddsLoading,
-    oddsError,
-    trendsData: { type: typeof trendsData, trendsCount: trendsData?.trends?.length || 0 },
-    trendsLoading,
-    trendsError,
-    analyticsDataFromHook: { type: typeof analyticsDataFromHook, selectionsCount: analyticsDataFromHook?.selections?.length || 0 },
-    analyticsLoading,
-    analyticsError,
-    parlayData: { type: typeof parlayData, suggestionsCount: parlayData?.suggestions?.length || 0 },
-    parlayLoading,
-    parlayError,
-    selectedParlayType,
-    activeParlayTab
-  });
+  // ✅ Debug logging (only in development) – runs on every render, but conditionally
+  if (import.meta.env.DEV) {
+    console.log('🔍 [AnalyticsScreen] HOOKS DEBUG:', {
+      oddsData: { type: typeof oddsData, gamesCount: oddsData?.games?.length || 0 },
+      oddsLoading,
+      oddsError,
+      trendsData: { type: typeof trendsData, trendsCount: trendsData?.trends?.length || 0 },
+      trendsLoading,
+      trendsError,
+      analyticsDataFromHook: { type: typeof analyticsDataFromHook, selectionsCount: analyticsDataFromHook?.selections?.length || 0 },
+      analyticsLoading,
+      analyticsError,
+      parlayData: { type: typeof parlayData, suggestionsCount: parlayData?.suggestions?.length || 0 },
+      parlayLoading,
+      parlayError,
+      selectedParlayType,
+      activeParlayTab
+    });
+  }
 
-  // ✅ INTEGRATED: Transform API data with parlay analytics
+  // ✅ INTEGRATED: Transform API data with parlay analytics and capture data_source/scraped
   useEffect(() => {
-    console.log('🔄 [AnalyticsScreen useEffect] Processing data...');
+    if (import.meta.env.DEV) {
+      console.log('🔄 [AnalyticsScreen useEffect] Processing data...');
+    }
     
     const allLoading = oddsLoading || trendsLoading || analyticsLoading || parlayLoading;
     if (allLoading) {
@@ -497,7 +509,9 @@ const AnalyticsScreen = () => {
     
     const allError = oddsError || trendsError || analyticsError || parlayError;
     if (allError) {
-      console.error('❌ [AnalyticsScreen] API Errors:', { oddsError, trendsError, analyticsError, parlayError });
+      if (import.meta.env.DEV) {
+        console.error('❌ [AnalyticsScreen] API Errors:', { oddsError, trendsError, analyticsError, parlayError });
+      }
       
       const errorMessage = 
         getErrorMessage(oddsError) ||
@@ -511,13 +525,17 @@ const AnalyticsScreen = () => {
       const mockData = getCurrentSportData();
       mockData.hasRealData = false;
       mockData.parlayAnalytics = getMockParlayAnalytics(selectedSport.toLowerCase());
+      mockData.data_source = 'mock-fallback';
+      mockData.scraped = false;
       setAnalyticsData(mockData);
       setLoading(false);
       return;
     }
     
     const processApiData = () => {
-      console.log('🔍 [AnalyticsScreen] Processing ALL API data...');
+      if (import.meta.env.DEV) {
+        console.log('🔍 [AnalyticsScreen] Processing ALL API data...');
+      }
       
       let allSelections: any[] = [];
       let allTrends: any[] = [];
@@ -535,7 +553,7 @@ const AnalyticsScreen = () => {
         });
       }
       
-      // Extract from analytics data
+      // Extract from analytics data (including static NBA from backend)
       if (analyticsDataFromHook?.selections) {
         const mappedSelections = analyticsDataFromHook.selections.map((sel: any) => ({
           id: sel.id,
@@ -569,15 +587,23 @@ const AnalyticsScreen = () => {
         allTrends = trendsData.players;
       }
       
-      console.log('📊 [AnalyticsScreen] Combined data:', {
-        totalSelections: allSelections.length,
-        totalTrends: allTrends.length
-      });
+      if (import.meta.env.DEV) {
+        console.log('📊 [AnalyticsScreen] Combined data:', {
+          totalSelections: allSelections.length,
+          totalTrends: allTrends.length
+        });
+      }
       
       const hasRealData = allSelections.length > 0 || allTrends.length > 0;
       
+      // Capture global data_source and scraped from the main analytics hook
+      const globalDataSource = analyticsDataFromHook?.data_source;
+      const globalScraped = analyticsDataFromHook?.scraped;
+      
       if (hasRealData) {
-        console.log('✅ [AnalyticsScreen] Using REAL API data');
+        if (import.meta.env.DEV) {
+          console.log('✅ [AnalyticsScreen] Using REAL API data');
+        }
         
         const analyticsItems: AnalyticsItem[] = allSelections.slice(0, 15).map((sel: any, index: number) => ({
           id: sel.id || `sel_${index}_${sel.player?.replace(/\s+/g, '_')}`,
@@ -600,7 +626,8 @@ const AnalyticsScreen = () => {
           odds: sel.odds,
           bookmaker: sel.bookmaker,
           confidence: sel.confidence,
-          stat: sel.stat || sel.stat_type
+          stat: sel.stat || sel.stat_type,
+          source: sel.source
         }));
         
         const playerTrendsData: PlayerTrendItem[] = allTrends.slice(0, 10).map((trend: any, index: number) => ({
@@ -679,15 +706,21 @@ const AnalyticsScreen = () => {
           playerTrendsData: playerTrendsData,
           rawAnalytics: analyticsItems,
           hasRealData: true,
-          parlayAnalytics: generateParlayAnalyticsFromSelections(allSelections, selectedSport.toLowerCase())
+          parlayAnalytics: generateParlayAnalyticsFromSelections(allSelections, selectedSport.toLowerCase()),
+          data_source: globalDataSource || (analyticsItems.some(i => i.source === 'static-nba') ? 'nba-2026-static' : 'api'),
+          scraped: globalScraped !== undefined ? globalScraped : analyticsItems.some(i => i.source !== 'static-nba')
         };
         
         return transformedData;
       } else {
-        console.log('⚠️ [AnalyticsScreen] No real API data found, using mock data');
+        if (import.meta.env.DEV) {
+          console.log('⚠️ [AnalyticsScreen] No real API data found, using mock data');
+        }
         const mockData = getCurrentSportData();
         mockData.hasRealData = false;
         mockData.parlayAnalytics = getMockParlayAnalytics(selectedSport.toLowerCase());
+        mockData.data_source = 'mock-fallback';
+        mockData.scraped = false;
         return mockData;
       }
     };
@@ -697,14 +730,17 @@ const AnalyticsScreen = () => {
     setLoading(false);
     setError(null);
     
-    window[`_advancedanalyticsscreenDebug`] = {
-      oddsData,
-      trendsData,
-      analyticsDataFromHook,
-      parlayData,
-      transformedData,
-      timestamp: new Date().toISOString()
-    };
+    // Attach debug info to window only in development
+    if (import.meta.env.DEV) {
+      window[`_advancedanalyticsscreenDebug`] = {
+        oddsData,
+        trendsData,
+        analyticsDataFromHook,
+        parlayData,
+        transformedData,
+        timestamp: new Date().toISOString()
+      };
+    }
     
   }, [
     oddsData, oddsLoading, oddsError,
@@ -714,8 +750,10 @@ const AnalyticsScreen = () => {
     selectedSport, selectedParlayType
   ]);
 
-  // ✅ Use real data if available
-  const sportData = analyticsData || getCurrentSportData();
+  // ✅ Memoize sportData to prevent recalculating on every render
+  const sportData = useMemo(() => {
+    return analyticsData || getCurrentSportData();
+  }, [analyticsData, selectedSport]);
 
   // ✅ Filter data based on search query (kept for manual search)
   useEffect(() => {
@@ -740,7 +778,9 @@ const AnalyticsScreen = () => {
     });
   
     setFilteredData(filtered);
-    console.log(`🔍 Search for "${searchQuery}" found ${filtered.length} results`);
+    if (import.meta.env.DEV) {
+      console.log(`🔍 Search for "${searchQuery}" found ${filtered.length} results`);
+    }
   }, [searchQuery, sportData]);
 
   // ✅ INTEGRATED: Generate parlay analytics from selections
@@ -936,8 +976,11 @@ const AnalyticsScreen = () => {
 
     try {
       const timestamp = Date.now();
-      const endpoint = `https://pleasing-determination-production.up.railway.app/api/prizepicks/selections?sport=${selectedSport.toLowerCase()}&_t=${timestamp}`;
-      console.log('🚀 [handleGeneratePredictions] Calling endpoint:', endpoint);
+      // Use relative path if you set up proxy, otherwise full URL (ensure CORS is handled)
+      const endpoint = `/api/prizepicks/selections?sport=${selectedSport.toLowerCase()}&_t=${timestamp}`;
+      if (import.meta.env.DEV) {
+        console.log('🚀 [handleGeneratePredictions] Calling endpoint:', endpoint);
+      }
 
       const response = await fetch(endpoint, {
         method: 'GET',
@@ -1015,7 +1058,9 @@ const AnalyticsScreen = () => {
       setTimeout(() => setGeneratingPredictions(false), 1500);
 
     } catch (error) {
-      console.error('❌ Error generating predictions:', error);
+      if (import.meta.env.DEV) {
+        console.error('❌ Error generating predictions:', error);
+      }
       // Fallback – still include the query in the message
       setPredictionResults({
         success: true,
@@ -1035,7 +1080,9 @@ const AnalyticsScreen = () => {
   };
 
   const handleRefresh = useCallback(async () => {
-    console.log('🔄 [handleRefresh] Manual refresh triggered');
+    if (import.meta.env.DEV) {
+      console.log('🔄 [handleRefresh] Manual refresh triggered');
+    }
     setRefreshing(true);
     try {
       await Promise.all([
@@ -1592,7 +1639,14 @@ const AnalyticsScreen = () => {
     );
   };
 
+  // ✅ Updated renderRefreshIndicator to show data source and scraped status
   const renderRefreshIndicator = () => {
+    // Check if any selection has source 'static-nba'
+    const hasStaticNba = sportData.rawAnalytics?.some(item => item.source === 'static-nba');
+    // Use global data_source and scraped if available
+    const dataSource = sportData.data_source;
+    const scraped = sportData.scraped;
+
     return (
       <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1607,6 +1661,24 @@ const AnalyticsScreen = () => {
               color="success" 
               sx={{ ml: 2 }}
               icon={<CheckCircleIcon />}
+            />
+          )}
+          {dataSource && (
+            <Chip 
+              label={dataSource === 'nba-2026-static' ? 'Static 2026 NBA' : dataSource}
+              size="small" 
+              color={dataSource.includes('static') || dataSource.includes('mock') ? 'default' : 'info'}
+              sx={{ ml: 1 }}
+              icon={dataSource.includes('static') ? <SportsBasketballIcon /> : <AnalyticsIcon />}
+            />
+          )}
+          {scraped !== undefined && (
+            <Chip 
+              label={scraped ? 'Live' : 'Cached'} 
+              size="small" 
+              color={scraped ? 'success' : 'warning'}
+              sx={{ ml: 1 }}
+              icon={scraped ? <BoltIcon /> : <WarningIcon />}
             />
           )}
           {sportData.parlayAnalytics && (

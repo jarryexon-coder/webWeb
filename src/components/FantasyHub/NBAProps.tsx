@@ -107,13 +107,13 @@ const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
     );
   }
 
-  // Filter out players with no valid props (line > 0)
-  const validProps = propsData.filter(p => p.props.some(prop => prop.line > 0));
-  if (validProps.length === 0) {
-    return (
-      <Alert severity="info">No real-time player props available at this time.</Alert>
-    );
-  }
+// Filter out players with no valid props (line > 0)
+const validProps = propsData.filter(p => p.props && p.props.some(prop => prop.line > 0));
+if (validProps.length === 0) {
+  return (
+    <Alert severity="info">No real-time player props available at this time.</Alert>
+  );
+}
 
   return (
     <Box>
