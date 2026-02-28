@@ -1,4 +1,4 @@
-// src/pages/PredictionsOutcomeScreen.tsx - FINAL VERSION with live data, projections, and multi-sport support
+// src/pages/PredictionsOutcomeScreen.tsx - FINAL MERGED VERSION
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
@@ -88,6 +88,11 @@ import {
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 import { format, subDays } from 'date-fns';
+
+// ========== IMPORT UTILITIES ==========
+import { useDebounce } from '../utils/useDebounce';
+import { preprocessQuery, QueryIntent } from '../utils/queryProcessor';
+import { logPromptPerformance } from '../utils/analytics';
 
 // ========== ENVIRONMENT VARIABLE SAFE ACCESS ==========
 const getApiBase = (): string => {
@@ -537,11 +542,14 @@ const PredictionsOutcomeScreen = () => {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info' | 'warning'>('info');
   
-  // Generator state
+  // Generator state – enhanced
   const [customQuery, setCustomQuery] = useState('');
   const [generatingPredictions, setGeneratingPredictions] = useState(false);
   const [predictionResults, setPredictionResults] = useState<any>(null);
   const [showSimulationModal, setShowSimulationModal] = useState(false);
+  // New: store generated sets from custom query
+  const [generatedSets, setGeneratedSets] = useState<any[][]>([]);
+  const [currentSetIndex, setCurrentSetIndex] = useState(0);
 
   // UI control
   const [showResults, setShowResults] = useState(true);
@@ -588,7 +596,28 @@ const PredictionsOutcomeScreen = () => {
     await refetch(true);
   };
 
-  // Generator function
+  // ===== ENHANCED GENERATOR FUNCTIONS =====
+  const scorePredictionRelevance = (prediction: any, intent: QueryIntent): number => {
+    let score = 0;
+    const player = (prediction.player || '').toLowerCase();
+    const team = (prediction.team || '').toLowerCase();
+    const stat = (prediction.stat_type || '').toLowerCase();
+    const game = (prediction.game || '').toLowerCase();
+
+    if (intent.player && player.includes(intent.player)) score += 10;
+    if (intent.team && team.includes(intent.team)) score += 8;
+    if (intent.keywords.length) {
+      const keywordMatch = intent.keywords.some(k => 
+        player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
+      );
+      if (keywordMatch) score += 5;
+    }
+    // Boost by confidence
+    score += (prediction.confidence_pre_game || 0) / 10; // e.g., 80% adds 8
+    return score;
+  };
+
+  // *** CORRECTED HANDLE GENERATE PREDICTIONS ***
   const handleGeneratePredictions = async () => {
     if (!customQuery.trim()) {
       alert('Please enter a prediction query');
@@ -597,6 +626,9 @@ const PredictionsOutcomeScreen = () => {
 
     setGeneratingPredictions(true);
     setShowSimulationModal(true);
+
+    // Initialize selections as empty array
+    let selections: any[] = [];
 
     try {
       const endpoint = `${API_BASE}/api/ai/query`;
@@ -613,19 +645,17 @@ const PredictionsOutcomeScreen = () => {
       }
 
       const data = await response.json();
-// Inside handleGeneratePredictions, after const data = await response.json();
-console.log('✅ API response:', data);
+      console.log('✅ API response:', data);
 
-// ---- NEW: Outdated player info detection ----
-const outdatedPhrases = [
-    'James Harden of the Brooklyn Nets',
-    'James Harden of the Philadelphia 76ers',
-    // Add more as you discover them (e.g., 'Trae Young of the Atlanta Hawks')
-];
-if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phrase))) {
-    throw new Error('Outdated player info detected, using demo data');
-}
-// ----------------------------------------------
+      // ---- Outdated player info detection ----
+      const outdatedPhrases = [
+        'James Harden of the Brooklyn Nets',
+        'James Harden of the Philadelphia 76ers',
+      ];
+      if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phrase))) {
+        throw new Error('Outdated player info detected, using demo data');
+      }
+      // ----------------------------------------
 
       if (data.analysis) {
         setPredictionResults({
@@ -636,8 +666,12 @@ if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phras
           source: 'AI Query Endpoint',
           rawData: data
         });
+        // Add to generated sets
+        setGeneratedSets(prev => [...prev, [{ analysis: data.analysis, source: 'AI' }]]);
+        setCurrentSetIndex(prev => prev + 1);
+        // selections remains empty – that's fine
       } else {
-        let selections = [];
+        // Populate selections from data
         if (data.success && data.data) {
           selections = data.data;
         } else if (Array.isArray(data)) {
@@ -667,33 +701,152 @@ if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phras
             source: 'AI Query Endpoint',
             rawData: data
           });
+          setGeneratedSets(prev => [...prev, selections]);
+          setCurrentSetIndex(prev => prev + 1);
         } else {
           throw new Error('No analysis or picks in response');
         }
       }
+
+      // Log analytics – safely use selections.length (it's defined)
+      logPromptPerformance(customQuery, selections.length || 1, 0, 'generator');
     } catch (error) {
       console.error('❌ Error generating predictions:', error);
-      const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), 5);
-      const mockAnalysis = mockSelections.map((item: any, idx: number) => {
-        return `**${idx + 1}. ${item.player}**\n` +
-          `   📈 **Stat:** ${item.stat_type}\n` +
-          `   🎯 **Line:** ${item.line}\n` +
-          `   🔮 **Projection:** ${item.projection}\n` +
-          `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
-          `   💰 **Odds:** -110\n` +
-          `   📝 **Analysis:** ${item.key_factors?.join(' ')}`;
-      }).join('\n\n');
 
-      setPredictionResults({
-        success: true,
-        analysis: `🎯 **AI Prediction Results (Demo)**\n\nBased on your query:\n\n${mockAnalysis}`,
-        model: 'demo-model',
-        timestamp: new Date().toISOString(),
-        source: 'Demo Data (API unavailable)'
-      });
+      // Fallback: use local outcomes and rank by relevance
+      const outcomes = outcomesData?.outcomes || [];
+      if (outcomes.length > 0) {
+        const intent = preprocessQuery(customQuery);
+        let filtered = outcomes;
+        if (intent.sport) {
+          filtered = filtered.filter((o: any) => o.sport === intent.sport);
+        }
+        if (intent.player) {
+          filtered = filtered.filter((o: any) => 
+            (o.player || '').toLowerCase().includes(intent.player!)
+          );
+        }
+        if (intent.team) {
+          filtered = filtered.filter((o: any) => 
+            (o.team || '').toLowerCase().includes(intent.team!)
+          );
+        }
+        const scored = filtered
+          .map((o: any) => ({ ...o, relevanceScore: scorePredictionRelevance(o, intent) }))
+          .sort((a: any, b: any) => b.relevanceScore - a.relevanceScore)
+          .slice(0, 5);
+
+        const mockAnalysis = scored.map((item: any, idx: number) => {
+          return `**${idx + 1}. ${item.player}**\n` +
+            `   📈 **Stat:** ${item.stat_type}\n` +
+            `   🎯 **Line:** ${item.line}\n` +
+            `   🔮 **Projection:** ${item.projection}\n` +
+            `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
+            `   💰 **Odds:** -110\n` +
+            `   📝 **Analysis:** ${item.key_factors?.join(' ')}`;
+        }).join('\n\n');
+
+        setPredictionResults({
+          success: true,
+          analysis: `🎯 **AI Prediction Results (Local Relevance)**\n\nBased on your query:\n\n${mockAnalysis}`,
+          model: 'local-relevance',
+          timestamp: new Date().toISOString(),
+          source: 'Local Filtering (API unavailable)'
+        });
+        setGeneratedSets(prev => [...prev, scored]);
+        setCurrentSetIndex(prev => prev + 1);
+        selections = scored; // for analytics
+      } else {
+        const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), 5);
+        const mockAnalysis = mockSelections.map((item: any, idx: number) => {
+          return `**${idx + 1}. ${item.player}**\n` +
+            `   📈 **Stat:** ${item.stat_type}\n` +
+            `   🎯 **Line:** ${item.line}\n` +
+            `   🔮 **Projection:** ${item.projection}\n` +
+            `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
+            `   💰 **Odds:** -110\n` +
+            `   📝 **Analysis:** ${item.key_factors?.join(' ')}`;
+        }).join('\n\n');
+
+        setPredictionResults({
+          success: true,
+          analysis: `🎯 **AI Prediction Results (Demo)**\n\nBased on your query:\n\n${mockAnalysis}`,
+          model: 'demo-model',
+          timestamp: new Date().toISOString(),
+          source: 'Demo Data (API unavailable)'
+        });
+        setGeneratedSets(prev => [...prev, mockSelections]);
+        setCurrentSetIndex(prev => prev + 1);
+        selections = mockSelections; // for analytics
+      }
+
+      logPromptPerformance(customQuery, selections.length || 5, 0, 'fallback');
     } finally {
       setTimeout(() => setGeneratingPredictions(false), 1500);
     }
+  };
+
+  const handlePrevSet = () => {
+    if (currentSetIndex > 0) {
+      const newIndex = currentSetIndex - 1;
+      setCurrentSetIndex(newIndex);
+      const prevSet = generatedSets[newIndex];
+      if (prevSet) {
+        if (prevSet[0]?.analysis) {
+          setPredictionResults(prevSet[0]);
+        } else {
+          // Convert set to formatted analysis
+          const formatted = prevSet.map((item: any, idx: number) => {
+            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
+              `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
+              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
+              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
+              `   💎 **Confidence:** ${item.confidence_pre_game || 'medium'}\n` +
+              `   💰 **Odds:** -110\n` +
+              `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+          }).join('\n\n');
+          setPredictionResults({
+            success: true,
+            analysis: `🎯 **AI Prediction Results**\n\n${formatted}`,
+            source: 'Generated Set'
+          });
+        }
+      }
+    }
+  };
+
+  const handleNextSet = () => {
+    if (currentSetIndex < generatedSets.length - 1) {
+      const newIndex = currentSetIndex + 1;
+      setCurrentSetIndex(newIndex);
+      const nextSet = generatedSets[newIndex];
+      if (nextSet) {
+        if (nextSet[0]?.analysis) {
+          setPredictionResults(nextSet[0]);
+        } else {
+          const formatted = nextSet.map((item: any, idx: number) => {
+            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
+              `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
+              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
+              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
+              `   💎 **Confidence:** ${item.confidence_pre_game || 'medium'}\n` +
+              `   💰 **Odds:** -110\n` +
+              `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+          }).join('\n\n');
+          setPredictionResults({
+            success: true,
+            analysis: `🎯 **AI Prediction Results**\n\n${formatted}`,
+            source: 'Generated Set'
+          });
+        }
+      }
+    }
+  };
+
+  const clearGenerated = () => {
+    setGeneratedSets([]);
+    setCurrentSetIndex(0);
+    setPredictionResults(null);
   };
 
   const outcomes = outcomesData?.outcomes || [];
@@ -751,155 +904,154 @@ if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phras
   };
 
   // Render card
-const renderOutcomeCard = (outcome: any, index: number) => {
-  const outcomeColor = getOutcomeColor(outcome.outcome);
-  const isExpanded = expandedCard === outcome.id;
-  const isAllStar = outcome.prediction?.includes('All-Star') || outcome.prop?.includes('All-Star') || outcome.season_phase === 'all-star' || outcome.market_type === 'special';
-  const isFutures = outcome.prediction?.includes('ROTY') || outcome.prediction?.includes('MVP') || outcome.prediction?.includes('Cy Young') || outcome.market_type === 'futures' || outcome.season_phase === 'futures';
-  const isPlayoff = outcome.season_phase === 'playoffs';
-  const isWorldCup = outcome.prediction?.includes('World Cup') || outcome.tournament === 'World Cup 2026' || outcome.sport === 'world cup';
+  const renderOutcomeCard = (outcome: any, index: number) => {
+    const outcomeColor = getOutcomeColor(outcome.outcome);
+    const isExpanded = expandedCard === outcome.id;
+    const isAllStar = outcome.prediction?.includes('All-Star') || outcome.prop?.includes('All-Star') || outcome.season_phase === 'all-star' || outcome.market_type === 'special';
+    const isFutures = outcome.prediction?.includes('ROTY') || outcome.prediction?.includes('MVP') || outcome.prediction?.includes('Cy Young') || outcome.market_type === 'futures' || outcome.season_phase === 'futures';
+    const isPlayoff = outcome.season_phase === 'playoffs';
+    const isWorldCup = outcome.prediction?.includes('World Cup') || outcome.tournament === 'World Cup 2026' || outcome.sport === 'world cup';
 
-  return (
-    <Grid item xs={12} md={6} lg={4} key={outcome.id || `outcome-${index}-${Date.now()}`}>
-      <Card sx={{ 
-        height: '100%', 
-        display: 'flex', 
-        flexDirection: 'column',
-        transition: 'all 0.3s',
-        border: `1px solid ${alpha(outcomeColor, 0.2)}`,
-        ...(isAllStar && { borderLeftWidth: 4, borderLeftColor: '#FFD700', background: 'linear-gradient(to right, rgba(255,215,0,0.05), transparent)' }),
-        ...(isFutures && { borderTopWidth: 2, borderTopColor: '#4CAF50', background: 'linear-gradient(to bottom, rgba(76,175,80,0.05), transparent)' }),
-        ...(isPlayoff && { borderLeftWidth: 4, borderLeftColor: '#0066CC', background: 'linear-gradient(to right, rgba(0,102,204,0.05), transparent)' }),
-        ...(isWorldCup && { borderLeftWidth: 4, borderLeftColor: '#00BCD4', background: 'linear-gradient(to right, rgba(0,188,212,0.05), transparent)' }),
-        '&:hover': { borderColor: outcomeColor, boxShadow: `0 4px 20px ${alpha(outcomeColor, 0.15)}` }
-      }}>
-        <CardContent sx={{ flexGrow: 1, p: 3 }}>
-          {isFutures && (
-            <Box sx={{ bgcolor: '#1a2a1a', px: 2, py: 0.75, borderRadius: 1, display: 'inline-block', mb: 2 }}>
-              <Typography variant="caption" sx={{ color: '#4CAF50', fontWeight: 700 }}>🏆 2026 FUTURES</Typography>
-            </Box>
-          )}
-          {isAllStar && !isFutures && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#2a2a1a', px: 2, py: 0.75, borderRadius: 1, mb: 2 }}>
-              <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />
-              <Typography variant="caption" sx={{ color: '#FFD700', fontWeight: 600 }}>2026 ALL-STAR</Typography>
-            </Box>
-          )}
+    return (
+      <Grid item xs={12} md={6} lg={4} key={outcome.id || `outcome-${index}-${Date.now()}`}>
+        <Card sx={{ 
+          height: '100%', 
+          display: 'flex', 
+          flexDirection: 'column',
+          transition: 'all 0.3s',
+          border: `1px solid ${alpha(outcomeColor, 0.2)}`,
+          ...(isAllStar && { borderLeftWidth: 4, borderLeftColor: '#FFD700', background: 'linear-gradient(to right, rgba(255,215,0,0.05), transparent)' }),
+          ...(isFutures && { borderTopWidth: 2, borderTopColor: '#4CAF50', background: 'linear-gradient(to bottom, rgba(76,175,80,0.05), transparent)' }),
+          ...(isPlayoff && { borderLeftWidth: 4, borderLeftColor: '#0066CC', background: 'linear-gradient(to right, rgba(0,102,204,0.05), transparent)' }),
+          ...(isWorldCup && { borderLeftWidth: 4, borderLeftColor: '#00BCD4', background: 'linear-gradient(to right, rgba(0,188,212,0.05), transparent)' }),
+          '&:hover': { borderColor: outcomeColor, boxShadow: `0 4px 20px ${alpha(outcomeColor, 0.15)}` }
+        }}>
+          <CardContent sx={{ flexGrow: 1, p: 3 }}>
+            {isFutures && (
+              <Box sx={{ bgcolor: '#1a2a1a', px: 2, py: 0.75, borderRadius: 1, display: 'inline-block', mb: 2 }}>
+                <Typography variant="caption" sx={{ color: '#4CAF50', fontWeight: 700 }}>🏆 2026 FUTURES</Typography>
+              </Box>
+            )}
+            {isAllStar && !isFutures && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#2a2a1a', px: 2, py: 0.75, borderRadius: 1, mb: 2 }}>
+                <StarIcon sx={{ fontSize: 16, color: '#FFD700' }} />
+                <Typography variant="caption" sx={{ color: '#FFD700', fontWeight: 600 }}>2026 ALL-STAR</Typography>
+              </Box>
+            )}
 
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-            <Box>
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                {outcome.game || `${outcome.player || 'Player'} Prediction`}
-              </Typography>
-              <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
-                <Chip label={outcome.sport?.toUpperCase() || 'NBA'} size="small" icon={getSportIcon(outcome.sport || 'nba')} sx={{ bgcolor: alpha('#3b82f6', 0.1), color: '#3b82f6' }} />
-                {outcome.player && <Chip label={outcome.player} size="small" variant="outlined" />}
-                {outcome.season && <Chip label={outcome.season} size="small" sx={{ bgcolor: alpha('#4CAF50', 0.1), color: '#4CAF50', fontSize: '0.65rem' }} />}
+            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+              <Box>
+                <Typography variant="h6" fontWeight="bold" gutterBottom>
+                  {outcome.game || `${outcome.player || 'Player'} Prediction`}
+                </Typography>
+                <Box display="flex" gap={1} alignItems="center" flexWrap="wrap">
+                  <Chip label={outcome.sport?.toUpperCase() || 'NBA'} size="small" icon={getSportIcon(outcome.sport || 'nba')} sx={{ bgcolor: alpha('#3b82f6', 0.1), color: '#3b82f6' }} />
+                  {outcome.player && <Chip label={outcome.player} size="small" variant="outlined" />}
+                  {outcome.season && <Chip label={outcome.season} size="small" sx={{ bgcolor: alpha('#4CAF50', 0.1), color: '#4CAF50', fontSize: '0.65rem' }} />}
+                </Box>
+              </Box>
+              <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
+                <Chip label={outcome.outcome?.toUpperCase() || 'PENDING'} size="small" sx={{ bgcolor: outcomeColor, color: 'white', fontWeight: 'bold', fontSize: '0.7rem' }} />
+                {outcome.units && outcome.units !== '0' && <Typography variant="caption" fontWeight="bold" color={outcomeColor}>{outcome.units} units</Typography>}
               </Box>
             </Box>
-            <Box display="flex" flexDirection="column" alignItems="flex-end" gap={0.5}>
-              <Chip label={outcome.outcome?.toUpperCase() || 'PENDING'} size="small" sx={{ bgcolor: outcomeColor, color: 'white', fontWeight: 'bold', fontSize: '0.7rem' }} />
-              {outcome.units && outcome.units !== '0' && <Typography variant="caption" fontWeight="bold" color={outcomeColor}>{outcome.units} units</Typography>}
-            </Box>
-          </Box>
 
-          <Typography variant="body1" fontWeight="medium" color="primary" mb={2}>
-            {outcome.prediction || outcome.prop || 'No prediction details available'}
-          </Typography>
-
-          <Grid container spacing={2} mb={2}>
-            <Grid item xs={6}>
-              <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
-                <Typography variant="caption" color="text.secondary">Confidence</Typography>
-                <LinearProgress variant="determinate" value={outcome.confidence_pre_game || outcome.confidence || 70} sx={{ height: 8, borderRadius: 4, mt: 1, mb: 1, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: (outcome.confidence_pre_game || outcome.confidence) >= 80 ? '#10b981' : (outcome.confidence_pre_game || outcome.confidence) >= 70 ? '#f59e0b' : '#ef4444' } }} />
-                <Typography variant="body2" fontWeight="bold">{outcome.confidence_pre_game || outcome.confidence || 70}%</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6}>
-              <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
-                <Typography variant="caption" color="text.secondary">Result</Typography>
-                <Typography variant="body1" fontWeight="bold" color={outcomeColor} sx={{ mt: 0.5 }}>{outcome.actual_result || outcome.outcome?.charAt(0).toUpperCase() + outcome.outcome?.slice(1) || 'Pending'}</Typography>
-              </Box>
-            </Grid>
-          </Grid>
-
-          {/* Edge and Accuracy - with safe edge sign check */}
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#4CAF50', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
-            <Typography variant="caption" fontWeight="bold" color="text.secondary">Edge:</Typography>
-            <Typography variant="body2" fontWeight="bold" color={
-              (() => {
-                const edgeVal = outcome.edge;
-                if (typeof edgeVal === 'string' && edgeVal.startsWith('+')) return '#4CAF50';
-                if (typeof edgeVal === 'number' && edgeVal > 0) return '#4CAF50';
-                if (typeof edgeVal === 'string') {
-                  // Try to parse a number from strings like "8.4%" or "8.4"
-                  const num = parseFloat(edgeVal.replace(/[^0-9.-]/g, ''));
-                  if (!isNaN(num) && num > 0) return '#4CAF50';
-                }
-                return '#FF4444';
-              })()
-            }>
-              {outcome.edge || '+8.4%'}
+            <Typography variant="body1" fontWeight="medium" color="primary" mb={2}>
+              {outcome.prediction || outcome.prop || 'No prediction details available'}
             </Typography>
-            <Typography variant="caption" fontWeight="bold" color="text.secondary">Accuracy:</Typography>
-            <Typography variant="body2" fontWeight="bold" color="#4CAF50">{outcome.accuracy || 75}%</Typography>
-          </Box>
 
-          {/* Accordion - controlled locally */}
-          <Accordion 
-            expanded={isExpanded}
-            onChange={() => setExpandedCard(isExpanded ? null : outcome.id)}
-            sx={{ mb: 2, '&:before': { display: 'none' }, boxShadow: 'none', bgcolor: 'transparent' }}
-          >
-            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 'auto', p: 0, '& .MuiAccordionSummary-content': { my: 1 } }}>
-              <Typography variant="body2" color="primary" fontWeight="medium">
-                {isExpanded ? 'Show Less' : 'View Details'}
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ p: 0 }}>
-              {outcome.key_factors && outcome.key_factors.length > 0 && (
-                <Box mb={2}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Key Factors</Typography>
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {outcome.key_factors.map((factor: string, i: number) => (
-                      <li key={i}><Typography variant="body2" color="text.secondary">{factor}</Typography></li>
-                    ))}
-                  </ul>
+            <Grid container spacing={2} mb={2}>
+              <Grid item xs={6}>
+                <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
+                  <Typography variant="caption" color="text.secondary">Confidence</Typography>
+                  <LinearProgress variant="determinate" value={outcome.confidence_pre_game || outcome.confidence || 70} sx={{ height: 8, borderRadius: 4, mt: 1, mb: 1, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: (outcome.confidence_pre_game || outcome.confidence) >= 80 ? '#10b981' : (outcome.confidence_pre_game || outcome.confidence) >= 70 ? '#f59e0b' : '#ef4444' } }} />
+                  <Typography variant="body2" fontWeight="bold">{outcome.confidence_pre_game || outcome.confidence || 70}%</Typography>
                 </Box>
-              )}
-              {/* Prediction Details including projection */}
-              {(outcome.line || outcome.stat_type || outcome.actual_value || outcome.projection) && (
-                <Box mb={2}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Prediction Details</Typography>
-                  <Grid container spacing={1}>
-                    {outcome.line && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Line</Typography><Typography variant="body2">{outcome.line}</Typography></Grid>}
-                    {outcome.stat_type && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Stat Type</Typography><Typography variant="body2">{outcome.stat_type}</Typography></Grid>}
-                    {outcome.projection && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Projection</Typography><Typography variant="body2">{outcome.projection}</Typography></Grid>}
-                    {outcome.actual_value && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Actual</Typography><Typography variant="body2" fontWeight="bold">{outcome.actual_value}</Typography></Grid>}
-                  </Grid>
+              </Grid>
+              <Grid item xs={6}>
+                <Box textAlign="center" p={1.5} bgcolor="action.hover" borderRadius={2}>
+                  <Typography variant="caption" color="text.secondary">Result</Typography>
+                  <Typography variant="body1" fontWeight="bold" color={outcomeColor} sx={{ mt: 0.5 }}>{outcome.actual_result || outcome.outcome?.charAt(0).toUpperCase() + outcome.outcome?.slice(1) || 'Pending'}</Typography>
                 </Box>
-              )}
-            </AccordionDetails>
-          </Accordion>
+              </Grid>
+            </Grid>
 
-          <Box sx={{ mt: 'auto' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography variant="caption" color="text.secondary">
-                {outcome.timestamp ? format(new Date(outcome.timestamp), 'MMM d, yyyy') : outcome.date || AS_OF_DATE}
+            {/* Edge and Accuracy - with safe edge sign check */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#4CAF50', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
+              <Typography variant="caption" fontWeight="bold" color="text.secondary">Edge:</Typography>
+              <Typography variant="body2" fontWeight="bold" color={
+                (() => {
+                  const edgeVal = outcome.edge;
+                  if (typeof edgeVal === 'string' && edgeVal.startsWith('+')) return '#4CAF50';
+                  if (typeof edgeVal === 'number' && edgeVal > 0) return '#4CAF50';
+                  if (typeof edgeVal === 'string') {
+                    const num = parseFloat(edgeVal.replace(/[^0-9.-]/g, ''));
+                    if (!isNaN(num) && num > 0) return '#4CAF50';
+                  }
+                  return '#FF4444';
+                })()
+              }>
+                {outcome.edge || '+8.4%'}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {outcome.source && `Source: ${outcome.source}`}
-              </Typography>
+              <Typography variant="caption" fontWeight="bold" color="text.secondary">Accuracy:</Typography>
+              <Typography variant="body2" fontWeight="bold" color="#4CAF50">{outcome.accuracy || 75}%</Typography>
             </Box>
-            {outcome.asOf && <Typography variant="caption" color="#4CAF50" sx={{ display: 'block', mt: 0.5 }}>📅 Data as of {outcome.asOf}</Typography>}
-          </Box>
-        </CardContent>
-      </Card>
-    </Grid>
-  );
-};
+
+            {/* Accordion - controlled locally */}
+            <Accordion 
+              expanded={isExpanded}
+              onChange={() => setExpandedCard(isExpanded ? null : outcome.id)}
+              sx={{ mb: 2, '&:before': { display: 'none' }, boxShadow: 'none', bgcolor: 'transparent' }}
+            >
+              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 'auto', p: 0, '& .MuiAccordionSummary-content': { my: 1 } }}>
+                <Typography variant="body2" color="primary" fontWeight="medium">
+                  {isExpanded ? 'Show Less' : 'View Details'}
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0 }}>
+                {outcome.key_factors && outcome.key_factors.length > 0 && (
+                  <Box mb={2}>
+                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Key Factors</Typography>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {outcome.key_factors.map((factor: string, i: number) => (
+                        <li key={i}><Typography variant="body2" color="text.secondary">{factor}</Typography></li>
+                      ))}
+                    </ul>
+                  </Box>
+                )}
+                {/* Prediction Details including projection */}
+                {(outcome.line || outcome.stat_type || outcome.actual_value || outcome.projection) && (
+                  <Box mb={2}>
+                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Prediction Details</Typography>
+                    <Grid container spacing={1}>
+                      {outcome.line && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Line</Typography><Typography variant="body2">{outcome.line}</Typography></Grid>}
+                      {outcome.stat_type && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Stat Type</Typography><Typography variant="body2">{outcome.stat_type}</Typography></Grid>}
+                      {outcome.projection && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Projection</Typography><Typography variant="body2">{outcome.projection}</Typography></Grid>}
+                      {outcome.actual_value && <Grid item xs={4}><Typography variant="caption" color="text.secondary">Actual</Typography><Typography variant="body2" fontWeight="bold">{outcome.actual_value}</Typography></Grid>}
+                    </Grid>
+                  </Box>
+                )}
+              </AccordionDetails>
+            </Accordion>
+
+            <Box sx={{ mt: 'auto' }}>
+              <Box display="flex" justifyContent="space-between" alignItems="center">
+                <Typography variant="caption" color="text.secondary">
+                  {outcome.timestamp ? format(new Date(outcome.timestamp), 'MMM d, yyyy') : outcome.date || AS_OF_DATE}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {outcome.source && `Source: ${outcome.source}`}
+                </Typography>
+              </Box>
+              {outcome.asOf && <Typography variant="caption" color="#4CAF50" sx={{ display: 'block', mt: 0.5 }}>📅 Data as of {outcome.asOf}</Typography>}
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+  };
   
-  // Render generator
+  // ===== ENHANCED GENERATOR UI =====
   const renderGenerator = () => (
     <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -907,18 +1059,19 @@ const renderOutcomeCard = (outcome: any, index: number) => {
         <Typography variant="h4">🚀 AI Prediction Generator</Typography>
       </Box>
       <Typography variant="body1" color="text.secondary" paragraph>
-        Generate custom predictions using advanced AI models
+        Generate custom predictions using advanced AI models – try natural language queries.
       </Typography>
 
       <Box sx={{ mb: 3 }}>
         <Typography variant="h6" gutterBottom>Quick Prediction Queries</Typography>
         <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
           {[
-            "Generate NBA player props for tonight",
-            "Best NFL team total predictions this week",
-            "High probability MLB game outcomes",
-            "Today's best over/under predictions",
-            "Generate same-game parlay predictions"
+            "LeBron James points over tonight",
+            "Patrick Mahomes passing yards over 300",
+            "Shohei Ohtani home run",
+            "McDavid points over 1.5",
+            "Nikola Jokic triple double",
+            "Jayson Tatum rebounds over 8.5"
           ].map((query, index) => (
             <Chip
               key={index}
@@ -941,13 +1094,13 @@ const renderOutcomeCard = (outcome: any, index: number) => {
           fullWidth
           multiline
           rows={2}
-          placeholder="Enter custom prediction query..."
+          placeholder="Enter custom prediction query (e.g., 'Jokic points over 25.5', 'Chiefs win margin')"
           value={customQuery}
           onChange={(e) => setCustomQuery(e.target.value)}
           variant="outlined"
           sx={{ mb: 2 }}
         />
-        <Box sx={{ display: 'flex', gap: 2 }}>
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           <Button
             fullWidth
             variant="contained"
@@ -973,6 +1126,22 @@ const renderOutcomeCard = (outcome: any, index: number) => {
         </Box>
       </Box>
 
+      {generatedSets.length > 0 && (
+        <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body2">Generated sets:</Typography>
+          <IconButton size="small" onClick={handlePrevSet} disabled={currentSetIndex === 0}>
+            <ExpandMoreIcon sx={{ transform: 'rotate(90deg)' }} />
+          </IconButton>
+          <Typography variant="caption">
+            {currentSetIndex + 1}/{generatedSets.length}
+          </Typography>
+          <IconButton size="small" onClick={handleNextSet} disabled={currentSetIndex === generatedSets.length - 1}>
+            <ExpandMoreIcon sx={{ transform: 'rotate(-90deg)' }} />
+          </IconButton>
+          <Button size="small" onClick={clearGenerated}>Clear</Button>
+        </Box>
+      )}
+
       {predictionResults && (
         <Box sx={{ mt: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
           <Typography variant="h6" gutterBottom>
@@ -990,7 +1159,7 @@ const renderOutcomeCard = (outcome: any, index: number) => {
       )}
 
       <Alert severity="info" icon={<PsychologyIcon />} sx={{ mt: 2 }}>
-        Uses neural networks, statistical modeling, and historical data for accurate predictions
+        Uses neural networks, statistical modeling, and historical data for accurate predictions. Try specific player queries.
       </Alert>
     </Paper>
   );
@@ -1264,7 +1433,7 @@ const renderOutcomeCard = (outcome: any, index: number) => {
               </Box>
               <Typography variant="h6" gutterBottom>AI Predictions Generated!</Typography>
               {predictionResults && (
-                <Paper sx={{ p: 2, mt: 2, bgcolor: 'background.default', textAlign: 'left' }}>
+                <Paper sx={{ p: 2, mt: 2, bgcolor: 'background.default', textAlign: 'left', maxHeight: 300, overflow: 'auto' }}>
                   <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{predictionResults.analysis}</Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>Source: {predictionResults.source}</Typography>
                 </Paper>

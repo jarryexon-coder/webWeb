@@ -1,11 +1,7 @@
-// src/pages/AdvancedAnalyticsScreen.tsx - FINAL OPTIMIZED VERSION
-// Compatible with backend update that serves static 2026 NBA data.
-// Integrated with advanced parlay analytics, prop value opportunities, correlated parlays, and sharp money indicators
-// OPTIMIZATIONS:
-// - sportData wrapped in useMemo to avoid recalculating on every render
-// - Debug logs only shown in development (import.meta.env.DEV)
-// - Reduced effect dependencies (no functional change, but more stable)
-// - Added comments for clarity
+// src/pages/AdvancedAnalyticsScreen.tsx - FINAL UPDATED VERSION
+// - Fixed playerTrends variable usage
+// - Added Value Picks tab with advanced filters
+// - Integrated with existing parlay and analytics data
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -260,6 +256,11 @@ const AnalyticsScreen = () => {
   
   // ✅ ADDED: Show all picks toggle
   const [showAllPicks, setShowAllPicks] = useState(false);
+
+  // ✅ NEW: Filter states for Value Picks tab
+  const [edgeMin, setEdgeMin] = useState<number>(5);
+  const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
+  const [sideFilter, setSideFilter] = useState<string>('all');
   
   // ============================================
   // MOCK DATA FUNCTIONS (moved up – must be defined before they are used)
@@ -783,6 +784,31 @@ const AnalyticsScreen = () => {
     }
   }, [searchQuery, sportData]);
 
+  // ✅ NEW: Filtered value picks based on advanced filters
+  const getFilteredValuePicks = useCallback(() => {
+    if (!sportData.rawAnalytics) return [];
+    
+    return sportData.rawAnalytics.filter(item => {
+      // Edge filter (percentage)
+      const edge = item.edge || 0;
+      if (edge < edgeMin) return false;
+
+      // Confidence filter
+      if (confidenceFilter !== 'all') {
+        const conf = item.confidence?.toLowerCase() || '';
+        if (conf !== confidenceFilter) return false;
+      }
+
+      // Side filter (over/under)
+      if (sideFilter !== 'all') {
+        const side = item.value_side?.toLowerCase() || item.type?.toLowerCase() || '';
+        if (side !== sideFilter) return false;
+      }
+
+      return true;
+    });
+  }, [sportData.rawAnalytics, edgeMin, confidenceFilter, sideFilter]);
+
   // ✅ INTEGRATED: Generate parlay analytics from selections
   const generateParlayAnalyticsFromSelections = (selections: any[], sport: string): ParlayAnalytics => {
     const successRates: Record<string, any> = {};
@@ -880,13 +906,14 @@ const AnalyticsScreen = () => {
     { id: 'Soccer', name: 'Soccer', icon: <SportsSoccerIcon />, color: '#14b8a6' }
   ];
 
-  // ✅ EXISTING metrics tabs
+  // ✅ EXISTING metrics tabs (UPDATED with new 'value' tab)
   const metrics = [
     { id: 'overview', label: 'Overview', icon: <AnalyticsIcon /> },
     { id: 'trends', label: 'Trends', icon: <TrendingUpIcon /> },
     { id: 'teams', label: 'Teams', icon: <GroupIcon /> },
     { id: 'players', label: 'Players', icon: <PersonIcon /> },
-    { id: 'advanced', label: 'Advanced', icon: <BarChartIcon /> }
+    { id: 'advanced', label: 'Advanced', icon: <BarChartIcon /> },
+    { id: 'value', label: 'Value Picks', icon: <LocalOfferIcon /> } // NEW TAB
   ];
 
   // ✅ INTEGRATED: Parlay type selector data
@@ -965,113 +992,205 @@ const AnalyticsScreen = () => {
   ];
 
   // ✅ UPDATED: handleGeneratePredictions now filters selections based on customQuery
-  const handleGeneratePredictions = async () => {
-    if (!customQuery.trim()) {
-      alert('Please enter a prediction query');
+const handleGeneratePredictions = async () => {
+  if (!customQuery.trim()) {
+    alert('Please enter a prediction query');
+    return;
+  }
+
+  setGeneratingPredictions(true);
+  setShowSimulationModal(true);
+
+  try {
+    const timestamp = Date.now();
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 
+                    (import.meta.env.DEV ? 'https://python-api-fresh-production.up.railway.app' : '');
+    const endpoint = `${baseUrl}/api/prizepicks/selections?sport=${selectedSport.toLowerCase()}&_t=${timestamp}`;
+    
+    if (import.meta.env.DEV) {
+      console.log('🚀 [handleGeneratePredictions] Calling endpoint:', endpoint);
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+
+    const data = await response.json();
+    if (import.meta.env.DEV) {
+      console.log('📦 [handleGeneratePredictions] API response:', data);
+    }
+
+    // Handle different possible response structures
+    let selections = [];
+    if (data.selections && Array.isArray(data.selections)) {
+      selections = data.selections;
+    } else if (data.props && Array.isArray(data.props)) {
+      selections = data.props;
+    } else if (data.data && Array.isArray(data.data)) {
+      selections = data.data;
+    } else if (Array.isArray(data)) {
+      selections = data;
+    } else {
+      // Fallback to existing analytics data if available
+      if (sportData.rawAnalytics && sportData.rawAnalytics.length > 0) {
+        selections = sportData.rawAnalytics;
+        if (import.meta.env.DEV) {
+          console.log('⚠️ Using fallback analytics data');
+        }
+      }
+    }
+
+    // If we still have no selections, show a message
+    if (selections.length === 0) {
+      setPredictionResults({
+        success: true,
+        analysis: `❌ No player prop data available from the API.\n\nPlease try a different query or check back later.`,
+        model: 'system',
+        timestamp: new Date().toISOString(),
+        source: 'No Data'
+      });
+      setTimeout(() => setGeneratingPredictions(false), 1500);
       return;
     }
 
-    setGeneratingPredictions(true);
-    setShowSimulationModal(true);
-
-    try {
-      const timestamp = Date.now();
-      // Use relative path if you set up proxy, otherwise full URL (ensure CORS is handled)
-      const endpoint = `/api/prizepicks/selections?sport=${selectedSport.toLowerCase()}&_t=${timestamp}`;
-      if (import.meta.env.DEV) {
-        console.log('🚀 [handleGeneratePredictions] Calling endpoint:', endpoint);
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
-
-      const data = await response.json();
-      const selections = data.selections || [];
-
-      // Filter selections based on the custom query (case‑insensitive search in player, stat, game)
-      const query = customQuery.toLowerCase();
-      const filteredSelections = selections.filter((sel: any) => {
-        const searchable = [
-          sel.player,
-          sel.stat,
-          sel.stat_type,
-          sel.game,
-          sel.analysis
-        ].filter(Boolean).map(s => String(s).toLowerCase());
-        return searchable.some(field => field.includes(query));
-      });
-
-      // If no matches, use the full list but add a note
-      const picksToAnalyze = filteredSelections.length > 0 ? filteredSelections : selections;
-      const note = filteredSelections.length === 0 ? '⚠️ No picks directly matching your query – showing all available picks.' : '';
-
-      // Classify confidence based on numeric score (if present) or fallback to string comparison
-      const highConfidence = picksToAnalyze.filter((sel: any) => {
-        const score = typeof sel.confidence === 'number' ? sel.confidence : parseFloat(sel.confidence);
-        if (!isNaN(score)) return score >= 70;
-        return String(sel.confidence).toLowerCase() === 'high';
-      });
-
-      const mediumConfidence = picksToAnalyze.filter((sel: any) => {
-        if (highConfidence.includes(sel)) return false;
-        const score = typeof sel.confidence === 'number' ? sel.confidence : parseFloat(sel.confidence);
-        if (!isNaN(score)) return score >= 40 && score < 70;
-        return String(sel.confidence).toLowerCase() === 'medium';
-      });
-
-      const topPicks = [...highConfidence, ...mediumConfidence].slice(0, 5);
-
-      const formattedResults = {
-        success: true,
-        analysis: `🎯 **AI Prediction Results**\n\nBased on ${picksToAnalyze.length} player prop analyses for "${customQuery}":\n\n` +
-          (note ? `${note}\n\n` : '') +
-          `📊 **Confidence Breakdown:**\n` +
-          `   • High Confidence: ${highConfidence.length} picks\n` +
-          `   • Medium Confidence: ${mediumConfidence.length} picks\n\n` +
-          `🔥 **Top Picks for ${selectedSport}:**\n\n` +
-          (topPicks.map((pick: any, idx: number) => 
-            `**${idx + 1}. ${pick.player}**\n` +
-            `   📈 **Stat:** ${pick.stat || 'N/A'}\n` +
-            `   🎯 **Line:** ${pick.line || 'N/A'} ${pick.type || ''}\n` +
-            `   🔮 **Projection:** ${pick.projection || 'N/A'}\n` +
-            `   💎 **Confidence:** ${pick.confidence || 'medium'}\n` +
-            `   💰 **Odds:** ${pick.odds || 'N/A'}\n` +
-            `   🏆 **Bookmaker:** ${pick.bookmaker || 'N/A'}\n` +
-            `   📝 **Analysis:** ${pick.analysis || 'No analysis available'}`
-          ).join('\n\n') || '❌ No picks available'),
-        model: 'prizepicks-ai',
-        timestamp: new Date().toISOString(),
-        source: 'The Odds API via PrizePicks',
-        rawData: {
-          totalSelections: picksToAnalyze.length,
-          highConfidence: highConfidence.length,
-          mediumConfidence: mediumConfidence.length,
-          queryMatched: filteredSelections.length > 0
-        }
-      };
-
-      setPredictionResults(formattedResults);
-      setTimeout(() => setGeneratingPredictions(false), 1500);
-
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.error('❌ Error generating predictions:', error);
-      }
-      // Fallback – still include the query in the message
-      setPredictionResults({
-        success: true,
-        analysis: `Based on current ${selectedSport} data trends for "${customQuery}":\n\n• ${customQuery}\n\nAI Prediction: Strong home team advantage expected with a 68% probability of covering the spread. Key players to watch show consistent performance trends.`,
-        model: 'deepseek-chat',
-        timestamp: new Date().toISOString(),
-        source: 'AI Analysis (Fallback)'
-      });
-      setTimeout(() => setGeneratingPredictions(false), 1500);
+    // Log the first selection to see its structure (debug)
+    if (import.meta.env.DEV) {
+      console.log('📊 First selection keys:', Object.keys(selections[0]));
+      console.log('📊 First selection sample:', selections[0]);
     }
-  };
+
+    // Filter selections based on the custom query (case‑insensitive search)
+    const query = customQuery.toLowerCase();
+    const filteredSelections = selections.filter((sel: any) => {
+      const searchable = [
+        sel.player,
+        sel.name,
+        sel.stat,
+        sel.stat_type,
+        sel.metric,
+        sel.game,
+        sel.analysis,
+        sel.description,
+        sel.title
+      ].filter(Boolean).map(s => String(s).toLowerCase());
+      return searchable.some(field => field.includes(query));
+    });
+
+    const picksToAnalyze = filteredSelections.length > 0 ? filteredSelections : selections;
+    const note = filteredSelections.length === 0 && selections.length > 0
+      ? '⚠️ No picks directly matching your query – showing all available picks.'
+      : '';
+
+    // Classify confidence based on available fields
+    const highConfidence = picksToAnalyze.filter((sel: any) => {
+      const score = typeof sel.confidence === 'number' ? sel.confidence : parseFloat(sel.confidence);
+      if (!isNaN(score)) return score >= 70;
+      const confStr = String(sel.confidence || '').toLowerCase();
+      if (confStr === 'high') return true;
+      if (sel.edge && parseFloat(sel.edge) > 10) return true;
+      return false;
+    });
+
+    const mediumConfidence = picksToAnalyze.filter((sel: any) => {
+      if (highConfidence.includes(sel)) return false;
+      const score = typeof sel.confidence === 'number' ? sel.confidence : parseFloat(sel.confidence);
+      if (!isNaN(score)) return score >= 40 && score < 70;
+      const confStr = String(sel.confidence || '').toLowerCase();
+      if (confStr === 'medium') return true;
+      if (sel.edge && parseFloat(sel.edge) > 5) return true;
+      return false;
+    });
+
+    const unknownConfidence = picksToAnalyze.filter(sel => 
+      !highConfidence.includes(sel) && !mediumConfidence.includes(sel)
+    );
+
+    // Debug logs
+    if (import.meta.env.DEV) {
+      console.log('🔍 picksToAnalyze length:', picksToAnalyze.length);
+      console.log('🔍 highConfidence length:', highConfidence.length);
+      console.log('🔍 mediumConfidence length:', mediumConfidence.length);
+      console.log('🔍 unknownConfidence length:', unknownConfidence.length);
+    }
+
+    // Combine all picks and shuffle to show variety
+    const allPicks = [...highConfidence, ...mediumConfidence, ...unknownConfidence];
+    const shuffled = [...allPicks].sort(() => 0.5 - Math.random()); // Simple random shuffle
+    const topPicks = shuffled.slice(0, 10); // Show top 10
+
+    const formattedResults = {
+      success: true,
+      analysis: `🎯 **AI Prediction Results**\n\nBased on ${picksToAnalyze.length} player prop analyses for "${customQuery}":\n\n` +
+        (note ? `${note}\n\n` : '') +
+        `📊 **Confidence Breakdown:**\n` +
+        `   • High Confidence: ${highConfidence.length} picks\n` +
+        `   • Medium Confidence: ${mediumConfidence.length} picks\n` +
+        `   • Unknown Confidence: ${unknownConfidence.length} picks\n\n` +
+        `🔥 **Top 10 Picks for ${selectedSport} (randomized for variety):**\n\n` +
+        (topPicks.length > 0 
+          ? topPicks.map((pick: any, idx: number) => {
+              const player = pick.player || pick.name || 'Unknown Player';
+              const stat = pick.stat || pick.stat_type || pick.metric || 'Stat';
+              const line = pick.line || 'N/A';
+              const type = pick.type || pick.value_side || '';
+              const projection = pick.projection || pick.projected_value || 'N/A';
+              const confidence = pick.confidence || (pick.edge ? (pick.edge > 10 ? 'high' : 'medium') : 'unknown');
+              const odds = pick.odds || pick.market_odds || 'N/A';
+              const bookmaker = pick.bookmaker || pick.source || 'N/A';
+              const analysis = pick.analysis || pick.description || 'No analysis available';
+              const game = pick.game || analysis.split(' in ')[1] || 'Game info';
+              return `**${idx + 1}. ${player}**\n` +
+                `   📈 **Stat:** ${stat}\n` +
+                `   🎯 **Line:** ${line} ${type}\n` +
+                `   🔮 **Projection:** ${projection}\n` +
+                `   💎 **Confidence:** ${confidence}\n` +
+                `   💰 **Odds:** ${odds}\n` +
+                `   🏆 **Bookmaker:** ${bookmaker}\n` +
+                `   🏀 **Game:** ${game}\n` +
+                `   📝 **Analysis:** ${analysis}`;
+            }).join('\n\n')
+          : '❌ No picks available'),
+      model: 'prizepicks-ai',
+      timestamp: new Date().toISOString(),
+      source: selections.length > 0 ? 'The Odds API via PrizePicks' : 'Fallback Analytics Data',
+      rawData: {
+        totalSelections: picksToAnalyze.length,
+        highConfidence: highConfidence.length,
+        mediumConfidence: mediumConfidence.length,
+        unknownConfidence: unknownConfidence.length,
+        queryMatched: filteredSelections.length > 0
+      }
+    };
+
+    setPredictionResults(formattedResults);
+    setTimeout(() => setGeneratingPredictions(false), 1500);
+
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.error('❌ Error generating predictions:', error);
+    }
+    // Fallback – use existing analytics data if available
+    let fallbackSelections = sportData.rawAnalytics || [];
+    const fallbackAnalysis = fallbackSelections.length > 0
+      ? `Based on current ${selectedSport} analytics data (${fallbackSelections.length} props):\n\n` +
+        fallbackSelections.slice(0, 5).map((sel: any, i: number) => 
+          `• ${sel.player || 'Player'}: ${sel.stat || 'Stat'} ${sel.line || ''} (${sel.confidence || 'medium'})`
+        ).join('\n')
+      : `Based on current ${selectedSport} data trends for "${customQuery}":\n\n• ${customQuery}\n\nAI Prediction: Strong home team advantage expected with a 68% probability of covering the spread. Key players to watch show consistent performance trends.`;
+
+    setPredictionResults({
+      success: true,
+      analysis: fallbackAnalysis,
+      model: 'deepseek-chat',
+      timestamp: new Date().toISOString(),
+      source: 'AI Analysis (Fallback)'
+    });
+    setTimeout(() => setGeneratingPredictions(false), 1500);
+  }
+};
 
   const handleSearchSubmit = () => {
     if (searchInput.trim()) {
@@ -1118,6 +1237,72 @@ const AnalyticsScreen = () => {
   // ============================================
   // RENDER FUNCTIONS
   // ============================================
+
+  // NEW: Value Picks Panel with filters
+  const ValuePicksPanel = () => {
+    const filteredData = getFilteredValuePicks();
+
+    return (
+      <Paper sx={{ p: 4, mb: 4 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <LocalOfferIcon sx={{ mr: 2, color: 'primary.main' }} />
+          <Typography variant="h5">🔍 Advanced Value Filter</Typography>
+        </Box>
+
+        {/* Filter Controls */}
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          <Grid item xs={12} md={4}>
+            <Typography gutterBottom>Minimum Edge (%)</Typography>
+            <Slider
+              value={edgeMin}
+              onChange={(_, val) => setEdgeMin(val as number)}
+              min={0}
+              max={30}
+              step={1}
+              valueLabelDisplay="auto"
+            />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Confidence</InputLabel>
+              <Select
+                value={confidenceFilter}
+                label="Confidence"
+                onChange={(e) => setConfidenceFilter(e.target.value)}
+              >
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="high">High</MenuItem>
+                <MenuItem value="medium">Medium</MenuItem>
+                <MenuItem value="low">Low</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Side</InputLabel>
+              <Select
+                value={sideFilter}
+                label="Side"
+                onChange={(e) => setSideFilter(e.target.value)}
+              >
+                <MenuItem value="all">All</MenuItem>
+                <MenuItem value="over">Over</MenuItem>
+                <MenuItem value="under">Under</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+
+        {/* Results count */}
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Showing {filteredData.length} of {sportData.rawAnalytics?.length || 0} value picks
+        </Typography>
+
+        {/* The existing MetricsDashboard */}
+        <MetricsDashboard data={filteredData} />
+      </Paper>
+    );
+  };
 
   // Parlay render functions
   const renderParlayTypeSelector = () => {
@@ -2395,12 +2580,14 @@ const AnalyticsScreen = () => {
             {renderPrompts()}
           </>
         );
+      case 'value':
+        return <ValuePicksPanel />;
       case 'advanced':
         return (
           <>
             {renderAdvancedMetrics()}
-            {playerTrends && Array.isArray(playerTrends) && playerTrends.length > 0 && (
-              <PlayerTrendsChart trends={playerTrends} />
+            {sportData.playerTrendsData && Array.isArray(sportData.playerTrendsData) && sportData.playerTrendsData.length > 0 && (
+              <PlayerTrendsChart trends={sportData.playerTrendsData} />
             )}
           </>
         );
@@ -2410,8 +2597,8 @@ const AnalyticsScreen = () => {
             {sportData.rawAnalytics && Array.isArray(sportData.rawAnalytics) && (
               <MetricsDashboard data={sportData.rawAnalytics} />
             )}
-            {playerTrends && Array.isArray(playerTrends) && playerTrends.length > 0 && (
-              <PlayerTrendsChart trends={playerTrends} />
+            {sportData.playerTrendsData && Array.isArray(sportData.playerTrendsData) && sportData.playerTrendsData.length > 0 && (
+              <PlayerTrendsChart trends={sportData.playerTrendsData} />
             )}
             <Paper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
               <TimelineIcon sx={{ fontSize: 64, color: 'primary.main', mb: 3 }} />
@@ -2430,8 +2617,8 @@ const AnalyticsScreen = () => {
       case 'players':
         return (
           <>
-            {playerTrends && Array.isArray(playerTrends) && playerTrends.length > 0 ? (
-              <PlayerTrendsChart trends={playerTrends} />
+            {sportData.playerTrendsData && Array.isArray(sportData.playerTrendsData) && sportData.playerTrendsData.length > 0 ? (
+              <PlayerTrendsChart trends={sportData.playerTrendsData} />
             ) : (
               <Paper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
                 <PersonIcon sx={{ fontSize: 64, color: 'primary.main', mb: 3 }} />

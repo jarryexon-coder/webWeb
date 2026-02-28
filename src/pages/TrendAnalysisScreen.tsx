@@ -262,9 +262,9 @@ const TrendAnalysisScreen: React.FC = () => {
       console.log('First trend item:', apiTrends[0]);
       console.log('Keys of first item:', Object.keys(apiTrends[0]));
 
-      // Map each trend item to our internal format
+      // Map each trend item to our internal format with safe fallbacks
       const allTrends: TrendMetric[] = apiTrends.map((item: any) => {
-        // Extract numeric values
+        // Extract numeric values safely
         const current = typeof item.average === 'number' ? item.average : parseFloat(item.average) || 0;
         const previous = typeof item.last_5_average === 'number' ? item.last_5_average : parseFloat(item.last_5_average) || current;
         let change = 0;
@@ -279,10 +279,12 @@ const TrendAnalysisScreen: React.FC = () => {
         // Create simple time series from last_5_games if available
         let data: TrendDataPoint[] | undefined;
         if (item.last_5_games && Array.isArray(item.last_5_games)) {
-          data = item.last_5_games.map((val: number, idx: number) => ({
-            date: `Game ${idx + 1}`,
-            value: val,
-          }));
+          data = item.last_5_games
+            .filter((val: any) => typeof val === 'number') // ensure numbers
+            .map((val: number, idx: number) => ({
+              date: `Game ${idx + 1}`,
+              value: val,
+            }));
         }
 
         return {
@@ -293,7 +295,7 @@ const TrendAnalysisScreen: React.FC = () => {
           change,
           trend,
           sport: item.sport?.toUpperCase() || selectedSport.toUpperCase(),
-          data,
+          data: data && data.length > 0 ? data : undefined, // only include if non-empty
         };
       });
 
@@ -385,12 +387,16 @@ const TrendAnalysisScreen: React.FC = () => {
     }
 
     const dataLength = firstWithData.data.length;
+    // Build combined dataset ensuring each point exists
     const combinedData = Array.from({ length: dataLength }, (_, index) => {
-      const point: any = { date: firstWithData.data[index].date };
+      const point: any = {
+        date: firstWithData.data[index]?.date || `Game ${index + 1}`
+      };
       metrics.forEach(m => {
-        if (m.data && Array.isArray(m.data) && m.data[index]) {
+        if (m.data && Array.isArray(m.data) && m.data[index] && typeof m.data[index].value === 'number') {
           point[m.title] = m.data[index].value;
         } else {
+          // Use a safe default to keep chart from breaking
           point[m.title] = 0;
         }
       });

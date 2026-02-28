@@ -136,8 +136,6 @@ export const navigationGroups: NavGroup[] = [
   {
     title: 'Predictions',
     items: [
-      { label: 'Prediction Markets', path: '/prediction-markets', element: PredictionMarketsScreen },
-      { label: 'Prediction Detail', path: '/prediction/:id', element: PredictionDetailScreen },
       { label: 'Kalshi Predictions', path: '/kalshi-predictions', element: KalshiPredictionsScreen },
       { label: 'Predictions Outcome', path: '/predictions-outcome', element: PredictionsOutcomeScreen },
     ],

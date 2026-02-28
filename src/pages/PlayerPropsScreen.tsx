@@ -67,9 +67,10 @@ interface PlayerProp {
 }
 
 // ----------------------------------------------------------------------
-// Helper Components
+// Helper Components (with defensive checks)
 // ----------------------------------------------------------------------
-const OddsDisplay = ({ odds }: { odds: number }) => {
+const OddsDisplay = ({ odds }: { odds?: number }) => {
+  if (odds === undefined || odds === null) return <Chip label="N/A" size="small" variant="outlined" sx={{ color: '#aaa', borderColor: '#555' }} />;
   const formatted = odds > 0 ? `+${odds}` : `${odds}`;
   const isFavorite = odds < 0;
   return (
@@ -83,7 +84,8 @@ const OddsDisplay = ({ odds }: { odds: number }) => {
   );
 };
 
-const ConfidenceIndicator = ({ value }: { value: number }) => {
+const ConfidenceIndicator = ({ value }: { value?: number }) => {
+  if (value === undefined || value === null) return null;
   let color: 'success' | 'warning' | 'error' = 'success';
   if (value < 60) color = 'error';
   else if (value < 75) color = 'warning';
@@ -110,7 +112,8 @@ const ConfidenceIndicator = ({ value }: { value: number }) => {
   );
 };
 
-const SportIcon = ({ sport }: { sport: string }) => {
+const SportIcon = ({ sport }: { sport?: string }) => {
+  if (!sport) return null;
   switch (sport.toUpperCase()) {
     case 'NBA': return <BasketballIcon fontSize="small" sx={{ color: '#fff' }} />;
     case 'NFL': return <FootballIcon fontSize="small" sx={{ color: '#fff' }} />;
@@ -131,7 +134,7 @@ const PlayerPropsScreen: React.FC = () => {
   const [sortBy, setSortBy] = useState<string>('confidence');
 
   const {
-    data: props = [],
+    data,
     isLoading,
     error,
     refetch,
@@ -144,48 +147,59 @@ const PlayerPropsScreen: React.FC = () => {
     retry: 1,
   });
 
-  const safeProps = Array.isArray(props) ? props : [];
+  // FIX: data is the array itself, not an object with a props property
+  const props = data || [];
+
+  // Debug logs (you can remove these later)
+  console.log('🔍 props array:', props);
+  console.log('🔍 props length:', props.length);
 
   const filteredProps = useMemo(() => {
-    let filtered = [...safeProps];
+    let filtered = [...props];
     if (searchQuery) {
       filtered = filtered.filter((p) =>
-        p.player.toLowerCase().includes(searchQuery.toLowerCase())
+        p.player?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
     if (confidenceThreshold > 0) {
-      filtered = filtered.filter((p) => p.confidence >= confidenceThreshold);
+      filtered = filtered.filter((p) => (p.confidence || 0) >= confidenceThreshold);
     }
     filtered.sort((a, b) => {
       switch (sortBy) {
-        case 'confidence': return b.confidence - a.confidence;
-        case 'over_odds': return b.over_odds - a.over_odds;
-        case 'line': return b.line - a.line;
+        case 'confidence': return (b.confidence || 0) - (a.confidence || 0);
+        case 'over_odds': return (b.over_odds || 0) - (a.over_odds || 0);
+        case 'line': return (b.line || 0) - (a.line || 0);
         default: return 0;
       }
     });
     return filtered;
-  }, [safeProps, searchQuery, confidenceThreshold, sortBy]);
+  }, [props, searchQuery, confidenceThreshold, sortBy]);
 
   const analytics = useMemo(() => {
-    if (safeProps.length === 0) return null;
-    const totalProps = safeProps.length;
-    const avgConfidence = safeProps.reduce((acc, p) => acc + p.confidence, 0) / totalProps;
-    const topPlayer = [...safeProps].sort((a, b) => b.confidence - a.confidence)[0];
-    const marketCounts = safeProps.reduce<Record<string, number>>((acc, p) => {
-      acc[p.market] = (acc[p.market] || 0) + 1;
+    if (props.length === 0) return null;
+    const totalProps = props.length;
+    const avgConfidence = props.reduce((acc, p) => acc + (p.confidence || 0), 0) / totalProps;
+    const topPlayer = [...props].sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+    const marketCounts = props.reduce<Record<string, number>>((acc, p) => {
+      const market = p.market || 'Unknown';
+      acc[market] = (acc[market] || 0) + 1;
       return acc;
     }, {});
     return { totalProps, avgConfidence, topPlayer, marketCounts };
-  }, [safeProps]);
+  }, [props]);
 
   const handleSportChange = (event: SelectChangeEvent) => setSelectedSport(event.target.value);
   const handleSortChange = (event: SelectChangeEvent) => setSortBy(event.target.value);
   const handleConfidenceChange = (_event: Event, value: number | number[]) =>
     setConfidenceThreshold(value as number);
-  const handleRowClick = (propId: string) => {
-    navigate(`/props-details/${propId}`);
+
+  // ===== FIXED: handleRowClick now receives the whole prop and passes it in state =====
+  const handleRowClick = (prop: PlayerProp) => {
+    console.log('🚀 Navigating to props-details with prop:', prop);
+    console.log('   prop.id =', prop.id);
+    navigate(`/props-details/${prop.id}`, { state: { prop } });
   };
+  // ===============================================================================
 
   if (isLoading) {
     return (
@@ -293,10 +307,10 @@ const PlayerPropsScreen: React.FC = () => {
               <CardContent>
                 <Typography sx={{ color: '#aaa' }} gutterBottom>Top Player</Typography>
                 <Typography variant="h6" fontWeight="bold" noWrap sx={{ color: '#fff' }}>
-                  {analytics.topPlayer?.player}
+                  {analytics.topPlayer?.player || 'N/A'}
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#aaa' }}>
-                  {analytics.topPlayer?.market} – {analytics.topPlayer?.line}
+                  {analytics.topPlayer?.market || ''} – {analytics.topPlayer?.line ?? ''}
                 </Typography>
               </CardContent>
             </Card>
@@ -377,8 +391,8 @@ const PlayerPropsScreen: React.FC = () => {
           <Box sx={{ height: 200, width: '100%' }}>
             <BarChart
               dataset={filteredProps.slice(0, 15).map((p) => ({
-                label: p.player.length > 15 ? p.player.substring(0, 12) + '…' : p.player,
-                confidence: p.confidence,
+                label: p.player && p.player.length > 15 ? p.player.substring(0, 12) + '…' : p.player || 'Unknown',
+                confidence: p.confidence || 0,
               }))}
               xAxis={[{ scaleType: 'band', dataKey: 'label', tickLabelStyle: { fill: '#fff' } }]}
               series={[{ dataKey: 'confidence', label: 'Confidence (%)', color: '#3b82f6' }]}
@@ -414,14 +428,15 @@ const PlayerPropsScreen: React.FC = () => {
                 <TableRow
                   key={prop.id}
                   hover
-                  onClick={() => handleRowClick(prop.id)}
+                  // ===== FIXED: pass the whole prop object to handleRowClick =====
+                  onClick={() => handleRowClick(prop)}
                   sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#333' } }}
                 >
                   <TableCell sx={{ color: '#fff', borderBottom: '1px solid #333' }}>
                     <Box display="flex" alignItems="center" gap={1}>
                       <SportIcon sport={prop.sport} />
                       <Typography variant="body2" fontWeight="medium" sx={{ color: '#fff' }}>
-                        {prop.player}
+                        {prop.player || 'Unknown'}
                       </Typography>
                       {prop.is_real_data && (
                         <Tooltip title="Live odds">
@@ -432,14 +447,14 @@ const PlayerPropsScreen: React.FC = () => {
                   </TableCell>
                   <TableCell sx={{ color: '#fff', borderBottom: '1px solid #333' }} align="center">
                     <Typography variant="body2" sx={{ color: '#fff' }}>
-                      {prop.team} {prop.position && `• ${prop.position}`}
+                      {prop.team || '—'} {prop.position && `• ${prop.position}`}
                     </Typography>
                   </TableCell>
                   <TableCell sx={{ color: '#fff', borderBottom: '1px solid #333' }} align="center">
-                    <Chip label={prop.market} size="small" variant="outlined" sx={{ color: '#fff', borderColor: '#555' }} />
+                    <Chip label={prop.market || '—'} size="small" variant="outlined" sx={{ color: '#fff', borderColor: '#555' }} />
                   </TableCell>
                   <TableCell sx={{ color: '#fff', borderBottom: '1px solid #333' }} align="center">
-                    <Typography variant="body2" fontWeight="bold" sx={{ color: '#fff' }}>{prop.line}</Typography>
+                    <Typography variant="body2" fontWeight="bold" sx={{ color: '#fff' }}>{prop.line ?? '—'}</Typography>
                   </TableCell>
                   <TableCell sx={{ color: '#fff', borderBottom: '1px solid #333' }} align="center">
                     <OddsDisplay odds={prop.over_odds} />

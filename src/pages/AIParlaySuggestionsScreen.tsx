@@ -210,22 +210,31 @@ const parlays = useMemo(() => {
   console.log('📦 parlays after transform:', parlays);
 
   // Filter and sort
-  const filteredParlays = useMemo(() => {
-    let filtered = [...parlays];
-    console.log('🔢 Starting filter with', filtered.length, 'parlays');
-    if (confidenceThreshold > 0) {
-      filtered = filtered.filter((p) => p.confidence >= confidenceThreshold);
-      console.log('🎯 After confidence filter:', filtered.length);
-    }
-    filtered.sort((a, b) => {
-      if (sortBy === 'confidence') return b.confidence - a.confidence;
-      if (sortBy === 'edge') return (b.ai_metrics?.edge || 0) - (a.ai_metrics?.edge || 0);
-      if (sortBy === 'legs') return b.legs.length - a.legs.length;
-      return 0;
-    });
-    console.log('📊 After sorting, filteredParlays:', filtered);
-    return filtered;
-  }, [parlays, confidenceThreshold, sortBy]);
+const filteredParlays = useMemo(() => {
+  // Start with all parlays
+  let filtered = [...parlays];
+
+  // 🔍 Keep only real data
+  filtered = filtered.filter(p => p.is_real_data === true);
+
+  // 🏀 Keep only NBA and NHL
+  filtered = filtered.filter(p => p.sport === 'NBA' || p.sport === 'NHL');
+
+  // Apply confidence threshold
+  if (confidenceThreshold > 0) {
+    filtered = filtered.filter(p => p.confidence >= confidenceThreshold);
+  }
+
+  // Sort
+  filtered.sort((a, b) => {
+    if (sortBy === 'confidence') return b.confidence - a.confidence;
+    if (sortBy === 'edge') return (b.ai_metrics?.edge || 0) - (a.ai_metrics?.edge || 0);
+    if (sortBy === 'legs') return b.legs.length - a.legs.length;
+    return 0;
+  });
+
+  return filtered;
+}, [parlays, confidenceThreshold, sortBy]);
 
   // AI summary analytics
   const aiSummary = useMemo(() => {

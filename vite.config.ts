@@ -51,6 +51,18 @@ export default defineConfig(({ mode }) => {
           target: 'https://python-api-fresh-production.up.railway.app',
           changeOrigin: true,
           secure: false,
+          // Do NOT rewrite the path – send /api/... as is
+          configure: (proxy) => {
+            proxy.on('error', (err, req, res) => {
+              console.log('❌ Proxy error:', err);
+            });
+            proxy.on('proxyReq', (proxyReq, req, res) => {
+              console.log('🔄 Proxying:', req.method, req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req, res) => {
+              console.log('✅ Proxy response:', proxyRes.statusCode, req.url);
+            });
+          },
         },
       },
     },

@@ -64,11 +64,37 @@ const ConfidenceChip = styled(Chip)(({ theme, confidence }: { confidence?: numbe
 const PredictionDetailScreen: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getPredictionById, isLoading, error } = usePredictions();
+  const { getPredictionById, isLoading, error, predictions } = usePredictions();
   const { addLeg, currentSlip } = useParlay();
   const [shareTooltip, setShareTooltip] = useState('Copy link');
 
+  // 🔐 Safety check: if id is the literal ":id", show a helpful message
+  if (id === ':id') {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          The prediction ID is missing. Please go back or try a specific ID.
+        </Alert>
+        <Button
+          variant="contained"
+          onClick={() => navigate('/prediction/mock-123')}
+        >
+          View Example Prediction
+        </Button>
+        <Button
+          variant="outlined"
+          onClick={() => navigate('/')}
+          sx={{ ml: 2 }}
+        >
+          Go Home
+        </Button>
+      </Container>
+    );
+  }
+
   const prediction = id ? getPredictionById(id) : undefined;
+  console.log('ID from URL:', id);
+  console.log('All predictions:', predictions);
 
   // Handle share link
   const handleShare = () => {

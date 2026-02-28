@@ -87,7 +87,7 @@ const PlayerTrends: React.FC<PlayerTrendsProps> = ({ sport, onSelectPlayer, allP
       // Fallback: create a minimal player object using trend data
       // Use season avg points as projection, default salary 5000
       onSelectPlayer({
-        id: `trend-${trend.player_id}`,
+        id: `trend-${trend.player_id}-${Date.now()}`,
         name: trend.player_name,
         team: trend.team,
         position: trend.position,
@@ -124,25 +124,30 @@ const PlayerTrends: React.FC<PlayerTrendsProps> = ({ sport, onSelectPlayer, allP
 
   return (
     <Box>
-      {trends.map(trend => (
-        <Card key={trend.player_id} sx={{ mb: 2 }}>
-          <CardContent sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Typography variant="subtitle1">
-                {trend.player_name}
-                {trend.trend === 'hot' && ' 🔥'}
-                {trend.trend === 'cold' && ' ❄️'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {trend.team} • {trend.position} • {trend.difference > 0 ? '+' : ''}{trend.difference} vs season
-              </Typography>
-            </Box>
-            <Button variant="outlined" size="small" onClick={() => handleAdd(trend)}>
-              Add
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+      {trends.map((trend, index) => {
+        // Create a truly unique key by combining multiple identifiers
+        const uniqueKey = `trend-${trend.player_id}-${trend.player_name}-${index}`;
+        
+        return (
+          <Card key={uniqueKey} sx={{ mb: 2 }}>
+            <CardContent sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box>
+                <Typography variant="subtitle1">
+                  {trend.player_name}
+                  {trend.trend === 'hot' && ' 🔥'}
+                  {trend.trend === 'cold' && ' ❄️'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {trend.team} • {trend.position} • {trend.difference > 0 ? '+' : ''}{trend.difference} vs season
+                </Typography>
+              </Box>
+              <Button variant="outlined" size="small" onClick={() => handleAdd(trend)}>
+                Add
+              </Button>
+            </CardContent>
+          </Card>
+        );
+      })}
     </Box>
   );
 };
