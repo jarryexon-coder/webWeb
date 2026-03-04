@@ -1,3 +1,4 @@
+// src/pages/AnalyticsDashboardScreen.tsx
 import React, { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -17,7 +18,8 @@ import {
   useTheme,
   Tab,
   Tabs,
-  Button,
+  Pagination,
+  Stack,
 } from '@mui/material';
 import {
   TrendingUp,
@@ -40,111 +42,21 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 
-// ========== Import the actual hooks ==========
-import { useOddsGames, usePlayerTrends, useAdvancedAnalytics } from '../hooks/useUnifiedAPI';
-import { useParlaySuggestions } from '../hooks/useSportsData';
+const API_BASE = 'https://prizepicks-production.up.railway.app';
 
-// ========== Type Definitions (unchanged) ==========
-interface AnalyticsMetric {
-  id: string;
-  title: string;
-  metric: string;
-  value: number | string | Record<string, any> | any[];
-  change: string;
-  trend: 'up' | 'down' | 'stable' | 'warning';
-  sport: string;
-  sample_size?: number;
-  injured_count?: number;
-  positive_edges?: number;
-  total_analyzed?: number;
-  position_distribution?: Record<string, number>;
-}
+const safeFormat = (date: Date | null | undefined, formatStr: string, fallback: string = ''): string => {
+  if (!date) return fallback;
+  try {
+    return format(date, formatStr);
+  } catch {
+    return fallback;
+  }
+};
 
-interface GameAnalytics {
-  id: string;
-  homeTeam: { name: string; logo: string; color: string };
-  awayTeam: { name: string; logo: string; color: string };
-  homeScore: number;
-  awayScore: number;
-  status: string;
-  sport: string;
-  date: string;
-  time: string;
-  venue: string;
-  odds: { spread: string; total: string };
-  quarter?: string;
-}
-
-interface AnalyticsResponse {
-  success: boolean;
-  games: GameAnalytics[];
-  analytics: AnalyticsMetric[];
-  count: number;
-  timestamp: string;
-  sport: string;
-  is_real_data: boolean;
-  has_data: boolean;
-}
-
-// ========== Mock Data (fallback) – only used when no real data ==========
-const getMockAnalyticsData = (sport: string): AnalyticsResponse => ({
-  success: true,
-  games: [],
-  analytics: [
-    {
-      id: '1',
-      title: 'Total Players',
-      metric: 'players',
-      value: 450,
-      change: '+12%',
-      trend: 'up',
-      sport: sport.toUpperCase(),
-      sample_size: 450,
-    },
-    {
-      id: '2',
-      title: 'Injuries',
-      metric: 'injuries',
-      value: 23,
-      change: '-5%',
-      trend: 'down',
-      sport: sport.toUpperCase(),
-      injured_count: 23,
-    },
-    {
-      id: '3',
-      title: 'Value Bets Found',
-      metric: 'value_bets',
-      value: 18,
-      change: '+3',
-      trend: 'up',
-      sport: sport.toUpperCase(),
-      positive_edges: 18,
-      total_analyzed: 45,
-    },
-    {
-      id: '4',
-      title: 'Avg Edge',
-      metric: 'avg_edge',
-      value: '+4.2%',
-      change: '+0.8%',
-      trend: 'up',
-      sport: sport.toUpperCase(),
-    },
-  ],
-  count: 4,
-  timestamp: new Date().toISOString(),
-  sport,
-  is_real_data: false,
-  has_data: false,
-});
-
-// ========== Sport Config (unchanged) ==========
 const SPORTS = [
   { value: 'nba', label: 'NBA', icon: <SportsBasketball />, color: '#1d428a' },
   { value: 'nfl', label: 'NFL', icon: <SportsFootball />, color: '#013369' },
@@ -160,227 +72,286 @@ const TREND_COLORS = {
   warning: '#ff9800',
 };
 
-// ========== Main Component ==========
+const parseTankDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
+  if (/^\d{8}$/.test(dateStr)) {
+    const y = dateStr.slice(0, 4);
+    const m = dateStr.slice(4, 6);
+    const d = dateStr.slice(6, 8);
+    const dt = new Date(`${y}-${m}-${d}T12:00:00`);
+    return isValid(dt) ? dt : null;
+  }
+  const dt = new Date(dateStr);
+  return isValid(dt) ? dt : null;
+};
+
 const AnalyticsDashboardScreen: React.FC = () => {
   const theme = useTheme();
   const [selectedSport, setSelectedSport] = useState('nba');
-  const [tabValue, setTabValue] = useState(0); // 0 = Overview, 1 = Player Analysis, 2 = Injury Report, 3 = Value Bets
+  const [tabValue, setTabValue] = useState(0);
+  // Pagination state for Player Analysis tab
+  const [playerPage, setPlayerPage] = useState(1);
+  const playersPerPage = 12; // Adjust as needed
 
-  // ========== Use the real data hooks ==========
-  const { data: oddsData, isLoading: oddsLoading, error: oddsError, refetch: refetchOdds } = useOddsGames();
-  const { data: trendsData, isLoading: trendsLoading, error: trendsError, refetch: refetchTrends } = usePlayerTrends();
-  const { data: analyticsDataFromHook, isLoading: analyticsLoading, error: analyticsError, refetch: refetchAnalytics } = useAdvancedAnalytics();
-  const { data: parlayData, loading: parlayLoading, error: parlayError, refetch: refetchParlay } = useParlaySuggestions();
-
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // ========== Transform hook data into AnalyticsResponse ==========
+  // Reset to page 1 when sport changes
   useEffect(() => {
-    const allLoading = oddsLoading || trendsLoading || analyticsLoading || parlayLoading;
-    if (allLoading) {
-      setLoading(true);
-      return;
-    }
+    setPlayerPage(1);
+  }, [selectedSport]);
 
-    const allError = oddsError || trendsError || analyticsError || parlayError;
-    if (allError) {
-      const errorMsg = 
-        (oddsError as any)?.message ||
-        (trendsError as any)?.message ||
-        (analyticsError as any)?.message ||
-        (parlayError as any)?.message ||
-        'Failed to load analytics data';
-      setError(errorMsg);
-      // Fallback to mock
-      setAnalyticsData(getMockAnalyticsData(selectedSport));
-      setLoading(false);
-      return;
-    }
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
 
-    // Build games from oddsData
-    const games: GameAnalytics[] = (oddsData?.games || []).map((game: any) => ({
-      id: game.id || `game-${Math.random()}`,
-      homeTeam: {
-        name: game.home_team || 'Home',
-        logo: game.home_team?.substring(0, 2) || 'H',
-        color: '#1976d2',
-      },
-      awayTeam: {
-        name: game.away_team || 'Away',
-        logo: game.away_team?.substring(0, 2) || 'A',
-        color: '#dc004e',
-      },
-      homeScore: game.home_score || 0,
-      awayScore: game.away_score || 0,
-      status: game.status || 'Scheduled',
-      sport: game.sport || selectedSport,
-      date: game.commence_time || new Date().toISOString(),
-      time: game.commence_time ? new Date(game.commence_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'TBD',
-      venue: game.venue || 'TBD',
-      odds: {
-        spread: game.spread || 'N/A',
-        total: game.total || 'N/A',
-      },
-    }));
+  // ========== Player data from /api/players/master ==========
+  const { data: playersData, isLoading: playersLoading, error: playersError } = useQuery({
+    queryKey: ['players_master', selectedSport],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/players/master?sport=${selectedSport}`);
+      if (!res.ok) throw new Error('Failed to fetch players');
+      const json = await res.json();
+      return json.data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    keepPreviousData: true,
+  });
 
-    // Build analytics metrics from selections and trends
-    const selections = analyticsDataFromHook?.selections || [];
-    const parlays = parlayData?.suggestions || [];
+  // Injuries from Tank01
+  const { data: injuriesRaw, isLoading: injLoading, error: injError } = useQuery({
+    queryKey: ['tank01_injuries', selectedSport],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/tank01/injuries?sport=${selectedSport}`);
+      if (!res.ok) throw new Error('Failed to fetch injuries');
+      const json = await res.json();
+      return json.data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    keepPreviousData: true,
+  });
 
-    // Counters
-    const totalPlayers = selections.length + parlays.length;
-    const highConfidenceCount = selections.filter((s: any) => s.confidence === 'high' || s.edge > 10).length;
-    const injuredCount = trendsData?.injuries?.length || 0; // assuming trendsData has injuries
+  // Games from Tank01
+  const { data: gamesData, isLoading: gamesLoading, error: gamesError } = useQuery({
+    queryKey: ['tank01_games', selectedSport, todayStr],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/tank01/games?date=${todayStr}&sport=${selectedSport}`);
+      if (!res.ok) throw new Error('Failed to fetch games');
+      const json = await res.json();
+      return json.data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    keepPreviousData: true,
+  });
 
-    // Position distribution (if available from trends or selections)
-    const positionCounts: Record<string, number> = {};
-    if (trendsData?.players) {
-      trendsData.players.forEach((p: any) => {
-        const pos = p.position || 'Unknown';
-        positionCounts[pos] = (positionCounts[pos] || 0) + 1;
+  // PrizePicks selections (value bets)
+  const { data: propsData, isLoading: propsLoading, error: propsError } = useQuery({
+    queryKey: ['prizepicks_selections', selectedSport],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/api/prizepicks/selections?sport=${selectedSport}`);
+      if (!res.ok) throw new Error('Failed to fetch props');
+      const json = await res.json();
+      return json.selections || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    keepPreviousData: true,
+  });
+
+  const loading = playersLoading || injLoading || gamesLoading || propsLoading;
+  const error = playersError || injError || gamesError || propsError;
+
+  // ========== PROCESS DATA ==========
+
+  // Build a map from player ID to player name for injury lookup
+  const playerNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (Array.isArray(playersData)) {
+      playersData.forEach((p: any) => {
+        if (p.id && p.name) {
+          map.set(p.id, p.name);
+        }
       });
     }
+    return map;
+  }, [playersData]);
 
-    const metrics: AnalyticsMetric[] = [
-      {
-        id: '1',
-        title: 'Total Players',
-        metric: 'players',
-        value: totalPlayers,
-        change: totalPlayers > 400 ? '+5%' : '+2%',
-        trend: totalPlayers > 400 ? 'up' : 'stable',
-        sport: selectedSport.toUpperCase(),
-        sample_size: totalPlayers,
-      },
-      {
-        id: '2',
-        title: 'Injuries',
-        metric: 'injuries',
-        value: injuredCount,
-        change: injuredCount > 20 ? '-3%' : '+1%',
-        trend: injuredCount > 20 ? 'down' : 'warning',
-        sport: selectedSport.toUpperCase(),
-        injured_count: injuredCount,
-      },
-      {
-        id: '3',
-        title: 'Value Bets Found',
-        metric: 'value_bets',
-        value: highConfidenceCount,
-        change: `+${highConfidenceCount}`,
-        trend: highConfidenceCount > 10 ? 'up' : 'stable',
-        sport: selectedSport.toUpperCase(),
-        positive_edges: highConfidenceCount,
-        total_analyzed: selections.length,
-      },
-      {
-        id: '4',
-        title: 'Position Averages',
-        metric: 'position_averages',
-        value: Object.keys(positionCounts).length > 0 ? positionCounts : { PG: 45, SG: 38, SF: 32, PF: 28, C: 25 }, // fallback
-        change: '+0.8%',
-        trend: 'up',
-        sport: selectedSport.toUpperCase(),
-        position_distribution: Object.keys(positionCounts).length > 0 ? positionCounts : { PG: 45, SG: 38, SF: 32, PF: 28, C: 25 },
-      },
-    ];
-
-    const transformed: AnalyticsResponse = {
-      success: true,
-      games,
-      analytics: metrics,
-      count: metrics.length,
-      timestamp: new Date().toISOString(),
-      sport: selectedSport,
-      is_real_data: totalPlayers > 0 || games.length > 0,
-      has_data: totalPlayers > 0 || games.length > 0,
-    };
-
-    setAnalyticsData(transformed);
-    setLoading(false);
-    setError(null);
-
-    // Debug in dev
-    if (import.meta.env.DEV) {
-      console.log('📊 AnalyticsDashboardScreen data built:', transformed);
+  // Player data – all players (no slice)
+  const playerData = useMemo(() => {
+    if (!Array.isArray(playersData)) return [];
+    if (playersData.length > 0) {
+      console.log('🧪 First player from master endpoint:', playersData[0]);
     }
-  }, [
-    oddsData, oddsLoading, oddsError,
-    trendsData, trendsLoading, trendsError,
-    analyticsDataFromHook, analyticsLoading, analyticsError,
-    parlayData, parlayLoading, parlayError,
-    selectedSport
-  ]);
-
-  // ========== Derived Data ==========
-  const metrics = analyticsData?.analytics || [];
-  const games = analyticsData?.games || [];
-
-  // Process position distribution for chart
-  const positionData = useMemo(() => {
-    const posMetric = metrics.find((m) => m.title === 'Position Averages');
-    if (!posMetric?.position_distribution) return [];
-    return Object.entries(posMetric.position_distribution).map(([name, value]) => ({
-      name,
-      value,
+    return playersData.map((p: any) => ({
+      id: p.id,
+      name: p.name || 'Unknown',
+      team: p.team || 'FA',
+      position: p.position || 'N/A',
+      points: p.points || 0,
+      rebounds: p.rebounds || 0,
+      assists: p.assists || 0,
+      fantasy_points: p.fantasy_points || p.projection || 0,
     }));
-  }, [metrics]);
+  }, [playersData]);
 
-  // Process edge analysis for chart (from value bets metric)
-  const edgeData = useMemo(() => {
-    const valueMetric = metrics.find((m) => m.metric === 'value_bets');
-    if (!valueMetric) return [];
-    const positive = valueMetric.positive_edges || 0;
-    const total = valueMetric.total_analyzed || positive;
+  // Injuries – attach player name from map
+  const injuryData = useMemo(() => {
+    if (!Array.isArray(injuriesRaw)) return [];
+    const idCounts = new Map<string, number>();
+    return injuriesRaw.map((inj: any, idx: number) => {
+      const baseId = inj.playerID || `inj-${idx}`;
+      const count = idCounts.get(baseId) || 0;
+      idCounts.set(baseId, count + 1);
+      const uniqueId = count === 0 ? baseId : `${baseId}-${count}`;
+      const reported = parseTankDate(inj.injDate);
+      const ret = parseTankDate(inj.injReturnDate);
+      const playerName = playerNameMap.get(inj.playerID) || `Player ${inj.playerID?.slice(-4) || idx}`;
+      return {
+        id: uniqueId,
+        playerName,
+        team: 'N/A',
+        position: 'N/A',
+        injury: inj.description || 'No details',
+        status: inj.designation || 'Unknown',
+        reportedDate: reported,
+        returnDate: ret,
+        impact: 'Medium',
+      };
+    });
+  }, [injuriesRaw, playerNameMap]);
+
+  // Games
+  const games = useMemo(() => {
+    if (!Array.isArray(gamesData)) return [];
+    return gamesData.map((game: any) => {
+      const gameDateObj = parseTankDate(game.gameDate);
+      const timeStr = safeFormat(gameDateObj, 'hh:mm a', 'TBD');
+      return {
+        id: game.gameID,
+        homeTeam: { name: game.home || 'Home', logo: game.home?.slice(0, 2) || 'H', color: '#1976d2' },
+        awayTeam: { name: game.away || 'Away', logo: game.away?.slice(0, 2) || 'A', color: '#dc004e' },
+        homeScore: game.homeScore || 0,
+        awayScore: game.awayScore || 0,
+        status: game.gameStatus || 'Scheduled',
+        sport: selectedSport,
+        time: timeStr,
+        venue: game.venue || 'TBD',
+      };
+    });
+  }, [gamesData, selectedSport]);
+
+// Inside the useMemo for valueBetData (around line 200)
+const valueBetData = useMemo(() => {
+  if (!Array.isArray(propsData)) return [];
+
+  // First, filter to current sport and map to a consistent format
+  const allProps = propsData
+    .filter((prop: any) => prop.sport?.toLowerCase() === selectedSport)
+    .map((prop: any, idx: number) => {
+      let timestamp = prop.timestamp;
+      if (timestamp) {
+        const d = new Date(timestamp);
+        if (!isValid(d)) timestamp = new Date().toISOString();
+      } else {
+        timestamp = new Date().toISOString();
+      }
+
+      // Parse odds to number for comparison
+      let oddsNumber = 0;
+      if (prop.odds) {
+        const oddsStr = prop.odds.toString().replace('+', '');
+        oddsNumber = parseInt(oddsStr, 10) || 0;
+      }
+
+      return {
+        id: prop.id || `prop-${idx}`,
+        player: prop.player,
+        stat: prop.stat,
+        line: prop.line,
+        game: prop.game || (prop.player ? `${prop.player} prop` : 'Game'),
+        betType: prop.stat ? `${prop.stat} (line: ${prop.line})` : 'Parlay',
+        odds: prop.odds || '-110',
+        oddsNumber, // numeric for comparison
+        edge: prop.edge ? `${prop.edge}%` : '5%',
+        confidence: prop.confidence || 'Medium',
+        projection: prop.projection, // <-- include projection
+        sport: prop.sport,
+        timestamp,
+      };
+    });
+
+  // Deduplicate by player + stat + line, keeping the one with highest oddsNumber
+  const uniqueMap = new Map();
+  allProps.forEach(prop => {
+    const key = `${prop.player}|${prop.stat}|${prop.line}`;
+    const existing = uniqueMap.get(key);
+    if (!existing || prop.oddsNumber > existing.oddsNumber) {
+      uniqueMap.set(key, prop);
+    }
+  });
+
+  return Array.from(uniqueMap.values());
+}, [propsData, selectedSport]);
+
+  // Metrics
+  const metrics = useMemo(() => {
+    const totalPlayers = playerData.length;
+    const injuredCount = injuryData.length;
+    const valueBetsCount = valueBetData.length;
+    const positiveEdges = valueBetData.filter(b => parseFloat(b.edge) > 5).length;
+    const posCounts: Record<string, number> = {};
+    playerData.forEach(p => { posCounts[p.position] = (posCounts[p.position] || 0) + 1; });
     return [
-      { name: 'Positive Edge', value: positive },
-      { name: 'Negative Edge', value: total - positive },
+      {
+        id: '1', title: 'Total Players', metric: 'players', value: totalPlayers,
+        change: totalPlayers > 300 ? '+5%' : '+2%', trend: totalPlayers > 300 ? 'up' : 'stable',
+        sport: selectedSport.toUpperCase(), sample_size: totalPlayers,
+      },
+      {
+        id: '2', title: 'Injuries', metric: 'injuries', value: injuredCount,
+        change: injuredCount > 20 ? '-3%' : '+1%', trend: injuredCount > 20 ? 'down' : 'warning',
+        sport: selectedSport.toUpperCase(), injured_count: injuredCount,
+      },
+      {
+        id: '3', title: 'Value Bets Found', metric: 'value_bets', value: valueBetsCount,
+        change: `+${positiveEdges}`, trend: positiveEdges > 3 ? 'up' : 'stable',
+        sport: selectedSport.toUpperCase(), positive_edges: positiveEdges, total_analyzed: valueBetsCount,
+      },
+      {
+        id: '4', title: 'Position Averages', metric: 'position_averages', value: Object.keys(posCounts).length,
+        change: '+0.8%', trend: 'up', sport: selectedSport.toUpperCase(), position_distribution: posCounts,
+      },
     ];
+  }, [playerData, injuryData, valueBetData, selectedSport]);
+
+  const positionData = useMemo(() => {
+    const posMetric = metrics.find(m => m.metric === 'position_averages');
+    if (!posMetric?.position_distribution) return [];
+    return Object.entries(posMetric.position_distribution).map(([name, value]) => ({ name, value }));
   }, [metrics]);
 
-  // ========== Render Helpers ==========
+  const edgeData = useMemo(() => {
+    const pos = valueBetData.filter(b => parseFloat(b.edge) > 0).length;
+    const neg = valueBetData.length - pos;
+    return [
+      { name: 'Positive Edge', value: pos },
+      { name: 'Negative/No Edge', value: neg },
+    ];
+  }, [valueBetData]);
+
+  // ========== RENDER HELPERS ==========
   const renderTrendIcon = (trend: string) => {
     switch (trend) {
-      case 'up':
-        return <TrendingUp sx={{ color: TREND_COLORS.up }} />;
-      case 'down':
-        return <TrendingDown sx={{ color: TREND_COLORS.down }} />;
-      case 'warning':
-        return <Warning sx={{ color: TREND_COLORS.warning }} />;
-      default:
-        return <TrendingFlat sx={{ color: TREND_COLORS.stable }} />;
+      case 'up': return <TrendingUp sx={{ color: TREND_COLORS.up }} />;
+      case 'down': return <TrendingDown sx={{ color: TREND_COLORS.down }} />;
+      case 'warning': return <Warning sx={{ color: TREND_COLORS.warning }} />;
+      default: return <TrendingFlat sx={{ color: TREND_COLORS.stable }} />;
     }
-  };
-
-  // Helper to safely render a metric value that might be an object or array
-  const renderMetricValue = (metric: AnalyticsMetric) => {
-    const { value, title } = metric;
-
-    if (typeof value !== 'object' || value === null) {
-      return value;
-    }
-
-    if (Array.isArray(value)) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`Metric "${title}" received an array of length ${value.length}:`, value);
-      }
-      return `[${value.length} items]`;
-    }
-
-    // For the Position Averages metric, it's expected to be an object – don't warn
-    if (title === 'Position Averages') {
-      const count = Object.keys(value).length;
-      return `${count} positions`;
-    }
-
-    if (process.env.NODE_ENV === 'development') {
-      console.warn(`Metric "${title}" received an object:`, value);
-    }
-
-    const str = JSON.stringify(value);
-    return str.length > 50 ? str.substring(0, 47) + '...' : str;
   };
 
   const renderMetricCards = () => (
@@ -390,45 +361,21 @@ const AnalyticsDashboardScreen: React.FC = () => {
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-                <Typography color="textSecondary" gutterBottom variant="body2">
-                  {metric.title}
-                </Typography>
-                <Chip
-                  label={metric.sport}
-                  size="small"
-                  icon={SPORTS.find((s) => s.value === metric.sport?.toLowerCase())?.icon}
-                  variant="outlined"
-                />
+                <Typography color="textSecondary" gutterBottom variant="body2">{metric.title}</Typography>
+                <Chip label={metric.sport} size="small" variant="outlined" />
               </Box>
-              <Typography variant="h5" component="div" sx={{ fontWeight: 600, mt: 1 }}>
-                {renderMetricValue(metric)}
-              </Typography>
+              <Typography variant="h5" component="div" sx={{ fontWeight: 600, mt: 1 }}>{metric.value}</Typography>
               <Box display="flex" alignItems="center" mt={1}>
                 {renderTrendIcon(metric.trend)}
-                <Typography
-                  variant="body2"
-                  sx={{
-                    ml: 0.5,
-                    color:
-                      metric.trend === 'up'
-                        ? TREND_COLORS.up
-                        : metric.trend === 'down'
-                        ? TREND_COLORS.down
-                        : 'text.secondary',
-                  }}
-                >
+                <Typography variant="body2" sx={{ ml: 0.5, color: metric.trend === 'up' ? TREND_COLORS.up : metric.trend === 'down' ? TREND_COLORS.down : 'text.secondary' }}>
                   {metric.change}
                 </Typography>
               </Box>
               {metric.sample_size !== undefined && (
-                <Typography variant="caption" color="textSecondary" display="block" mt={1}>
-                  Sample: {metric.sample_size} players
-                </Typography>
+                <Typography variant="caption" color="textSecondary" display="block" mt={1}>Sample: {metric.sample_size} players</Typography>
               )}
               {metric.injured_count !== undefined && (
-                <Typography variant="caption" color="textSecondary" display="block">
-                  Injured: {metric.injured_count}
-                </Typography>
+                <Typography variant="caption" color="textSecondary" display="block">Injured: {metric.injured_count}</Typography>
               )}
             </CardContent>
           </Card>
@@ -442,27 +389,11 @@ const AnalyticsDashboardScreen: React.FC = () => {
     return (
       <Card>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Position Distribution
-          </Typography>
+          <Typography variant="h6" gutterBottom>Position Distribution</Typography>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
-              <Pie
-                data={positionData}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={100}
-                paddingAngle={2}
-                dataKey="value"
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-              >
-                {positionData.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={CHART_COLORS[index % CHART_COLORS.length]}
-                  />
-                ))}
+              <Pie data={positionData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value" label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}>
+                {positionData.map((_, i) => <Cell key={`cell-${i}`} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
               </Pie>
               <Tooltip />
             </PieChart>
@@ -473,26 +404,19 @@ const AnalyticsDashboardScreen: React.FC = () => {
   };
 
   const renderEdgeChart = () => {
-    if (edgeData.length === 0 || edgeData[0].value === 0) return null;
+    if (edgeData[0].value === 0) return null;
     return (
       <Card>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Edge Analysis
-          </Typography>
+          <Typography variant="h6" gutterBottom>Edge Analysis</Typography>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={edgeData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="value" fill="#82ca9d" radius={[4, 4, 0, 0]}>
-                {edgeData.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={entry.name === 'Positive Edge' ? '#4caf50' : '#f44336'}
-                  />
-                ))}
+              <Bar dataKey="value" fill="#82ca9d" radius={[4,4,0,0]}>
+                {edgeData.map((entry, i) => <Cell key={`cell-${i}`} fill={entry.name === 'Positive Edge' ? '#4caf50' : '#f44336'} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -502,88 +426,33 @@ const AnalyticsDashboardScreen: React.FC = () => {
   };
 
   const renderGameCards = () => {
-    if (games.length === 0) {
-      return (
-        <Box py={3}>
-          <Alert severity="info">No games available for {selectedSport.toUpperCase()}.</Alert>
-        </Box>
-      );
-    }
-
+    if (games.length === 0) return <Alert severity="info">No games today for {selectedSport.toUpperCase()}.</Alert>;
     return (
       <Grid container spacing={3}>
-        {games.slice(0, 4).map((game) => (
+        {games.slice(0,4).map((game) => (
           <Grid item xs={12} md={6} lg={3} key={game.id}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Chip
-                    label={game.status}
-                    size="small"
-                    color={game.status === 'Live' ? 'error' : 'default'}
-                  />
-                  <Typography variant="caption" color="textSecondary">
-                    {game.time}
-                  </Typography>
+                  <Chip label={game.status} size="small" color={game.status === 'Live' ? 'error' : 'default'} />
+                  <Typography variant="caption" color="textSecondary">{game.time}</Typography>
                 </Box>
                 <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
                   <Box display="flex" alignItems="center">
-                    <Box
-                      sx={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: '50%',
-                        bgcolor: game.awayTeam?.color ?? '#ccc',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontWeight: 'bold',
-                        fontSize: 14,
-                        mr: 1,
-                      }}
-                    >
-                      {game.awayTeam?.logo ?? '?'}
-                    </Box>
-                    <Typography variant="body2">{game.awayTeam?.name ?? 'Away'}</Typography>
+                    <Box sx={{ width:32, height:32, borderRadius:'50%', bgcolor: game.awayTeam.color, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:'bold', fontSize:14, mr:1 }}>{game.awayTeam.logo}</Box>
+                    <Typography variant="body2">{game.awayTeam.name}</Typography>
                   </Box>
-                  <Typography variant="h6">{game.awayScore ?? 0}</Typography>
+                  <Typography variant="h6">{game.awayScore}</Typography>
                 </Box>
                 <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
                   <Box display="flex" alignItems="center">
-                    <Box
-                      sx={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: '50%',
-                        bgcolor: game.homeTeam?.color ?? '#ccc',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontWeight: 'bold',
-                        fontSize: 14,
-                        mr: 1,
-                      }}
-                    >
-                      {game.homeTeam?.logo ?? '?'}
-                    </Box>
-                    <Typography variant="body2">{game.homeTeam?.name ?? 'Home'}</Typography>
+                    <Box sx={{ width:32, height:32, borderRadius:'50%', bgcolor: game.homeTeam.color, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:'bold', fontSize:14, mr:1 }}>{game.homeTeam.logo}</Box>
+                    <Typography variant="body2">{game.homeTeam.name}</Typography>
                   </Box>
-                  <Typography variant="h6">{game.homeScore ?? 0}</Typography>
+                  <Typography variant="h6">{game.homeScore}</Typography>
                 </Box>
-                <Divider sx={{ my: 2 }} />
-                <Box display="flex" justifyContent="space-between">
-                  <Typography variant="caption" color="textSecondary">
-                    Spread: {game.odds?.spread ?? 'N/A'}
-                  </Typography>
-                  <Typography variant="caption" color="textSecondary">
-                    Total: {game.odds?.total ?? 'N/A'}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" color="textSecondary" display="block" mt={1}>
-                  {game.venue ?? 'Venue TBD'}
-                </Typography>
+                <Divider sx={{ my:2 }} />
+                <Typography variant="caption" color="textSecondary" display="block">{game.venue}</Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -592,64 +461,143 @@ const AnalyticsDashboardScreen: React.FC = () => {
     );
   };
 
-  // ========== Tab-specific data fetching (using the same hooks) ==========
-  // For simplicity, we reuse the same data but filter for the tabs.
-  // In a real scenario, you might want separate queries, but for now we'll derive from the combined data.
+  const renderPlayerAnalysis = () => {
+    if (playerData.length === 0) return <Alert severity="info">No player data available for {selectedSport.toUpperCase()}.</Alert>;
 
-  const playerData = useMemo(() => {
-    // Extract player stats from selections and trends
-    const selections = analyticsDataFromHook?.selections || [];
-    const players: any[] = [];
-    selections.forEach((sel: any, idx: number) => {
-      players.push({
-        id: sel.id || `player-${idx}`,
-        name: sel.player || 'Unknown',
-        team: sel.team || 'FA',
-        position: sel.position || 'G/F',
-        gamesPlayed: sel.games_played || 10,
-        points: sel.projection || 15,
-        rebounds: sel.rebounds || 5,
-        assists: sel.assists || 3,
-        plusMinus: sel.plus_minus || 0,
-        efficiency: sel.efficiency || 12,
-        trend: sel.trend || 'stable',
-      });
-    });
-    return players;
-  }, [analyticsDataFromHook]);
+    // Pagination calculations
+    const totalPages = Math.ceil(playerData.length / playersPerPage);
+    const paginatedPlayers = playerData.slice(
+      (playerPage - 1) * playersPerPage,
+      playerPage * playersPerPage
+    );
 
-  const injuryData = useMemo(() => {
-    // From trendsData injuries
-    const injuries = trendsData?.injuries || [];
-    return injuries.map((inj: any, idx: number) => ({
-      id: inj.id || `injury-${idx}`,
-      playerName: inj.player || 'Player',
-      team: inj.team || 'Unknown',
-      position: inj.position || 'N/A',
-      injury: inj.injury || 'Unknown',
-      status: inj.status || 'Questionable',
-      date: inj.date || new Date().toISOString(),
-      returnDate: inj.return_date || null,
-      impact: inj.impact || 'Medium',
-    }));
-  }, [trendsData]);
+    const handlePageChange = (event: React.ChangeEvent<unknown>, value: number) => {
+      setPlayerPage(value);
+    };
 
-  const valueBetData = useMemo(() => {
-    // From parlayData suggestions or high-confidence selections
-    const parlays = parlayData?.suggestions || [];
-    return parlays.map((bet: any, idx: number) => ({
-      id: bet.id || `bet-${idx}`,
-      game: bet.game || 'Game',
-      betType: bet.type || 'Spread',
-      odds: bet.odds || '-110',
-      edge: bet.edge || '5%',
-      confidence: bet.confidence || 'Medium',
-      sport: bet.sport || selectedSport,
-      timestamp: bet.timestamp || new Date().toISOString(),
-    }));
-  }, [parlayData, selectedSport]);
+    return (
+      <>
+        <Grid container spacing={3}>
+          {paginatedPlayers.map((p) => (
+            <Grid item xs={12} md={6} lg={4} key={p.id}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6">{p.name}</Typography>
+                  <Typography color="textSecondary">{p.team} • {p.position}</Typography>
+                  <Divider sx={{ my:1 }} />
+                  <Grid container spacing={1}>
+                    <Grid item xs={6}><Typography variant="body2">PPG: {p.points.toFixed(1)}</Typography></Grid>
+                    <Grid item xs={6}><Typography variant="body2">RPG: {p.rebounds.toFixed(1)}</Typography></Grid>
+                    <Grid item xs={6}><Typography variant="body2">APG: {p.assists.toFixed(1)}</Typography></Grid>
+                    <Grid item xs={6}><Typography variant="body2">FPG: {p.fantasy_points.toFixed(1)}</Typography></Grid>
+                  </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+        {totalPages > 1 && (
+          <Stack spacing={2} alignItems="center" sx={{ mt: 4 }}>
+            <Pagination
+              count={totalPages}
+              page={playerPage}
+              onChange={handlePageChange}
+              color="primary"
+              size="large"
+              showFirstButton
+              showLastButton
+            />
+          </Stack>
+        )}
+      </>
+    );
+  };
 
-  // ========== Loading / Error ==========
+  const renderInjuryReport = () => {
+    if (injuryData.length === 0) return <Alert severity="info">No injuries reported for {selectedSport.toUpperCase()}.</Alert>;
+    return (
+      <Grid container spacing={3}>
+        {injuryData.map((inj) => (
+          <Grid item xs={12} md={6} lg={4} key={inj.id}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6">{inj.playerName}</Typography>
+                <Chip label={inj.status} size="small" color={inj.status === 'Out' ? 'error' : inj.status === 'Questionable' ? 'warning' : 'success'} />
+                <Typography variant="body2" mt={1}>Injury: {inj.injury}</Typography>
+                <Box mt={1} display="flex" justifyContent="space-between">
+                  <Typography variant="caption">Reported: {safeFormat(inj.reportedDate, 'MMM dd', 'Unknown')}</Typography>
+                  <Typography variant="caption">Return: {safeFormat(inj.returnDate, 'MMM dd', 'Unknown')}</Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+    );
+  };
+
+// Replace the renderValueBets function (around line 360)
+const renderValueBets = () => {
+  if (valueBetData.length === 0) return <Alert severity="info">No value bets found for {selectedSport.toUpperCase()}.</Alert>;
+  return (
+    <Grid container spacing={3}>
+      {valueBetData.map((bet) => {
+        const betDate = new Date(bet.timestamp);
+        const displayDate = safeFormat(betDate, 'MMM dd, HH:mm', 'Unknown');
+        return (
+          <Grid item xs={12} md={6} lg={4} key={bet.id}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6">{bet.game}</Typography>
+                <Box display="flex" justifyContent="space-between" mt={1}>
+                  <Chip label={bet.betType} size="small" />
+                  <Chip label={`Edge: ${bet.edge}`} color="success" size="small" />
+                </Box>
+                {/* NEW: Show projection */}
+                {bet.projection !== undefined && (
+                  <Typography variant="body2" sx={{ mt: 1, fontWeight: 500 }}>
+                    Projection: {bet.projection.toFixed(1)}
+                  </Typography>
+                )}
+                <Box mt={2} display="flex" justifyContent="space-between">
+                  <Typography variant="body2">Odds: {bet.odds}</Typography>
+                  <Chip
+                    label={`Confidence: ${bet.confidence}`}
+                    size="small"
+                    color={bet.confidence === 'High' ? 'success' : bet.confidence === 'Medium' ? 'warning' : 'default'}
+                  />
+                </Box>
+                <Typography variant="caption" color="textSecondary" display="block" mt={2}>
+                  Updated: {displayDate}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        );
+      })}
+    </Grid>
+  );
+};
+
+  const renderTabContent = () => {
+    switch (tabValue) {
+      case 0: return (
+        <>
+          <Box mb={4}><Typography variant="h6" gutterBottom>Key Performance Indicators</Typography>{renderMetricCards()}</Box>
+          <Grid container spacing={3} mb={4}>
+            <Grid item xs={12} md={6}>{renderPositionChart()}</Grid>
+            <Grid item xs={12} md={6}>{renderEdgeChart()}</Grid>
+          </Grid>
+          <Box mb={2}><Typography variant="h6" gutterBottom>Today's Games</Typography>{renderGameCards()}</Box>
+        </>
+      );
+      case 1: return renderPlayerAnalysis();
+      case 2: return renderInjuryReport();
+      case 3: return renderValueBets();
+      default: return null;
+    }
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
@@ -661,232 +609,37 @@ const AnalyticsDashboardScreen: React.FC = () => {
   if (error) {
     return (
       <Box p={3}>
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={() => {
-              refetchOdds?.();
-              refetchTrends?.();
-              refetchAnalytics?.();
-              refetchParlay?.();
-            }}>
-              Retry
-            </Button>
-          }
-        >
-          {error}
-        </Alert>
+        <Alert severity="error">{(error as Error).message}</Alert>
       </Box>
     );
   }
 
-  // ========== Tab Content Render Functions ==========
-  const renderPlayerAnalysis = () => {
-    if (playerData.length === 0) return <Alert severity="info">No player data available for {selectedSport.toUpperCase()}</Alert>;
-
-    return (
-      <Grid container spacing={3}>
-        {playerData.slice(0, 6).map((player) => (
-          <Grid item xs={12} md={6} lg={4} key={player.id}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between">
-                  <Typography variant="h6">{player.name}</Typography>
-                  <Chip label={player.team} size="small" />
-                </Box>
-                <Typography color="textSecondary" gutterBottom>{player.position}</Typography>
-                <Divider sx={{ my: 1 }} />
-                <Grid container spacing={1}>
-                  <Grid item xs={6}><Typography variant="body2">PPG: {player.points}</Typography></Grid>
-                  <Grid item xs={6}><Typography variant="body2">RPG: {player.rebounds}</Typography></Grid>
-                  <Grid item xs={6}><Typography variant="body2">APG: {player.assists}</Typography></Grid>
-                  <Grid item xs={6}><Typography variant="body2">+/-: {player.plusMinus}</Typography></Grid>
-                </Grid>
-                <Box mt={1} display="flex" alignItems="center">
-                  {renderTrendIcon(player.trend)}
-                  <Typography variant="caption" sx={{ ml: 0.5 }}>Efficiency: {player.efficiency}</Typography>
-                </Box>
-                <Typography variant="caption" color="textSecondary" display="block" mt={1}>
-                  Games: {player.gamesPlayed}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-    );
-  };
-
-  const renderInjuryReport = () => {
-    if (injuryData.length === 0) return <Alert severity="info">No injuries reported for {selectedSport.toUpperCase()}</Alert>;
-
-    return (
-      <Grid container spacing={3}>
-        {injuryData.map((injury) => (
-          <Grid item xs={12} md={6} lg={4} key={injury.id}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between">
-                  <Typography variant="h6">{injury.playerName}</Typography>
-                  <Chip
-                    label={injury.status}
-                    color={
-                      injury.status === 'Out' ? 'error' :
-                      injury.status === 'Questionable' ? 'warning' : 'success'
-                    }
-                    size="small"
-                  />
-                </Box>
-                <Typography color="textSecondary">{injury.team} • {injury.position}</Typography>
-                <Typography variant="body2" mt={1}>Injury: {injury.injury}</Typography>
-                <Box mt={1} display="flex" justifyContent="space-between">
-                  <Typography variant="caption">Reported: {format(new Date(injury.date), 'MMM dd')}</Typography>
-                  <Typography variant="caption">
-                    Return: {injury.returnDate ? format(new Date(injury.returnDate), 'MMM dd') : 'Unknown'}
-                  </Typography>
-                </Box>
-                <Chip
-                  label={`Impact: ${injury.impact}`}
-                  size="small"
-                  sx={{ mt: 1 }}
-                  color={injury.impact === 'High' ? 'error' : injury.impact === 'Medium' ? 'warning' : 'default'}
-                />
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-    );
-  };
-
-  const renderValueBets = () => {
-    if (valueBetData.length === 0) return <Alert severity="info">No value bets found for {selectedSport.toUpperCase()}</Alert>;
-
-    return (
-      <Grid container spacing={3}>
-        {valueBetData.map((bet) => (
-          <Grid item xs={12} md={6} lg={4} key={bet.id}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6">{bet.game}</Typography>
-                <Box display="flex" justifyContent="space-between" mt={1}>
-                  <Chip label={bet.betType} size="small" />
-                  <Chip
-                    label={`Edge: ${bet.edge}`}
-                    color="success"
-                    size="small"
-                  />
-                </Box>
-                <Box mt={2} display="flex" justifyContent="space-between">
-                  <Typography variant="body2">Odds: {bet.odds}</Typography>
-                  <Chip
-                    label={`Confidence: ${bet.confidence}`}
-                    size="small"
-                    color={
-                      bet.confidence === 'High' ? 'success' :
-                      bet.confidence === 'Medium' ? 'warning' : 'default'
-                    }
-                  />
-                </Box>
-                <Typography variant="caption" color="textSecondary" display="block" mt={2}>
-                  Updated: {format(new Date(bet.timestamp), 'MMM dd, HH:mm')}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
-    );
-  };
-
-  // ========== Tab Content ==========
-  const renderTabContent = () => {
-    switch (tabValue) {
-      case 0: // Overview
-        return (
-          <>
-            {/* KPI Cards */}
-            <Box mb={4}>
-              <Typography variant="h6" gutterBottom>
-                Key Performance Indicators
-              </Typography>
-              {renderMetricCards()}
-            </Box>
-
-            {/* Charts */}
-            <Grid container spacing={3} mb={4}>
-              <Grid item xs={12} md={6}>
-                {renderPositionChart()}
-              </Grid>
-              <Grid item xs={12} md={6}>
-                {renderEdgeChart()}
-              </Grid>
-            </Grid>
-
-            {/* Live Games */}
-            <Box mb={2}>
-              <Typography variant="h6" gutterBottom>
-                Live & Upcoming Games
-              </Typography>
-              {renderGameCards()}
-            </Box>
-          </>
-        );
-
-      case 1: // Player Analysis
-        return renderPlayerAnalysis();
-
-      case 2: // Injury Report
-        return renderInjuryReport();
-
-      case 3: // Value Bets
-        return renderValueBets();
-
-      default:
-        return null;
-    }
-  };
+  const lastUpdated = new Date();
+  const lastUpdatedDisplay = safeFormat(lastUpdated, 'MMM dd, yyyy HH:mm', 'Unknown');
 
   return (
     <Box p={3} sx={{ bgcolor: theme.palette.background.default, minHeight: '100vh' }}>
-      {/* Header with Sport Selector */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box display="flex" alignItems="center">
           <Assessment sx={{ fontSize: 32, mr: 1, color: theme.palette.primary.main }} />
-          <Typography variant="h4" fontWeight={600}>
-            Analytics Dashboard
-          </Typography>
+          <Typography variant="h4" fontWeight={600}>Analytics Dashboard</Typography>
         </Box>
         <FormControl sx={{ minWidth: 200 }} size="small">
           <InputLabel id="sport-select-label">Sport</InputLabel>
-          <Select
-            labelId="sport-select-label"
-            value={selectedSport}
-            label="Sport"
-            onChange={(e) => setSelectedSport(e.target.value)}
-          >
+          <Select labelId="sport-select-label" value={selectedSport} label="Sport" onChange={(e) => setSelectedSport(e.target.value)}>
             {SPORTS.map((sport) => (
               <MenuItem key={sport.value} value={sport.value}>
-                <Box display="flex" alignItems="center">
-                  {sport.icon}
-                  <Typography sx={{ ml: 1 }}>{sport.label}</Typography>
-                </Box>
+                <Box display="flex" alignItems="center">{sport.icon}<Typography sx={{ ml: 1 }}>{sport.label}</Typography></Box>
               </MenuItem>
             ))}
           </Select>
         </FormControl>
       </Box>
 
-      {/* Data Source Status */}
       <Box mb={3}>
-        <Alert severity={analyticsData?.is_real_data ? 'success' : 'info'}>
-          {analyticsData?.is_real_data
-            ? '✅ Using real-time analytics data'
-            : '⚠️ Using simulated data (live API unavailable)'}
-        </Alert>
+        <Alert severity="success">✅ Using /api/players/master with real per‑game averages</Alert>
       </Box>
 
-      {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3, bgcolor: theme.palette.background.paper }}>
         <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
           <Tab label="Overview" />
@@ -896,16 +649,11 @@ const AnalyticsDashboardScreen: React.FC = () => {
         </Tabs>
       </Box>
 
-      {/* Tab Content */}
       {renderTabContent()}
 
-      {/* Data Timestamp */}
       <Box mt={4} display="flex" justifyContent="flex-end">
         <Typography variant="caption" color="textSecondary">
-          Last updated:{' '}
-          {analyticsData?.timestamp
-            ? format(new Date(analyticsData.timestamp), 'MMM dd, yyyy HH:mm')
-            : 'N/A'}
+          Last updated: {lastUpdatedDisplay}
         </Typography>
       </Box>
     </Box>

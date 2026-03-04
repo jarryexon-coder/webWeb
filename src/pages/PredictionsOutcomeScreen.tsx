@@ -1,5 +1,7 @@
-// src/pages/PredictionsOutcomeScreen.tsx - FINAL MERGED VERSION
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// src/pages/PredictionsOutcomeScreen.tsx
+// Final version with debounce, memoized outcomes, and improved scoring
+
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -94,22 +96,13 @@ import { useDebounce } from '../utils/useDebounce';
 import { preprocessQuery, QueryIntent } from '../utils/queryProcessor';
 import { logPromptPerformance } from '../utils/analytics';
 
-// ========== ENVIRONMENT VARIABLE SAFE ACCESS ==========
-const getApiBase = (): string => {
-  if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_BASE) {
-    return process.env.REACT_APP_API_BASE;
-  }
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
-  return 'https://python-api-fresh-production.up.railway.app';
-};
-const API_BASE = getApiBase();
+// ========== NODE API BASE ==========
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
 
-// ========== FEBRUARY 2026 SEASON CONTEXT ==========
+// ========== SEASON CONTEXT ==========
 const CURRENT_SEASON = '2025-26';
 const CURRENT_YEAR = '2026';
-const AS_OF_DATE = format(new Date(), 'MMMM d, yyyy'); // dynamic
+const AS_OF_DATE = format(new Date(), 'MMMM d, yyyy');
 
 // ========== CACHE IMPLEMENTATION ==========
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -153,7 +146,7 @@ const clearCache = (sport?: string): void => {
   }
 };
 
-// ========== REALISTIC MOCK DATA GENERATOR (FALLBACK) ==========
+// ========== MOCK DATA GENERATOR (FALLBACK) ==========
 const generateMockOutcomes = (sport: string, count: number = 20) => {
   const playersBySport: Record<string, string[]> = {
     nba: ['LeBron James', 'Stephen Curry', 'Jayson Tatum', 'Giannis Antetokounmpo', 'Luka Doncic', 'Nikola Jokic', 'Joel Embiid', 'Shai Gilgeous-Alexander'],
@@ -229,7 +222,7 @@ const generateMockOutcomes = (sport: string, count: number = 20) => {
       stat_type: stat,
       line,
       actual_value: actual,
-      projection: line + 0.2, // slight variation for projection
+      projection: line + 0.2,
       edge: randomOutcome === 'correct' ? `+${(Math.random() * 15 + 5).toFixed(1)}` : randomOutcome === 'incorrect' ? `-${(Math.random() * 10 + 2).toFixed(1)}` : '0',
       units: randomOutcome === 'correct' ? `+${(Math.random() * 2 + 0.5).toFixed(1)}` : randomOutcome === 'incorrect' ? `-${(Math.random() + 0.5).toFixed(1)}` : '0',
       season: CURRENT_SEASON,
@@ -249,7 +242,7 @@ const leagueData = [
   { id: 'world cup', name: 'WORLD CUP', icon: <TrophyIcon />, color: '#8b5cf6' }
 ];
 
-// ========== CUSTOM HOOK WITH IMPROVED RESPONSE HANDLING ==========
+// ========== CUSTOM HOOK ==========
 interface UsePredictionDataReturn {
   data: any;
   isLoading: boolean;
@@ -288,160 +281,53 @@ const usePredictionData = (sport: string, seasonPhase: string, marketType: strin
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Helper to extract numbers from strings like "Accurate projection (783.2 vs 783.2)"
-  const extractNumbers = (str: string): { actual: number; line: number } | null => {
-    const match = str.match(/(\d+\.?\d*)\s*vs\s*(\d+\.?\d*)/);
-    if (match) {
-      return { actual: parseFloat(match[1]), line: parseFloat(match[2]) };
+  const transformSelection = (sel: any, index: number) => {
+    const outcome = 'pending';
+    const actualResult = 'Pending';
+
+    let edgeDisplay = sel.edge || '+0%';
+    if (typeof edgeDisplay === 'number') {
+      edgeDisplay = edgeDisplay > 0 ? `+${edgeDisplay}` : `${edgeDisplay}`;
     }
-    return null;
+
+    return {
+      id: sel.id || `prop-${sport}-${index}-${Date.now()}`,
+      game: sel.game || `${sel.away_team || ''} @ ${sel.home_team || ''}`.trim() || 'Game TBD',
+      player: sel.player || 'Unknown',
+      prediction: `${sel.player || ''} ${sel.stat || ''} ${sel.line || ''}`.trim(),
+      prop: sel.prop || `${sel.stat || ''} ${sel.line || ''}`,
+      outcome,
+      actual_result: actualResult,
+      confidence_pre_game: sel.confidence === 'high' ? 85 : sel.confidence === 'medium' ? 70 : 55,
+      accuracy: null,
+      timestamp: sel.timestamp || new Date().toISOString(),
+      sport: sel.sport?.toLowerCase() || sport,
+      source: sel.source || 'The Odds API',
+      key_factors: sel.analysis ? [sel.analysis] : ['No analysis available'],
+      stat_type: sel.stat || 'Stat',
+      line: sel.line || 0,
+      actual_value: null,
+      projection: sel.projection || sel.line || 0,
+      edge: edgeDisplay,
+      units: '0',
+      market_type: marketType,
+      season_phase: seasonPhase,
+      season: CURRENT_SEASON,
+      asOf: AS_OF_DATE,
+      team: sel.team || '',
+      date: format(new Date(), 'MMM d, yyyy')
+    };
   };
 
-  // Improved processResult to handle various response shapes
-const processResult = (result: any, source: string, endpoint: string, isCached: boolean = false) => {
-  let rawOutcomes = [];
-  
-  if (result.success) {
-    if (result.outcomes) {
-      rawOutcomes = result.outcomes;
-      setDataSource('predictions/outcome');
-    } else if (result.data && Array.isArray(result.data)) {
-      rawOutcomes = result.data;
-      setDataSource('predictions/outcome');
-    } else if (result.predictions) {
-      rawOutcomes = result.predictions;
-      setDataSource('predictions');
-    } else if (result.results) {
-      rawOutcomes = result.results;
-      setDataSource('predictions');
-    } else if (Array.isArray(result)) {
-      rawOutcomes = result;
-      setDataSource('direct-array');
-    }
-  } else if (Array.isArray(result)) {
-    rawOutcomes = result;
-    setDataSource('direct-array');
-  }
-  
-  if (rawOutcomes.length > 0) {
-    const normalizedOutcomes = rawOutcomes.map((o: any) => {
-      // Helper to extract numbers from strings like "Accurate projection (783.2 vs 783.2)"
-      const extractNumbers = (str: string) => {
-        const match = str.match(/(\d+\.?\d*)\s*vs\s*(\d+\.?\d*)/);
-        return match ? { actual: parseFloat(match[1]), line: parseFloat(match[2]) } : null;
-      };
-
-      // Parse line and actual
-      let line = o.line || o.value || o.projected_line || 0;
-      const projected = o.projected_value || null;
-      let actual = o.actual_value || o.actual || o.result_value || null;
-      let outcome = o.outcome || o.result || 'pending';
-      let actualResult = o.actual_result || 'Pending';
-
-      // If we have actual_result string but no actual number, try to parse it
-      if (!actual && actualResult && actualResult !== 'Pending') {
-        const numbers = extractNumbers(actualResult);
-        if (numbers) {
-          actual = numbers.actual;
-          line = numbers.line; // override line if it was missing
-        }
-      }
-
-      // Infer outcome from actualResult if not provided
-      if (outcome === 'pending' && actualResult && actualResult !== 'Pending') {
-        if (actualResult.toLowerCase().includes('accurate')) {
-          outcome = 'correct';
-        } else if (actualResult.toLowerCase().includes('inaccurate')) {
-          outcome = 'incorrect';
-        }
-      }
-
-      // Extract stat type from prediction or prop if available
-      let statType = o.stat_type || o.stat || 'Stat';
-      if (statType === 'Stat' && o.prediction) {
-        const lowerPred = o.prediction.toLowerCase();
-        if (lowerPred.includes('points')) statType = 'Points';
-        else if (lowerPred.includes('assists')) statType = 'Assists';
-        else if (lowerPred.includes('rebounds')) statType = 'Rebounds';
-        else if (lowerPred.includes('steals')) statType = 'Steals';
-        else if (lowerPred.includes('blocks')) statType = 'Blocks';
-        else if (lowerPred.includes('three') || lowerPred.includes('3-point')) statType = '3-Pointers';
-        else if (lowerPred.includes('touchdowns')) statType = 'Touchdowns';
-        else if (lowerPred.includes('yards')) statType = 'Yards';
-        else if (lowerPred.includes('goals')) statType = 'Goals';
-        else if (lowerPred.includes('assists')) statType = 'Assists';
-        else if (lowerPred.includes('hits')) statType = 'Hits';
-        else if (lowerPred.includes('strikeouts')) statType = 'Strikeouts';
-        else if (lowerPred.includes('fantasy points')) statType = 'Fantasy Points';
-      }
-
-      return {
-        id: o.id || `api-${Math.random()}`,
-        game: o.game || `${o.away_team || ''} @ ${o.home_team || ''}`.trim() || 'Game TBD',
-        player: o.player || o.name || 'Unknown',
-        prediction: o.prediction || `${o.player || ''} ${statType} ${line}`.trim(),
-        prop: o.prop || o.prediction || `${statType} ${line}`,
-        outcome: outcome,
-        actual_result: actualResult,
-        confidence_pre_game: o.confidence_pre_game || o.confidence || 70,
-        accuracy: o.accuracy !== undefined ? o.accuracy : null,
-        timestamp: o.timestamp || o.date || new Date().toISOString(),
-        sport: o.sport || sport,
-        source: o.source || 'API',
-        key_factors: o.key_factors || (o.analysis ? [o.analysis] : ['No analysis available']),
-        stat_type: statType,
-        line: line,
-        actual_value: actual,
-        projection: projected || line, // fallback to line if no separate projection
-        edge: o.edge
-        ? (typeof o.edge === 'number' ? (o.edge > 0 ? `+${o.edge}` : `${o.edge}`) : o.edge)
-        : (o.confidence ? `+${o.confidence}%` : '+8.4%'),       
-        units: o.units || '0',
-        market_type: o.market_type || marketType,
-        season_phase: o.season_phase || seasonPhase,
-        season: o.season || CURRENT_SEASON,
-        asOf: o.asOf || AS_OF_DATE,
-        team: o.team || o.away_team || '',
-        date: o.date || format(new Date(), 'MMM d, yyyy')
-      };
+  const deduplicateOutcomes = (outcomes: any[]) => {
+    const seen = new Set();
+    return outcomes.filter(outcome => {
+      const key = `${outcome.player}-${outcome.stat_type}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-    
-    const enhancedOutcomes = normalizedOutcomes.map((o: any) => ({ 
-      ...o, 
-      season: CURRENT_SEASON, 
-      year: 2026, 
-      asOf: AS_OF_DATE 
-    }));
-    
-    const responseData = {
-      success: true,
-      outcomes: enhancedOutcomes,
-      count: enhancedOutcomes.length,
-      sport,
-      timestamp: new Date().toISOString(),
-      scraped: !isCached,
-      source,
-      message: isCached 
-        ? `Loaded ${enhancedOutcomes.length} outcomes from cache (${endpoint.split('/').pop()})`
-        : `Loaded ${enhancedOutcomes.length} outcomes from ${endpoint.split('/').pop()}`
-    };
-    setData(responseData);
-    
-    const correct = enhancedOutcomes.filter((o: any) => o.outcome === 'correct').length;
-    const totalEdge = enhancedOutcomes.reduce((acc: number, o: any) => acc + (parseFloat(o.edge) || 0), 0);
-    setSeasonStats({
-      totalPredictions: enhancedOutcomes.length,
-      correctRate: enhancedOutcomes.length > 0 ? Math.round((correct / enhancedOutcomes.length) * 100) : 0,
-      avgEdge: enhancedOutcomes.length > 0 ? Math.round(Math.abs(totalEdge / enhancedOutcomes.length) * 10) / 10 : 0,
-      profitIfBet100: enhancedOutcomes.length > 0 ? Math.round((correct - (enhancedOutcomes.length - correct)) * 100) : 0,
-      topPerformer: sport === 'nba' ? 'Wembanyama' : sport === 'nfl' ? 'Mahomes' : 'Ohtani'
-    });
-    
-    setCacheInfo({ isCached, age: isCached ? Date.now() - (getFromCache(sport, endpoint)?.timestamp || 0) : 0 });
-    return true;
-  }
-  return false;
-};
+  };
 
   const fetchData = useCallback(async (force: boolean = false, isRetry: boolean = false): Promise<void> => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -450,73 +336,96 @@ const processResult = (result: any, source: string, endpoint: string, isCached: 
     if (!force) setIsLoading(true); else setIsRefetching(true);
     if (isRetry) { setRetryCount(prev => prev + 1); setLastRetryTime(new Date()); }
 
-    const baseUrl = API_BASE;
-    const today = format(new Date(), 'yyyy-MM-dd'); // dynamic date
-    const endpoints = [
-      `${baseUrl}/api/predictions/outcome?sport=${sport}&season=${CURRENT_SEASON}&as_of=${today}&phase=${seasonPhase}&market_type=${marketType}`,
-      `${baseUrl}/api/players/trends?sport=${sport}&season=${CURRENT_SEASON}`,
-      `${baseUrl}/api/history?sport=${sport}&season=${CURRENT_SEASON}`,
-      `${baseUrl}/api/predictions?sport=${sport}&season=${CURRENT_SEASON}`
-    ];
-    
+    const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${sport}`;
+    const cacheKey = `prizepicks:${sport}`;
+
     if (!force) {
-      for (const endpoint of endpoints) {
-        const cachedData = getFromCache(sport, endpoint);
-        if (cachedData && processResult(cachedData, 'cache', endpoint, true)) {
-          setIsLoading(false); setIsRefetching(false);
-          return;
-        }
+      const cachedData = getFromCache(sport, cacheKey);
+      if (cachedData) {
+        const rawOutcomes = (cachedData.selections || []).map(transformSelection);
+        const outcomes = deduplicateOutcomes(rawOutcomes);
+        const responseData = {
+          success: true,
+          outcomes,
+          count: outcomes.length,
+          sport,
+          timestamp: new Date().toISOString(),
+          scraped: false,
+          source: 'cache',
+          message: `Loaded ${outcomes.length} props from cache`
+        };
+        setData(responseData);
+        setDataSource('cache');
+        setCacheInfo({ isCached: true, age: Date.now() - (predictionCache.get(cacheKey)?.timestamp || 0) });
+        setSeasonStats(prev => ({ ...prev, totalPredictions: outcomes.length }));
+        setIsLoading(false);
+        setIsRefetching(false);
+        return;
       }
     }
-    
-    let rateLimited = false;
-    for (const endpoint of endpoints) {
-      try {
-        const response = await fetch(endpoint, { signal: abortControllerRef.current?.signal, headers: { 'Cache-Control': 'no-cache' } });
-        if (response.status === 429) {
-          rateLimited = true;
-          const retryAfter = response.headers.get('Retry-After');
-          const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-          setError(`Rate limited. Please wait ${Math.ceil(waitTime/1000)} seconds.`);
-          continue;
-        }
-        if (!response.ok) continue;
-        
-        const result = await response.json();
-        console.log(`📦 Raw response from ${endpoint}:`, result);
-        setToCache(sport, endpoint, result);
-        if (processResult(result, endpoint, endpoint, false)) {
-          setError(null);
-          setIsLoading(false); setIsRefetching(false);
-          return;
-        }
-      } catch (err: any) {
-        if (err.name === 'AbortError') return;
-        console.log(`Endpoint ${endpoint} failed:`, err);
+
+    try {
+      const response = await fetch(endpoint, { signal: abortControllerRef.current?.signal });
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+        setError(`Rate limited. Please wait ${Math.ceil(waitTime/1000)} seconds.`);
+        throw new Error('Rate limited');
       }
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const result = await response.json();
+      console.log(`📦 Raw response from ${endpoint}:`, result);
+
+      if (result.success && Array.isArray(result.selections)) {
+        setToCache(sport, cacheKey, result);
+        const rawOutcomes = result.selections.map(transformSelection);
+        const outcomes = deduplicateOutcomes(rawOutcomes);
+        const responseData = {
+          success: true,
+          outcomes,
+          count: outcomes.length,
+          sport,
+          timestamp: new Date().toISOString(),
+          scraped: true,
+          source: 'prizepicks-api',
+          message: `Loaded ${outcomes.length} props from PrizePicks endpoint`
+        };
+        setData(responseData);
+        setDataSource('api');
+        setCacheInfo({ isCached: false, age: 0 });
+        setSeasonStats(prev => ({ ...prev, totalPredictions: outcomes.length }));
+        setError(null);
+      } else {
+        throw new Error('Invalid response format');
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
+
+      console.error('Fetch failed, using mock data:', err);
+      const mockOutcomes = deduplicateOutcomes(generateMockOutcomes(sport, 20));
+      const responseData = {
+        success: true,
+        outcomes: mockOutcomes,
+        count: mockOutcomes.length,
+        sport,
+        timestamp: new Date().toISOString(),
+        scraped: false,
+        source: 'mock',
+        message: `Showing demo data (API unavailable)`
+      };
+      setData(responseData);
+      setDataSource('mock');
+      setCacheInfo({ isCached: false, age: 0 });
+      setError(err.message || 'Using fallback data');
+      setSeasonStats(prev => ({ ...prev, totalPredictions: mockOutcomes.length }));
+    } finally {
+      setIsLoading(false);
+      setIsRefetching(false);
     }
-    
-    // Use realistic mock generator if all endpoints fail
-    const mockOutcomes = generateMockOutcomes(sport, 20);
-    const mockData = {
-      success: true,
-      outcomes: mockOutcomes,
-      count: mockOutcomes.length,
-      sport,
-      timestamp: new Date().toISOString(),
-      scraped: false,
-      source: 'mock',
-      message: rateLimited 
-        ? `Showing February 2026 ${seasonPhase} data (API rate limit reached)`
-        : `Showing February 2026 ${seasonPhase} predictions for demonstration`
-    };
-    setData(mockData);
-    processResult(mockData, 'mock', endpoints[0], false);
-    setDataSource('mock');
-    setCacheInfo({ isCached: false, age: 0 });
-    setError(rateLimited ? `Rate limited - showing February 2026 demo data. Try again later for live ${CURRENT_SEASON} data.` : null);
-    setIsLoading(false); setIsRefetching(false);
-  }, [sport, seasonPhase, marketType]);
+  }, [sport]);
 
   useEffect(() => {
     fetchData(false, false);
@@ -542,16 +451,13 @@ const PredictionsOutcomeScreen = () => {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info' | 'warning'>('info');
   
-  // Generator state – enhanced
+  // Generator state
   const [customQuery, setCustomQuery] = useState('');
   const [generatingPredictions, setGeneratingPredictions] = useState(false);
   const [predictionResults, setPredictionResults] = useState<any>(null);
   const [showSimulationModal, setShowSimulationModal] = useState(false);
-  // New: store generated sets from custom query
   const [generatedSets, setGeneratedSets] = useState<any[][]>([]);
   const [currentSetIndex, setCurrentSetIndex] = useState(0);
-
-  // UI control
   const [showResults, setShowResults] = useState(true);
 
   const [seasonPhase, setSeasonPhase] = useState<'regular' | 'playoffs' | 'all-star' | 'futures'>('regular');
@@ -569,6 +475,9 @@ const PredictionsOutcomeScreen = () => {
     lastRetryTime,
     seasonStats
   } = usePredictionData(selectedSport, seasonPhase, marketType);
+
+  // Memoize outcomes list to avoid recalculating on every render
+  const outcomes = useMemo(() => outcomesData?.outcomes || [], [outcomesData]);
 
   const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
     setSnackbarMessage(message);
@@ -596,28 +505,75 @@ const PredictionsOutcomeScreen = () => {
     await refetch(true);
   };
 
-  // ===== ENHANCED GENERATOR FUNCTIONS =====
-  const scorePredictionRelevance = (prediction: any, intent: QueryIntent): number => {
-    let score = 0;
-    const player = (prediction.player || '').toLowerCase();
-    const team = (prediction.team || '').toLowerCase();
-    const stat = (prediction.stat_type || '').toLowerCase();
-    const game = (prediction.game || '').toLowerCase();
+  // ===== ENHANCED SCORING FUNCTION =====
+const scorePredictionRelevance = (prediction: any, intent: QueryIntent): number => {
+  let score = 0;
+  const player = (prediction.player || '').toLowerCase();
+  const team = (prediction.team || '').toLowerCase();
+  const stat = (prediction.stat_type || '').toLowerCase();
+  const game = (prediction.game || '').toLowerCase();
 
-    if (intent.player && player.includes(intent.player)) score += 10;
-    if (intent.team && team.includes(intent.team)) score += 8;
-    if (intent.keywords.length) {
-      const keywordMatch = intent.keywords.some(k => 
-        player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
-      );
-      if (keywordMatch) score += 5;
+  // Exact matches
+  if (intent.player && player.includes(intent.player)) score += 20;
+  if (intent.team && team.includes(intent.team)) score += 15;
+
+  // Keyword matching with weighted bonuses
+  let keywordMatched = false;
+  if (intent.keywords.length) {
+    for (const kw of intent.keywords) {
+      if (stat.includes(kw)) {
+        score += 30;          // stat match is most relevant
+        keywordMatched = true;
+      }
+      if (player.includes(kw)) {
+        score += 15;
+        keywordMatched = true;
+      }
+      if (team.includes(kw)) {
+        score += 12;
+        keywordMatched = true;
+      }
+      if (game.includes(kw)) {
+        score += 8;
+        keywordMatched = true;
+      }
     }
-    // Boost by confidence
-    score += (prediction.confidence_pre_game || 0) / 10; // e.g., 80% adds 8
-    return score;
-  };
+  }
 
-  // *** CORRECTED HANDLE GENERATE PREDICTIONS ***
+  // If keywords exist but none matched, push item down
+  if (intent.keywords.length > 0 && !keywordMatched) {
+    score -= 50;
+  }
+
+  // Edge boost (positive only, reduced weight)
+  const edgeVal = prediction.edge;
+  let edgeNum = 0;
+  if (typeof edgeVal === 'string') {
+    const match = edgeVal.match(/[+-]?(\d+\.?\d*)/);
+    if (match) edgeNum = parseFloat(match[0]);
+  } else if (typeof edgeVal === 'number') {
+    edgeNum = edgeVal;
+  }
+  if (edgeNum > 0) score += edgeNum / 20;   // +10% edge → +0.5 points
+  else if (edgeNum < 0) score -= Math.abs(edgeNum) / 30; // small penalty
+
+  // Confidence boost (reduced)
+  const conf = prediction.confidence_pre_game || 0;
+  score += conf / 25;  // 80% → +3.2 points
+
+  return score;
+};
+
+  // ===== DEBOUNCED GENERATOR HANDLER =====
+  const generateTimeoutRef = useRef<NodeJS.Timeout>();
+
+  const debouncedGenerate = useCallback(() => {
+    if (generateTimeoutRef.current) clearTimeout(generateTimeoutRef.current);
+    generateTimeoutRef.current = setTimeout(() => {
+      handleGeneratePredictions();
+    }, 300);
+  }, [customQuery]); // re-create if customQuery changes? No, we want the latest query inside, but handleGenerate uses closure – better to put customQuery inside deps or use ref. We'll keep as is, but ensure handleGenerate reads current customQuery.
+
   const handleGeneratePredictions = async () => {
     if (!customQuery.trim()) {
       alert('Please enter a prediction query');
@@ -627,162 +583,98 @@ const PredictionsOutcomeScreen = () => {
     setGeneratingPredictions(true);
     setShowSimulationModal(true);
 
-    // Initialize selections as empty array
-    let selections: any[] = [];
+    // Simulate a short delay for UX
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     try {
-      const endpoint = `${API_BASE}/api/ai/query`;
-      console.log('📡 Sending request to:', endpoint, 'with query:', customQuery);
+      const intent = preprocessQuery(customQuery);
+      console.log('🔍 Query intent:', intent);
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: customQuery, sport: selectedSport }),
-      });
+      let selections: any[] = [];
 
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('✅ API response:', data);
-
-      // ---- Outdated player info detection ----
-      const outdatedPhrases = [
-        'James Harden of the Brooklyn Nets',
-        'James Harden of the Philadelphia 76ers',
-      ];
-      if (data.analysis && outdatedPhrases.some(phrase => data.analysis.includes(phrase))) {
-        throw new Error('Outdated player info detected, using demo data');
-      }
-      // ----------------------------------------
-
-      if (data.analysis) {
-        setPredictionResults({
-          success: true,
-          analysis: data.analysis,
-          model: 'ai-model',
-          timestamp: new Date().toISOString(),
-          source: 'AI Query Endpoint',
-          rawData: data
-        });
-        // Add to generated sets
-        setGeneratedSets(prev => [...prev, [{ analysis: data.analysis, source: 'AI' }]]);
-        setCurrentSetIndex(prev => prev + 1);
-        // selections remains empty – that's fine
-      } else {
-        // Populate selections from data
-        if (data.success && data.data) {
-          selections = data.data;
-        } else if (Array.isArray(data)) {
-          selections = data;
-        } else if (data.selections) {
-          selections = data.selections;
-        } else if (data.results) {
-          selections = data.results;
-        }
-
-        if (selections.length > 0) {
-          const formattedAnalysis = selections.map((item: any, idx: number) => {
-            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
-              `   📈 **Stat:** ${item.stat || 'N/A'}\n` +
-              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
-              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
-              `   💎 **Confidence:** ${item.confidence || 'medium'}\n` +
-              `   💰 **Odds:** ${item.odds || 'N/A'}\n` +
-              `   📝 **Analysis:** ${item.analysis || 'No analysis'}`;
-          }).join('\n\n');
-
-          setPredictionResults({
-            success: true,
-            analysis: `🎯 **AI Prediction Results**\n\nBased on your query:\n\n${formattedAnalysis}`,
-            model: 'ai-model',
-            timestamp: new Date().toISOString(),
-            source: 'AI Query Endpoint',
-            rawData: data
-          });
-          setGeneratedSets(prev => [...prev, selections]);
-          setCurrentSetIndex(prev => prev + 1);
-        } else {
-          throw new Error('No analysis or picks in response');
-        }
-      }
-
-      // Log analytics – safely use selections.length (it's defined)
-      logPromptPerformance(customQuery, selections.length || 1, 0, 'generator');
-    } catch (error) {
-      console.error('❌ Error generating predictions:', error);
-
-      // Fallback: use local outcomes and rank by relevance
-      const outcomes = outcomesData?.outcomes || [];
       if (outcomes.length > 0) {
-        const intent = preprocessQuery(customQuery);
         let filtered = outcomes;
+
         if (intent.sport) {
-          filtered = filtered.filter((o: any) => o.sport === intent.sport);
+          filtered = filtered.filter(o => o.sport === intent.sport);
         }
+
         if (intent.player) {
-          filtered = filtered.filter((o: any) => 
+          filtered = filtered.filter(o =>
             (o.player || '').toLowerCase().includes(intent.player!)
           );
         }
+
         if (intent.team) {
-          filtered = filtered.filter((o: any) => 
+          filtered = filtered.filter(o =>
             (o.team || '').toLowerCase().includes(intent.team!)
           );
         }
-        const scored = filtered
-          .map((o: any) => ({ ...o, relevanceScore: scorePredictionRelevance(o, intent) }))
-          .sort((a: any, b: any) => b.relevanceScore - a.relevanceScore)
-          .slice(0, 5);
 
-        const mockAnalysis = scored.map((item: any, idx: number) => {
-          return `**${idx + 1}. ${item.player}**\n` +
-            `   📈 **Stat:** ${item.stat_type}\n` +
-            `   🎯 **Line:** ${item.line}\n` +
-            `   🔮 **Projection:** ${item.projection}\n` +
-            `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
-            `   💰 **Odds:** -110\n` +
-            `   📝 **Analysis:** ${item.key_factors?.join(' ')}`;
-        }).join('\n\n');
-
-        setPredictionResults({
-          success: true,
-          analysis: `🎯 **AI Prediction Results (Local Relevance)**\n\nBased on your query:\n\n${mockAnalysis}`,
-          model: 'local-relevance',
-          timestamp: new Date().toISOString(),
-          source: 'Local Filtering (API unavailable)'
-        });
-        setGeneratedSets(prev => [...prev, scored]);
-        setCurrentSetIndex(prev => prev + 1);
-        selections = scored; // for analytics
-      } else {
-        const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), 5);
-        const mockAnalysis = mockSelections.map((item: any, idx: number) => {
-          return `**${idx + 1}. ${item.player}**\n` +
-            `   📈 **Stat:** ${item.stat_type}\n` +
-            `   🎯 **Line:** ${item.line}\n` +
-            `   🔮 **Projection:** ${item.projection}\n` +
-            `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
-            `   💰 **Odds:** -110\n` +
-            `   📝 **Analysis:** ${item.key_factors?.join(' ')}`;
-        }).join('\n\n');
-
-        setPredictionResults({
-          success: true,
-          analysis: `🎯 **AI Prediction Results (Demo)**\n\nBased on your query:\n\n${mockAnalysis}`,
-          model: 'demo-model',
-          timestamp: new Date().toISOString(),
-          source: 'Demo Data (API unavailable)'
-        });
-        setGeneratedSets(prev => [...prev, mockSelections]);
-        setCurrentSetIndex(prev => prev + 1);
-        selections = mockSelections; // for analytics
+        // Score and sort
+        const scored = filtered.map(o => ({
+          ...o,
+          relevanceScore: scorePredictionRelevance(o, intent)
+        }));
+        scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+        selections = scored.slice(0, 5);
       }
 
-      logPromptPerformance(customQuery, selections.length || 5, 0, 'fallback');
+      if (selections.length === 0) {
+        console.log('No matching outcomes, generating mock data');
+        const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), 5);
+        selections = mockSelections.map((item, idx) => ({
+          ...item,
+          relevanceScore: idx + 1
+        }));
+      }
+
+      const formattedAnalysis = selections.map((item: any, idx: number) => {
+        return `**${idx + 1}. ${item.player}**\n` +
+          `   📈 **Stat:** ${item.stat_type}\n` +
+          `   🎯 **Line:** ${item.line}\n` +
+          `   🔮 **Projection:** ${item.projection}\n` +
+          `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
+          `   💰 **Edge:** ${item.edge}\n` +
+          `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+      }).join('\n\n');
+
+      setPredictionResults({
+        success: true,
+        analysis: `🎯 **AI Prediction Results**\n\nBased on your query:\n\n${formattedAnalysis}`,
+        model: 'local-filter',
+        timestamp: new Date().toISOString(),
+        source: outcomes.length > 0 ? 'Real Data' : 'Demo Data'
+      });
+
+      setGeneratedSets(prev => [...prev, selections]);
+      setCurrentSetIndex(prev => prev + 1);
+
+      logPromptPerformance(customQuery, selections.length, 0, 'generator');
+    } catch (error) {
+      console.error('❌ Error in generator:', error);
+      const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), 5);
+      const mockAnalysis = mockSelections.map((item: any, idx: number) => {
+        return `**${idx + 1}. ${item.player}**\n` +
+          `   📈 **Stat:** ${item.stat_type}\n` +
+          `   🎯 **Line:** ${item.line}\n` +
+          `   🔮 **Projection:** ${item.projection}\n` +
+          `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
+          `   💰 **Odds:** -110\n` +
+          `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+      }).join('\n\n');
+
+      setPredictionResults({
+        success: true,
+        analysis: `🎯 **AI Prediction Results (Demo)**\n\nBased on your query:\n\n${mockAnalysis}`,
+        model: 'demo-model',
+        timestamp: new Date().toISOString(),
+        source: 'Demo Data'
+      });
+      setGeneratedSets(prev => [...prev, mockSelections]);
+      setCurrentSetIndex(prev => prev + 1);
     } finally {
-      setTimeout(() => setGeneratingPredictions(false), 1500);
+      setGeneratingPredictions(false);
     }
   };
 
@@ -795,7 +687,6 @@ const PredictionsOutcomeScreen = () => {
         if (prevSet[0]?.analysis) {
           setPredictionResults(prevSet[0]);
         } else {
-          // Convert set to formatted analysis
           const formatted = prevSet.map((item: any, idx: number) => {
             return `**${idx + 1}. ${item.player || 'Player'}**\n` +
               `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
@@ -848,8 +739,6 @@ const PredictionsOutcomeScreen = () => {
     setCurrentSetIndex(0);
     setPredictionResults(null);
   };
-
-  const outcomes = outcomesData?.outcomes || [];
 
   const filteredByOutcome = filterOutcome === 'all'
     ? outcomes
@@ -976,7 +865,15 @@ const PredictionsOutcomeScreen = () => {
               </Grid>
             </Grid>
 
-            {/* Edge and Accuracy - with safe edge sign check */}
+            {/* Line and Projection row */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#3b82f6', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
+              <Typography variant="caption" fontWeight="bold" color="text.secondary">Line:</Typography>
+              <Typography variant="body2" fontWeight="bold">{outcome.line}</Typography>
+              <Typography variant="caption" fontWeight="bold" color="text.secondary">Projection:</Typography>
+              <Typography variant="body2" fontWeight="bold" color="primary.main">{outcome.projection}</Typography>
+            </Box>
+
+            {/* Edge and Accuracy */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#4CAF50', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary">Edge:</Typography>
               <Typography variant="body2" fontWeight="bold" color={
@@ -997,7 +894,7 @@ const PredictionsOutcomeScreen = () => {
               <Typography variant="body2" fontWeight="bold" color="#4CAF50">{outcome.accuracy || 75}%</Typography>
             </Box>
 
-            {/* Accordion - controlled locally */}
+            {/* Accordion */}
             <Accordion 
               expanded={isExpanded}
               onChange={() => setExpandedCard(isExpanded ? null : outcome.id)}
@@ -1019,7 +916,6 @@ const PredictionsOutcomeScreen = () => {
                     </ul>
                   </Box>
                 )}
-                {/* Prediction Details including projection */}
                 {(outcome.line || outcome.stat_type || outcome.actual_value || outcome.projection) && (
                   <Box mb={2}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Prediction Details</Typography>
@@ -1051,7 +947,7 @@ const PredictionsOutcomeScreen = () => {
     );
   };
   
-  // ===== ENHANCED GENERATOR UI =====
+  // ===== GENERATOR UI =====
   const renderGenerator = () => (
     <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -1066,12 +962,16 @@ const PredictionsOutcomeScreen = () => {
         <Typography variant="h6" gutterBottom>Quick Prediction Queries</Typography>
         <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
           {[
-            "LeBron James points over tonight",
-            "Patrick Mahomes passing yards over 300",
-            "Shohei Ohtani home run",
-            "McDavid points over 1.5",
-            "Nikola Jokic triple double",
-            "Jayson Tatum rebounds over 8.5"
+            "Top value props for tonight's slate",
+            "Highest projected points from Lakers vs Celtics",
+            "Underdog props with positive edge",
+            "Rookie props with high upside",
+            "Assist leaders in primetime games",
+            "Rebound machines in blowout spots",
+            "Steals and blocks specialists",
+            "Three-point threats in pace-up games",
+            "Favorable matchups for centers",
+            "Late game hero props"
           ].map((query, index) => (
             <Chip
               key={index}
@@ -1106,7 +1006,7 @@ const PredictionsOutcomeScreen = () => {
             variant="contained"
             size="large"
             startIcon={<AutoAwesomeIcon />}
-            onClick={handleGeneratePredictions}
+            onClick={debouncedGenerate}
             disabled={!customQuery.trim() || generatingPredictions}
             sx={{ flex: 2 }}
           >
@@ -1295,10 +1195,10 @@ const PredictionsOutcomeScreen = () => {
         </Grid>
       </Paper>
 
-      {/* GENERATOR - placed right after Season Performance */}
+      {/* GENERATOR */}
       {renderGenerator()}
 
-      {/* Search and Filter Section – with Show/Hide Results button */}
+      {/* Search and Filter Section */}
       <Paper sx={{ p: 3, mb: 4, borderRadius: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={4}>
@@ -1326,7 +1226,6 @@ const PredictionsOutcomeScreen = () => {
             </FormControl>
           </Grid>
           <Grid item xs={12} md={2} sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-            {/* Show/Hide Results Button */}
             <Tooltip title={showResults ? "Hide Results" : "Show Results"}>
               <IconButton onClick={() => setShowResults(!showResults)} color="primary">
                 {showResults ? <VisibilityOffIcon /> : <VisibilityIcon />}
@@ -1453,7 +1352,7 @@ const PredictionsOutcomeScreen = () => {
   );
 };
 
-// Simple ClearIcon component for the Clear Cache button
+// Simple ClearIcon component
 const ClearIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6"></polyline>

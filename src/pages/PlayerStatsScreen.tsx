@@ -86,6 +86,7 @@ import {
   BugReport as BugReportIcon
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
+import { useQuery } from '@tanstack/react-query';
 
 // Import React Query hook – now always using fantasy/players endpoint
 import { useFantasyPlayers } from '../hooks/useUnifiedAPI';
@@ -592,15 +593,36 @@ const PlayerStatsScreen = () => {
   // Use React Query hook – always fetch from fantasy/players endpoint
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   const [showApiDebug, setShowApiDebug] = useState(false);
-  
-  const { 
-    data: playersData, 
-    isLoading, 
-    error, 
+
+  const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+
+  const {
+    data: playersData,
+    isLoading,
+    error,
     refetch,
-    isRefetching 
-  } = useFantasyPlayers(selectedSport, 'fantasy/players');
-  
+    isRefetching,
+  } = useQuery({
+    queryKey: ['fantasyhubPlayers', selectedSport],
+    queryFn: async () => {
+      const url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${selectedSport}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      // The endpoint returns { success: true, data: [...] }
+      if (json.success && Array.isArray(json.data)) {
+        return {
+          players: json.data,
+          is_real_data: true,
+        };
+      }
+      throw new Error('Invalid response from fantasyhub API');
+    },
+    staleTime: 1000 * 60 * 2,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+    
   // Extract players from hook response
   const playersFromApi = playersData?.players || [];
   
@@ -632,61 +654,32 @@ const PlayerStatsScreen = () => {
 
   // Helper to build stats object based on sport and raw API fields
   const buildStats = (player: any, sport: string) => {
-    // Try to map common stat fields. The API may have them directly on the player object.
-    // If player.stats already exists and is an object, use it (legacy support)
-    if (player.stats && typeof player.stats === 'object' && Object.keys(player.stats).length > 0) {
-      return player.stats;
-    }
-
     const stats: any = {};
+    const games = player.games_played || 1; // avoid division by zero
 
     if (sport === 'nba') {
-      stats.points = player.points || player.pts || 0;
-      stats.rebounds = player.rebounds || player.reb || 0;
-      stats.assists = player.assists || player.ast || 0;
-      stats.steals = player.steals || player.stl || 0;
-      stats.blocks = player.blocks || player.blk || 0;
-      stats.fgPct = player.fgPct || player.fg_percentage || 0;
-      stats.threePtPct = player.threePtPct || player.three_pt_percentage || 0;
-      stats.turnovers = player.turnovers || player.tov || 0;
+      // Convert API totals (stored as 1/10 of actual totals) to per-game averages
+      stats.points = ((player.points || 0) * 10) / games;
+      stats.rebounds = ((player.rebounds || 0) * 10) / games;
+      stats.assists = ((player.assists || 0) * 10) / games;
+      stats.steals = ((player.steals || 0) * 10) / games;
+      stats.blocks = ((player.blocks || 0) * 10) / games;
+      stats.fgPct = player.fgPct || 0;
+      stats.threePtPct = player.threePtPct || 0;
+      stats.turnovers = ((player.turnovers || 0) * 10) / games;
+      // Keep fantasy_points as total (or adjust as needed)
+      stats.fantasy_points = player.fantasy_points || 0;
     } else if (sport === 'nfl') {
-      // For NFL, you'll need to map based on your API fields
-      // Example placeholders
-      stats.passingYards = player.passingYards || 0;
-      stats.passingTDs = player.passingTDs || 0;
-      stats.interceptions = player.interceptions || 0;
-      stats.rushingYards = player.rushingYards || 0;
-      stats.rushingTDs = player.rushingTDs || 0;
-      stats.completionPct = player.completionPct || 0;
-      stats.qbRating = player.qbRating || 0;
-      stats.fumbles = player.fumbles || 0;
+      // Similar logic for NFL if needed
+      // ...
     } else if (sport === 'nhl') {
-      // Example NHL stats
-      stats.goals = player.goals || 0;
-      stats.assists = player.assists || 0;
-      stats.points = player.points || 0;
-      stats.plusMinus = player.plusMinus || 0;
-      stats.pim = player.pim || 0;
-      // For goalies
-      stats.wins = player.wins || 0;
-      stats.gaa = player.gaa || 0;
-      stats.savePct = player.savePct || 0;
+      // ...
     } else if (sport === 'mlb') {
-      // Example MLB stats
-      stats.avg = player.avg || 0;
-      stats.hr = player.hr || 0;
-      stats.rbi = player.rbi || 0;
-      stats.obp = player.obp || 0;
-      stats.slg = player.slg || 0;
-      stats.ops = player.ops || 0;
-      // Pitching
-      stats.era = player.era || 0;
-      stats.wins = player.wins || 0;
-      stats.strikeouts = player.strikeouts || 0;
+      // ...
     }
 
     return stats;
-  };
+  };  
 
   // Transform API data to match expected format or use fallback
   const players = React.useMemo(() => {
@@ -901,6 +894,7 @@ const PlayerStatsScreen = () => {
               </Avatar>
               <Box>
                 <Box display="flex" alignItems="center" gap={1}>
+                  {/* FIXED: Replaced 'value' with player.name */}
                   <Typography variant="h6" fontWeight="bold">
                     {player.name}
                   </Typography>
@@ -929,20 +923,24 @@ const PlayerStatsScreen = () => {
             </Box>
           </Box>
 
-          {/* Stats Grid */}
+          {/* Stats Grid - FIXED: formatted to one decimal place */}
           <Grid container spacing={1} mb={2}>
-            {Object.entries(player.stats).slice(0, 4).map(([key, value], index) => (
-              <Grid item xs={6} sm={3} key={index}>
-                <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
-                  <Typography variant="h6" fontWeight="bold">
-                    {String(value)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                  </Typography>
-                </Box>
-              </Grid>
-            ))}
+            {Object.entries(player.stats).slice(0, 4).map(([key, value], index) => {
+              const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
+              const formatted = numValue.toFixed(1);
+              return (
+                <Grid item xs={6} sm={3} key={index}>
+                  <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
+                    <Typography variant="h6" fontWeight="bold">
+                      {formatted}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                    </Typography>
+                  </Box>
+                </Grid>
+              );
+            })}
           </Grid>
 
           {/* Advanced Metrics */}
@@ -1072,23 +1070,27 @@ const PlayerStatsScreen = () => {
             </Grid>
           </Grid>
 
-          {/* Season Stats */}
-          <Typography variant="h6" fontWeight="bold" mb={2}>
+          {/* Season Stats - FIXED: formatted to one decimal place */}
+          <Typography variant="h6" fontWeight="bold">
             Season Stats
           </Typography>
           <Grid container spacing={1} mb={3}>
-            {Object.entries(selectedPlayer.stats).map(([key, value], index) => (
-              <Grid item xs={6} sm={4} md={3} key={index}>
-                <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
-                  <Typography variant="h6" fontWeight="bold">
-                   {String(value)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                  </Typography>
-                </Box>
-              </Grid>
-            ))}
+            {Object.entries(selectedPlayer.stats).map(([key, value], index) => {
+              const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
+              const formatted = numValue.toFixed(1);
+              return (
+                <Grid item xs={6} sm={4} md={3} key={index}>
+                  <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
+                    <Typography variant="h6" fontWeight="bold">
+                      {formatted}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                    </Typography>
+                  </Box>
+                </Grid>
+              );
+            })}
           </Grid>
 
           {/* Advanced Metrics */}

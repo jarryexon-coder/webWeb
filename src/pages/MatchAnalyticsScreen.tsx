@@ -75,7 +75,7 @@ import { format } from 'date-fns';
 // Import React Query hook
 import { usePrizepicksSelections } from '../hooks/useUnifiedAPI';
 
-// Mock Data
+// Mock Data (fallback only)
 const MOCK_DATA = {
   nfl: {
     games: [
@@ -214,17 +214,6 @@ const PROMPTS = [
   { id: 'predictive', icon: <Psychology />, title: 'Predictive Stats', color: '#ec4899', description: 'Win probability & projections' },
 ];
 
-const STATS_DATA = [
-  { label: 'Total Yards', home: 385, away: 320, icon: <CompareArrows /> },
-  { label: 'Passing Yards', home: 265, away: 210, icon: <TrendingUp /> },
-  { label: 'Rushing Yards', home: 120, away: 110, icon: <TrendingUp /> },
-  { label: 'Turnovers', home: 1, away: 2, icon: <BarChart /> },
-  { label: 'Time of Possession', home: '32:15', away: '27:45', icon: <AccessTime /> },
-  { label: 'First Downs', home: 22, away: 18, icon: <BarChart /> },
-  { label: 'Third Down %', home: '45%', away: '38%', icon: <TrendingUp /> },
-  { label: 'Red Zone %', home: '75%', away: '60%', icon: <LocationOn /> },
-];
-
 // Helper functions
 const randomChoice = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -261,17 +250,6 @@ const getGameStatus = (status: string): string => {
   const statusLower = status.toLowerCase();
   if (statusLower.includes('live') || statusLower.includes('in') || statusLower === 'live') return 'Live';
   if (statusLower.includes('final') || statusLower.includes('complete') || statusLower === 'final') return 'Final';
-  return 'Scheduled';
-};
-
-const getQuarter = (status: string): string => {
-  if (!status) return 'Scheduled';
-  const statusLower = status.toLowerCase();
-  if (statusLower.includes('live') || statusLower === 'live') {
-    const quarters = ['Q1 10:00', 'Q2 5:30', 'Q3 8:45', 'Q4 3:15'];
-    return randomChoice(quarters);
-  }
-  if (statusLower.includes('final') || statusLower === 'final') return 'Final';
   return 'Scheduled';
 };
 
@@ -322,7 +300,6 @@ const MatchAnalyticsScreen = () => {
   // Use the prize picks hook instead of analytics
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
  
-// Inside the component, replace the current hook call with:
 const prizepicks = usePrizepicksSelections();
 const { 
   data: prizePicksData, 
@@ -345,7 +322,7 @@ const {
   const [activeTab, setActiveTab] = useState('conditions');
   const [filteredGames, setFilteredGames] = useState<any[]>([]);
   
-  // Transform prize picks selections into game data
+  // Transform prize picks selections into game data – using real data, no fake scores
   const games = React.useMemo(() => {
     if (selectionsFromApi && selectionsFromApi.length > 0) {
       console.log(`✅ Using REAL data from prize picks: ${selectionsFromApi.length} selections`);
@@ -359,63 +336,93 @@ const {
           const playerTeamRaw = selection.team || selection.teamAbbrev || selection.team_full || 'Unknown';
           const playerTeam = extractTeamName(playerTeamRaw);
           
-          // Extract opponent from game field - handle different formats
-          let opponent = 'Opponent';
+          // Extract opponent from game field - improved parsing
+          let homeTeam = playerTeam;
+          let awayTeam = 'TBD';
           const gameField = selection.game || selection.opponent || '';
+          
           if (gameField) {
-            if (gameField.includes(' vs ')) {
-              const parts = gameField.split(' vs ');
-              opponent = extractTeamName(parts[1] || parts[0] || 'Opponent');
-            } else if (gameField.includes(' @ ')) {
-              const parts = gameField.split(' @ ');
-              opponent = extractTeamName(parts[1] || parts[0] || 'Opponent');
-            } else if (gameField.includes(' at ')) {
-              const parts = gameField.split(' at ');
-              opponent = extractTeamName(parts[1] || parts[0] || 'Opponent');
+            // Try to parse as "Team A vs Team B", "Team A @ Team B", or "Team A at Team B"
+            const vsIndex = gameField.indexOf(' vs ');
+            const atIndex = gameField.indexOf(' @ ');
+            const atWordIndex = gameField.indexOf(' at ');
+            
+            if (vsIndex !== -1) {
+              homeTeam = extractTeamName(gameField.substring(0, vsIndex).trim());
+              awayTeam = extractTeamName(gameField.substring(vsIndex + 4).trim());
+            } else if (atIndex !== -1) {
+              homeTeam = extractTeamName(gameField.substring(0, atIndex).trim());
+              awayTeam = extractTeamName(gameField.substring(atIndex + 3).trim());
+            } else if (atWordIndex !== -1) {
+              homeTeam = extractTeamName(gameField.substring(0, atWordIndex).trim());
+              awayTeam = extractTeamName(gameField.substring(atWordIndex + 4).trim());
             } else {
-              opponent = extractTeamName(gameField);
+              // No delimiter found – assume gameField is the opponent (if different from player's team)
+              if (gameField !== playerTeamRaw && !gameField.includes(playerTeamRaw)) {
+                awayTeam = extractTeamName(gameField);
+              } else {
+                awayTeam = 'TBD';
+              }
             }
+          } else {
+            awayTeam = 'TBD';
           }
           
           // Get team abbreviations
-          const homeAbbr = extractTeamAbbreviation(playerTeam);
-          const awayAbbr = extractTeamAbbreviation(opponent);
+          const homeAbbr = extractTeamAbbreviation(homeTeam);
+          const awayAbbr = awayTeam !== 'TBD' ? extractTeamAbbreviation(awayTeam) : 'TBD';
           
-          const gameKey = `${homeAbbr} vs ${awayAbbr}`;
+          // Create a unique game key. If we have both teams, use them. Otherwise, fallback to game field or player team + date.
+          let gameKey;
+          if (awayAbbr !== 'TBD' && homeAbbr !== 'TBD' && awayAbbr !== homeAbbr) {
+            gameKey = `${homeAbbr} vs ${awayAbbr}`;
+          } else {
+            // Fallback: use a combination of player team and game time (if available)
+            const gameTime = selection.game_time ? new Date(selection.game_time).toISOString().split('T')[0] : 'unknown';
+            gameKey = `${playerTeamRaw}-${gameTime}`;
+          }
           
           if (!gameMap.has(gameKey)) {
-            // Create a game from selection data
+            // Parse game_time if available
+            const gameTime = selection.game_time ? new Date(selection.game_time) : null;
+            const gameDate = gameTime ? format(gameTime, 'MMM dd, yyyy') : 'Today';
+            const gameTimeStr = gameTime ? format(gameTime, 'h:mm a') : 'TBD';
+            
+            // Derive quarter from status
+            const gameStatus = getGameStatus(selection.status);
+            const quarter = gameStatus === 'Live' ? 'In Progress' 
+                          : gameStatus === 'Final' ? 'Final' 
+                          : 'Scheduled';
+            
             gameMap.set(gameKey, {
-              id: `game-${homeAbbr}-${awayAbbr}-${index}`,
+              id: `game-${gameKey}-${index}`,
               homeTeam: { 
-                name: playerTeam, 
+                name: homeTeam, 
                 logo: homeAbbr, 
-                color: getTeamColor(playerTeam)
+                color: getTeamColor(homeTeam)
               },
               awayTeam: { 
-                name: opponent, 
+                name: awayTeam, 
                 logo: awayAbbr, 
-                color: getTeamColor(opponent)
+                color: getTeamColor(awayTeam)
               },
-              homeScore: Math.floor(Math.random() * 30) + 80,
-              awayScore: Math.floor(Math.random() * 30) + 80,
-              status: getGameStatus(selection.status),
+              homeScore: null,
+              awayScore: null,
+              status: gameStatus,
               sport: selection.sport || selectedSport.toUpperCase(),
-              date: format(new Date(), 'MMM dd, yyyy'),
-              time: `${Math.floor(Math.random() * 12) + 1}:${randomChoice(['00', '30'])} PM EST`,
-              venue: `${playerTeam} Arena`,
-              weather: randomChoice(['Clear, 72°F', 'Partly Cloudy, 68°F', 'Indoor']),
+              date: gameDate,
+              time: gameTimeStr,
+              venue: `${homeTeam} Arena`,
+              weather: 'Indoor',
               odds: { 
-                spread: `${randomChoice(['+', '-'])}${Math.floor(Math.random() * 7) + 1}.5`,
-                total: `${Math.floor(Math.random() * 30) + 210}`
+                spread: '–',
+                total: '–'
               },
-              broadcast: randomChoice(['TNT', 'ESPN', 'ABC', 'NBA TV']),
-              attendance: `${Math.floor(Math.random() * 5000) + 15000}`,
-              quarter: getQuarter(selection.status),
+              broadcast: 'TBD',
+              attendance: '–',
+              quarter,
               players: [selection.player],
-              // Store selection data for reference
               selectionData: [selection],
-              // Store raw data for debugging
               rawGameData: selection.game
             });
           } else {
@@ -446,6 +453,41 @@ const {
     return MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || MOCK_DATA.nfl.games;
     
   }, [selectionsFromApi, selectedSport]);
+
+  // Sport‑specific stats data
+  const getStatsForSport = (sport: string) => {
+    if (sport === 'nba') {
+      return [
+        { label: 'Points', home: 112, away: 108, icon: <BarChart /> },
+        { label: 'Rebounds', home: 48, away: 42, icon: <BarChart /> },
+        { label: 'Assists', home: 26, away: 24, icon: <BarChart /> },
+        { label: 'Steals', home: 8, away: 6, icon: <BarChart /> },
+        { label: 'Blocks', home: 5, away: 4, icon: <BarChart /> },
+        { label: 'Turnovers', home: 12, away: 14, icon: <BarChart /> },
+        { label: 'FG%', home: '48%', away: '45%', icon: <TrendingUp /> },
+        { label: '3P%', home: '37%', away: '34%', icon: <TrendingUp /> },
+      ];
+    } else if (sport === 'nfl') {
+      return [
+        { label: 'Total Yards', home: 385, away: 320, icon: <CompareArrows /> },
+        { label: 'Passing Yards', home: 265, away: 210, icon: <TrendingUp /> },
+        { label: 'Rushing Yards', home: 120, away: 110, icon: <TrendingUp /> },
+        { label: 'Turnovers', home: 1, away: 2, icon: <BarChart /> },
+        { label: 'Time of Possession', home: '32:15', away: '27:45', icon: <AccessTime /> },
+        { label: 'First Downs', home: 22, away: 18, icon: <BarChart /> },
+        { label: 'Third Down %', home: '45%', away: '38%', icon: <TrendingUp /> },
+        { label: 'Red Zone %', home: '75%', away: '60%', icon: <LocationOn /> },
+      ];
+    } else {
+      // MLB fallback
+      return [
+        { label: 'Hits', home: 8, away: 6, icon: <BarChart /> },
+        { label: 'Runs', home: 5, away: 3, icon: <BarChart /> },
+        { label: 'Errors', home: 1, away: 2, icon: <BarChart /> },
+        { label: 'ERA', home: '3.20', away: '4.10', icon: <TrendingUp /> },
+      ];
+    }
+  };
 
   // Set initial selected game
   useEffect(() => {
@@ -798,7 +840,7 @@ const {
             <Typography variant="caption" color="text.secondary">vs</Typography>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="body2" fontWeight="medium">
-                {awayTeam.name}
+                {awayTeam.name === 'TBD' ? 'TBD' : awayTeam.name}
               </Typography>
               <Avatar sx={{ 
                 bgcolor: awayTeam.color,
@@ -807,7 +849,7 @@ const {
                 fontSize: 14,
                 fontWeight: 'bold'
               }}>
-                {awayTeam.logo}
+                {awayTeam.logo === 'TBD' ? '?' : awayTeam.logo}
               </Avatar>
             </Box>
           </Box>
@@ -844,6 +886,9 @@ const {
       </Container>
     );
   }
+
+  // Get sport‑specific stats for rendering
+  const statsData = getStatsForSport(selectedSport);
 
   return (
     <Container maxWidth="lg">
@@ -1004,7 +1049,7 @@ const {
                       {selectedGame.homeTeam?.name || 'Home'}
                     </Typography>
                     <Typography variant="h3" color="primary" fontWeight="bold">
-                      {selectedGame.homeScore}
+                      {selectedGame.homeScore !== null ? selectedGame.homeScore : '–'}
                     </Typography>
                   </Box>
                 </Grid>
@@ -1055,13 +1100,13 @@ const {
                       fontWeight: 'bold',
                       mb: 2
                     }}>
-                      {selectedGame.awayTeam?.logo || 'A'}
+                      {selectedGame.awayTeam?.logo === 'TBD' ? '?' : selectedGame.awayTeam?.logo || 'A'}
                     </Avatar>
                     <Typography variant="h5" fontWeight="bold">
-                      {selectedGame.awayTeam?.name || 'Away'}
+                      {selectedGame.awayTeam?.name === 'TBD' ? 'TBD' : selectedGame.awayTeam?.name || 'Away'}
                     </Typography>
                     <Typography variant="h3" color="secondary" fontWeight="bold">
-                      {selectedGame.awayScore}
+                      {selectedGame.awayScore !== null ? selectedGame.awayScore : '–'}
                     </Typography>
                   </Box>
                 </Grid>
@@ -1079,7 +1124,7 @@ const {
                   <TrendingUp sx={{ color: 'text.secondary', mb: 0.5 }} />
                   <Typography variant="body2" color="text.secondary">Spread</Typography>
                   <Typography variant="h6" fontWeight="bold">
-                    {selectedGame.odds?.spread || '-3.5'}
+                    {selectedGame.odds?.spread || '–'}
                   </Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem />
@@ -1087,14 +1132,14 @@ const {
                   <BarChart sx={{ color: 'text.secondary', mb: 0.5 }} />
                   <Typography variant="body2" color="text.secondary">Total</Typography>
                   <Typography variant="h6" fontWeight="bold">
-                    {selectedGame.odds?.total || '48.5'}
+                    {selectedGame.odds?.total || '–'}
                   </Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem />
                 <Box sx={{ textAlign: 'center' }}>
                   <AttachMoney sx={{ color: 'text.secondary', mb: 0.5 }} />
                   <Typography variant="body2" color="text.secondary">Moneyline</Typography>
-                  <Typography variant="h6" fontWeight="bold">-150/+130</Typography>
+                  <Typography variant="h6" fontWeight="bold">–</Typography>
                 </Box>
               </Paper>
             </CardContent>
@@ -1124,13 +1169,13 @@ const {
             </Box>
           </Paper>
 
-          {/* Stats Section */}
+          {/* Stats Section – now sport‑specific */}
           <Paper sx={{ p: 3, mb: 3 }}>
             <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <BarChart /> Game Statistics
+              <BarChart /> Game Statistics ({selectedSport.toUpperCase()})
             </Typography>
             <Grid container spacing={2}>
-              {STATS_DATA.map((stat, index) => (
+              {statsData.map((stat, index) => (
                 <Grid item xs={12} sm={6} md={3} key={index}>
                   <Card variant="outlined">
                     <CardContent>

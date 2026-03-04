@@ -133,21 +133,44 @@ const PlayerPropsScreen: React.FC = () => {
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0);
   const [sortBy, setSortBy] = useState<string>('confidence');
 
-  const {
-    data,
-    isLoading,
-    error,
-    refetch,
-    isError,
-  } = useQuery({
-    queryKey: ['playerProps', selectedSport],
-    queryFn: () => playerPropsApi.getProps(selectedSport),
-    staleTime: 1000 * 60 * 2,
-    refetchOnWindowFocus: false,
-    retry: 1,
-  });
+const {
+  data,
+  isLoading,
+  error,
+  refetch,
+  isError,
+} = useQuery({
+  queryKey: ['playerProps', selectedSport],
+  queryFn: async () => {
+    const rawData = await playerPropsApi.getProps(selectedSport);
 
-  // FIX: data is the array itself, not an object with a props property
+    // If the API returns an array directly
+    if (Array.isArray(rawData)) {
+      return rawData.map(prop => ({
+        ...prop,
+        player: prop.player_name || prop.player || 'Unknown',
+        market: prop.prop_type || prop.market || '—',   // 👈 add market from prop_type
+        confidence: prop.confidence || 50,               // 👈 default confidence
+      }));
+    }
+    
+    // If the API returns an object with a 'props' array
+    if (rawData && Array.isArray(rawData.props)) {
+      return rawData.props.map(prop => ({
+        ...prop,
+        player: prop.player_name || prop.player || 'Unknown',
+        market: prop.prop_type || prop.market || '—',   // 👈 add market
+        confidence: prop.confidence || 50,               // 👈 default confidence
+      }));
+    }
+    
+    return [];
+  },
+  staleTime: 1000 * 60 * 2,
+  refetchOnWindowFocus: false,
+  retry: 1,
+});
+
   const props = data || [];
 
   // Debug logs (you can remove these later)

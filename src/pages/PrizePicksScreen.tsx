@@ -163,10 +163,28 @@ const PrizePicksScreen = () => {
   // Toggle for filter panel
   const [showFilters, setShowFilters] = useState(true);
 
+  // NEW: Sorting & Position Filter State
+  const [sortCriteria, setSortCriteria] = useState<'projection' | 'edge' | 'position'>('edge');
+  const [positionFilter, setPositionFilter] = useState<string>('all');
+
   // Caching
   const { getCached, setCached } = usePhraseCache();
 
-  // ===== FETCH FUNCTION (unchanged, but logs wrapped) =====
+  // ===== NEW: Predefined Generator Prompts =====
+  const generatorPrompts = [
+    { label: '🔥 Highest Projection Points', query: 'points high projection' },
+    { label: '⚡ Highest Edge Points', query: 'points best edge' },
+    { label: '🎯 Best Value Assists', query: 'assists value' },
+    { label: '📊 Best Value Rebounds', query: 'rebounds value' },
+    { label: '🏀 Top Edge Overall', query: 'highest edge' },
+    { label: '📈 Top Projection Overall', query: 'highest projection' },
+    { label: '⬇️ Best Under Bets', query: 'under value' },
+    { label: '⬆️ Best Over Bets', query: 'over value' },
+    { label: '🧑‍🦱 Point Guards High Assists', query: 'pg assists' },
+    { label: '🏋️ Centers High Rebounds', query: 'c rebounds' },
+  ];
+
+  // ===== FETCH FUNCTION (unchanged) =====
   const fetchPrizepicksSelections = async (skipCache = false) => {
     try {
       setPicksLoading(true);
@@ -191,7 +209,6 @@ const PrizePicksScreen = () => {
 const response = await fetch(
   `https://prizepicks-production.up.railway.app/api/prizepicks/selections?sport=${selectedSport}&nocache=${Date.now()}`
 );
-// Remove the headers object entirely
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -230,7 +247,7 @@ const response = await fetch(
       });
       
     } catch (error: any) {
-      console.error('❌ Error fetching data:', error); // Keep error logs always
+      console.error('❌ Error fetching data:', error);
       setError(error.message);
       setCombinedData([]);
       
@@ -257,7 +274,7 @@ const response = await fetch(
     return () => clearInterval(intervalId);
   }, [autoRefreshEnabled, selectedSport]);
 
-  // ===== HELPER FUNCTIONS (with production log suppression) =====
+  // ===== HELPER FUNCTIONS =====
   const calculateImpliedProbability = (americanOdds: number): number => {
     if (americanOdds > 0) return 100 / (americanOdds + 100);
     else return Math.abs(americanOdds) / (Math.abs(americanOdds) + 100);
@@ -285,32 +302,68 @@ const response = await fetch(
     };
   };
 
+  // FIXED: Single proper implementation
   const calculateProjectionValue = (projection?: number, line?: number, overPrice?: number | null, underPrice?: number | null): ProjectionValueResult => {
     if (projection === undefined || line === undefined) {
-      return { edge: 0, recommendedSide: 'none', confidence: 'low', marketImplied: 0, estimatedTrueProb: 0.5, projectionDiff: 0 };
+      return { 
+        edge: 0, 
+        recommendedSide: 'none', 
+        confidence: 'low', 
+        marketImplied: 0, 
+        estimatedTrueProb: 0.5, 
+        projectionDiff: 0 
+      };
     }
+    
     const projectionDiff = projection - line;
-    const isOverProjection = projectionDiff > 0;
-    const recommendedSide = isOverProjection ? 'over' : 'under';
-    const relevantOdds = isOverProjection ? overPrice : underPrice;
+    // Determine recommended side based on projection vs line
+    const recommendedSide = projectionDiff > 0 ? 'over' : projectionDiff < 0 ? 'under' : 'none';
+    
+    // Get relevant odds for the recommended side
+    const relevantOdds = recommendedSide === 'over' ? overPrice : (recommendedSide === 'under' ? underPrice : null);
+    
+    // If no odds for that side, return edge 0 and side 'none'
     if (relevantOdds === null || relevantOdds === undefined) {
-      return { edge: 0, recommendedSide: 'none', confidence: 'low', marketImplied: 0, estimatedTrueProb: 0.5, projectionDiff };
+      return { 
+        edge: 0, 
+        recommendedSide: 'none', 
+        confidence: 'low', 
+        marketImplied: 0, 
+        estimatedTrueProb: 0.5, 
+        projectionDiff 
+      };
     }
-    const marketImplied = relevantOdds > 0 ? 100 / (relevantOdds + 100) : -relevantOdds / (-relevantOdds + 100);
+    
+    // Calculate market implied probability from odds
+    const marketImplied = relevantOdds > 0 
+      ? 100 / (relevantOdds + 100) 
+      : -relevantOdds / (-relevantOdds + 100);
+    
     const absDiff = Math.abs(projectionDiff);
+    // Estimate true probability based on difference magnitude
     let estimatedTrueProb;
-    if (absDiff > 2.0) estimatedTrueProb = isOverProjection ? 0.65 : 0.35;
-    else if (absDiff > 1.0) estimatedTrueProb = isOverProjection ? 0.60 : 0.40;
-    else if (absDiff > 0.5) estimatedTrueProb = isOverProjection ? 0.55 : 0.45;
-    else estimatedTrueProb = isOverProjection ? 0.52 : 0.48;
+    if (absDiff > 2.0) estimatedTrueProb = recommendedSide === 'over' ? 0.65 : 0.35;
+    else if (absDiff > 1.0) estimatedTrueProb = recommendedSide === 'over' ? 0.60 : 0.40;
+    else if (absDiff > 0.5) estimatedTrueProb = recommendedSide === 'over' ? 0.55 : 0.45;
+    else estimatedTrueProb = recommendedSide === 'over' ? 0.52 : 0.48;
+    
     const edge = estimatedTrueProb - marketImplied;
+    
     let confidence = 'low';
     if (edge > 0.05) confidence = 'very-high';
     else if (edge > 0.03) confidence = 'high';
     else if (edge > 0.01) confidence = 'medium';
     else if (edge > 0) confidence = 'low';
     else confidence = 'no-edge';
-    return { edge, recommendedSide, confidence, marketImplied, estimatedTrueProb, projectionDiff };
+    
+    return { 
+      edge, 
+      recommendedSide, 
+      confidence, 
+      marketImplied, 
+      estimatedTrueProb, 
+      projectionDiff 
+    };
   };
 
   const normalizeOdds = (odds: any, type = ''): number | null => {
@@ -331,122 +384,106 @@ const response = await fetch(
     return isNaN(numericOdds) ? null : numericOdds;
   };
 
-  // ===== PROCESS PRIZE PICKS DATA (with stat_type cleaning and diagnostics) =====
-const processPrizePicksData = (data: any): PlayerProp[] => {
-  log('🔄 Processing PrizePicks Data from API');
-  const selections = data.selections || [];
-  log(`📊 Processing ${selections.length} selections`);
-  if (selections.length === 0) return [];
+  // ===== PROCESS PRIZE PICKS DATA =====
+  const processPrizePicksData = (data: any): PlayerProp[] => {
+    log('🔄 Processing PrizePicks Data from API');
+    const selections = data.selections || [];
+    log(`📊 Processing ${selections.length} selections`);
+    if (selections.length === 0) return [];
 
-  // First, map each selection to a PlayerProp (same as before)
-  const mapped = selections.map((item: any, index: number) => {
-    const playerName = item.player || item.player_name || 'Unknown Player';
-    
-    // Clean stat_type: remove 'player_' prefix and lowercase
-    const rawStat = item.stat_type || item.prop_type || item.stat || 'points';    
-    const statType = rawStat.replace(/^player_/, '').toLowerCase();
-    const statTypes = new Set(selections.map(s => s.stat_type || s.prop_type));
-console.log('Raw stat types from API:', Array.from(statTypes));
-
-    const line = item.line || 0;
-    const offset = (Math.random() * 4) - 2; // replace with actual projection logic later
-    let projection = parseFloat((line + offset).toFixed(1));
-    const projectionDiff = projection - line;
-
-    let overPrice = item.over_price;
-    let underPrice = item.under_price;
-    if (item.odds && item.type) {
-      if (item.type.toLowerCase() === 'over') overPrice = normalizeOdds(item.odds, 'over');
-      else if (item.type.toLowerCase() === 'under') underPrice = normalizeOdds(item.odds, 'under');
-    }
-    overPrice = normalizeOdds(overPrice, 'over');
-    underPrice = normalizeOdds(underPrice, 'under');
-
-    const projectionValue = calculateProjectionValue(projection, line, overPrice, underPrice);
-    let kellyBetSize = 0;
-    if (projectionValue.edge > 0 && projectionValue.recommendedSide !== 'none') {
-      const odds = projectionValue.recommendedSide === 'over' ? overPrice : underPrice;
-      if (odds !== null) {
-        const kellyResult = calculateKellyBetSize(projectionValue.edge, odds, bankrollAmount);
-        kellyBetSize = kellyResult.percentOfBankroll;
-      }
-    }
-
-    // Parse numeric fields from API if they exist
-    const edgeFromAPI = parseFloat(item.edge);
-    const projEdgeFromAPI = parseFloat(item.projection_edge);
-
-    return {
-      player_name: playerName,
-      player: playerName,
-      stat_type: statType,
-      line: line,
-      projection: projection,
-      projection_diff: projectionDiff,
-      edge: !isNaN(edgeFromAPI) ? edgeFromAPI : (projEdgeFromAPI ? projEdgeFromAPI * 100 : 0),
-      projectionEdge: !isNaN(projEdgeFromAPI) ? projEdgeFromAPI : projectionValue.edge,
-      odds: item.odds,
-      over_price: overPrice,
-      under_price: underPrice,
-      bookmaker: item.bookmaker || 'PrizePicks',
-      value_side: item.value_side || projectionValue.recommendedSide,
-      game: item.game || `${item.team || ''} vs ${item.opponent || ''}`,
-      team: item.team,
-      opponent: item.opponent,
-      position: item.position,
-      confidence: item.confidence,
-      data_source: item.data_source || data.data_source,
-      is_real_data: item.is_real_data,
-      sport: item.sport || selectedSport,
-      last_update: item.last_updated || item.timestamp || new Date().toISOString(),
-      id: item.id || `prop-${index}-${Date.now()}`,
-      projection_confidence: projectionValue.confidence,
-      market_implied: projectionValue.marketImplied,
-      estimated_true_prob: projectionValue.estimatedTrueProb,
-      recommendedSide: projectionValue.recommendedSide,
-      kellyBetSize: kellyBetSize,
-      value_score: projectionValue.edge > 0 ? projectionValue.edge * 100 : 0
-    };
-  });
-
-  // DIAGNOSTIC: log stat values after mapping
-  console.log('First item stat after mapping:', mapped[0]?.stat_type);
-  console.log('All stat values after mapping:', [...new Set(mapped.map(s => s.stat_type))]);
-
-  // Then group over/under pairs for the same player/stat/line
-  const groupOverUnder = (props: PlayerProp[]): PlayerProp[] => {
-    const grouped = new Map<string, PlayerProp>();
+    const mapped = selections.map((item: any, index: number) => {
+      const playerName = item.player || item.player_name || 'Unknown Player';
       
-    props.forEach(prop => {
-      const key = `${prop.player}-${prop.stat_type}-${prop.line}`;
-      if (grouped.has(key)) {
-        // Merge over/under info
-        const existing = grouped.get(key)!;
-        if (prop.value_side === 'over') {   
-          existing.over_price = prop.over_price;
-        } else if (prop.value_side === 'under') {
-          existing.under_price = prop.under_price;
-        }
-        // Keep the higher projection (or whichever you prefer)
-        if ((prop.projection || 0) > (existing.projection || 0)) {
-          existing.projection = prop.projection;
-          existing.projection_diff = prop.projection_diff;
-          existing.projectionEdge = prop.projectionEdge;
-        }
-      } else {
-        grouped.set(key, { ...prop });
+      const rawStat = item.stat_type || item.prop_type || item.stat || 'points';    
+      const statType = rawStat.replace(/^player_/, '').toLowerCase();
+
+      const line = item.line || 0;
+      const offset = (Math.random() * 4) - 2;
+      let projection = parseFloat((line + offset).toFixed(1));
+      const projectionDiff = projection - line;
+
+      let overPrice = item.over_price;
+      let underPrice = item.under_price;
+      if (item.odds && item.type) {
+        if (item.type.toLowerCase() === 'over') overPrice = normalizeOdds(item.odds, 'over');
+        else if (item.type.toLowerCase() === 'under') underPrice = normalizeOdds(item.odds, 'under');
       }
-    }); 
+      overPrice = normalizeOdds(overPrice, 'over');
+      underPrice = normalizeOdds(underPrice, 'under');
 
-    return Array.from(grouped.values());
+      const projectionValue = calculateProjectionValue(projection, line, overPrice, underPrice);
+      let kellyBetSize = 0;
+      if (projectionValue.edge > 0 && projectionValue.recommendedSide !== 'none') {
+        const odds = projectionValue.recommendedSide === 'over' ? overPrice : underPrice;
+        if (odds !== null) {
+          const kellyResult = calculateKellyBetSize(projectionValue.edge, odds, bankrollAmount);
+          kellyBetSize = kellyResult.percentOfBankroll;
+        }
+      }
+
+      const edgeFromAPI = parseFloat(item.edge);
+      const projEdgeFromAPI = parseFloat(item.projection_edge);
+
+      return {
+        player_name: playerName,
+        player: playerName,
+        stat_type: statType,
+        line: line,
+        projection: projection,
+        projection_diff: projectionDiff,
+        edge: !isNaN(edgeFromAPI) ? edgeFromAPI : (projEdgeFromAPI ? projEdgeFromAPI * 100 : 0),
+        projectionEdge: !isNaN(projEdgeFromAPI) ? projEdgeFromAPI : projectionValue.edge,
+        odds: item.odds,
+        over_price: overPrice,
+        under_price: underPrice,
+        bookmaker: item.bookmaker || 'PrizePicks',
+        value_side: item.value_side || projectionValue.recommendedSide,
+        game: item.game || `${item.team || ''} vs ${item.opponent || ''}`,
+        team: item.team,
+        opponent: item.opponent,
+        position: item.position,
+        confidence: item.confidence,
+        data_source: item.data_source || data.data_source,
+        is_real_data: item.is_real_data,
+        sport: item.sport || selectedSport,
+        last_update: item.last_updated || item.timestamp || new Date().toISOString(),
+        id: item.id || `prop-${index}-${Date.now()}`,
+        projection_confidence: projectionValue.confidence,
+        market_implied: projectionValue.marketImplied,
+        estimated_true_prob: projectionValue.estimatedTrueProb,
+        recommendedSide: projectionValue.recommendedSide,
+        kellyBetSize: kellyBetSize,
+        value_score: projectionValue.edge > 0 ? projectionValue.edge * 100 : 0
+      };
+    });
+
+    const groupOverUnder = (props: PlayerProp[]): PlayerProp[] => {
+      const grouped = new Map<string, PlayerProp>();
+      props.forEach(prop => {
+        const key = `${prop.player}-${prop.stat_type}-${prop.line}`;
+        if (grouped.has(key)) {
+          const existing = grouped.get(key)!;
+          if (prop.value_side === 'over') {   
+            existing.over_price = prop.over_price;
+          } else if (prop.value_side === 'under') {
+            existing.under_price = prop.under_price;
+          }
+          if ((prop.projection || 0) > (existing.projection || 0)) {
+            existing.projection = prop.projection;
+            existing.projection_diff = prop.projection_diff;
+            existing.projectionEdge = prop.projectionEdge;
+          }
+        } else {
+          grouped.set(key, { ...prop });
+        }
+      });
+      return Array.from(grouped.values());
+    };
+
+    const combined = groupOverUnder(mapped);
+    log(`✅ Processed and grouped into ${combined.length} props`);
+    return combined;
   };
-
-  const combined = groupOverUnder(mapped);
-  // DIAGNOSTIC: stat types after grouping
-  console.log('Stat types after grouping:', [...new Set(combined.map(p => p.stat_type))]);
-  log(`✅ Processed and grouped into ${combined.length} props`);
-  return combined;
-};
 
   // ===== VALUE FILTERING LOGIC =====
   const applyValueFiltering = (props: PlayerProp[]): PlayerProp[] => {
@@ -483,12 +520,35 @@ console.log('Raw stat types from API:', Array.from(statTypes));
     });
   };
 
+  // ===== NEW: Apply Sorting & Position Filter to Data =====
+  const applySortAndFilter = (props: PlayerProp[]): PlayerProp[] => {
+    let filtered = props;
+
+    // Position filter
+    if (positionFilter !== 'all') {
+      filtered = filtered.filter(p => p.position === positionFilter);
+    }
+
+    // Sorting
+    return filtered.sort((a, b) => {
+      if (sortCriteria === 'projection') {
+        return (b.projection || 0) - (a.projection || 0);
+      } else if (sortCriteria === 'edge') {
+        const edgeA = a.projectionEdge || a.edge || 0;
+        const edgeB = b.projectionEdge || b.edge || 0;
+        return edgeB - edgeA;
+      } else if (sortCriteria === 'position') {
+        return (a.position || '').localeCompare(b.position || '');
+      }
+      return 0;
+    });
+  };
+
   // ===== MEMOIZED DERIVED DATA =====
   const sortedProps = useMemo(() => {
     log('📊 useMemo: sortedProps');
     if (!combinedData.length) return [];
 
-    // Basic filtering (sport, search)
     let filtered = combinedData.filter(prop => {
       if (selectedLeague !== 'All' && prop.sport !== selectedLeague) return false;
       if (debouncedSearch) {
@@ -501,10 +561,7 @@ console.log('Raw stat types from API:', Array.from(statTypes));
       return true;
     });
 
-    // Value filtering
     filtered = applyValueFiltering(filtered);
-
-    // Sort
     return sortByValueScore(filtered);
   }, [
     combinedData,
@@ -518,71 +575,48 @@ console.log('Raw stat types from API:', Array.from(statTypes));
     minEdgeThreshold
   ]);
 
+  // Modified to incorporate the new sort/filter
   const filteredData = useMemo(() => {
     log('📊 useMemo: filteredData');
     if (!sortedProps.length) return [];
 
     let result = [...sortedProps];
 
-    // Numeric filters
+    // Existing numeric filters
     result = result.filter(item => {
       const edge = item.edge || (item.projectionEdge ? item.projectionEdge * 100 : 0) || 0;
       return edge >= filters.minEdge && edge <= filters.maxEdge;
     });
-
     result = result.filter(item => {
       const projection = item.projection || 0;
       return projection >= filters.minProjection && projection <= filters.maxProjection;
     });
-
     if (filters.statType !== 'all') {
       result = result.filter(item => 
         item.stat_type?.toLowerCase() === filters.statType.toLowerCase()
       );
     }
-
     if (filters.valueSide !== 'all') {
       result = result.filter(item => 
         item.value_side === filters.valueSide
       );
     }
 
-    // Sort
-    result.sort((a, b) => {
-      let aVal, bVal;
-      switch (filters.sortBy) {
-        case 'edge':
-          aVal = a.edge || (a.projectionEdge ? a.projectionEdge * 100 : 0) || 0;
-          bVal = b.edge || (b.projectionEdge ? b.projectionEdge * 100 : 0) || 0;
-          break;
-        case 'projection':
-          aVal = a.projection || 0;
-          bVal = b.projection || 0;
-          break;
-        case 'line':
-          aVal = a.line || 0;
-          bVal = b.line || 0;
-          break;
-        default:
-          aVal = a.edge || 0;
-          bVal = b.edge || 0;
-      }
-      return filters.sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
-    });
+    // NEW: Apply position filter and sorting
+    result = applySortAndFilter(result);
 
     return result;
-  }, [sortedProps, filters]);
+  }, [sortedProps, filters, sortCriteria, positionFilter]);
 
-  // Top value picks (for the tab)
+  // Top value picks (for the tab) – also use new sort/filter
   const topValueProps = useMemo(() => {
     if (!sortedProps.length) return [];
-    return [...sortedProps]
+    return applySortAndFilter(sortedProps)
       .filter(p => (p.projectionEdge || 0) > 0)
-      .sort((a, b) => (b.projectionEdge || 0) - (a.projectionEdge || 0))
       .slice(0, 10);
-  }, [sortedProps]);
+  }, [sortedProps, sortCriteria, positionFilter]);
 
-  // ===== GENERATOR (enhanced with keyword detection and diagnostic logging) =====
+  // ===== GENERATOR =====
   const scorePropRelevance = (prop: PlayerProp, intent: QueryIntent): number => {
     let score = 0;
     const player = (prop.player_name || prop.player || '').toLowerCase();
@@ -598,123 +632,109 @@ console.log('Raw stat types from API:', Array.from(statTypes));
       );
       if (keywordMatch) score += 10;
     }
-    score += (prop.projectionEdge || 0) * 5; // small bonus
+    score += (prop.projectionEdge || 0) * 5;
     return score;
   };
 
-const generateProps = useCallback(() => {
-  setIsGenerating(true);
-  setTimeout(() => {
-    try {
-      log('[Generator] Starting generation...');
-      const source = ignoreFilters ? combinedData : sortedProps;
-      if (!source.length) {
-        alert('No props available to generate from.');
-        setIsGenerating(false);
-        return;
-      }
+  const generateProps = useCallback(() => {
+    setIsGenerating(true);
+    setTimeout(() => {
+      try {
+        log('[Generator] Starting generation...');
+        const source = ignoreFilters ? combinedData : sortedProps;
+        if (!source.length) {
+          alert('No props available to generate from.');
+          setIsGenerating(false);
+          return;
+        }
 
-      let workingSet = [...source];
+        let workingSet = [...source];
 
-      if (debouncedGenQuery.trim()) {
-        log('[Generator] Custom query:', debouncedGenQuery);
-        const intent = preprocessQuery(debouncedGenQuery);
-        log('[Generator] Query intent:', intent);
+        if (debouncedGenQuery.trim()) {
+          log('[Generator] Custom query:', debouncedGenQuery);
+          const intent = preprocessQuery(debouncedGenQuery);
+          log('[Generator] Query intent:', intent);
 
-        // ---- Enhanced keyword extraction ----
-        const statMapping: Record<string, string[]> = {
-          points: ['points', 'point', 'pts', 'scoring'],
-          rebounds: ['rebounds', 'rebound', 'rebs', 'boards'],
-          assists: ['assists', 'assist', 'asts', 'dimes'],
-          steals: ['steals', 'steal', 'stls'],
-          blocks: ['blocks', 'block', 'blks'],
-          threes: ['threes', 'three', '3pt', '3-pointers', '3pm'],
-        };
+          const statMapping: Record<string, string[]> = {
+            points: ['points', 'point', 'pts', 'scoring'],
+            rebounds: ['rebounds', 'rebound', 'rebs', 'boards'],
+            assists: ['assists', 'assist', 'asts', 'dimes'],
+            steals: ['steals', 'steal', 'stls'],
+            blocks: ['blocks', 'block', 'blks'],
+            threes: ['threes', 'three', '3pt', '3-pointers', '3pm'],
+          };
 
-        const detectedStats: string[] = [];
-        const queryLower = debouncedGenQuery.toLowerCase();
-        Object.entries(statMapping).forEach(([stat, aliases]) => {
-          if (aliases.some(alias => queryLower.includes(alias))) {
-            detectedStats.push(stat);
-            detectedStats.push(stat.replace(/s$/, '')); // singular
-          }
-        });
-
-        const keywords = [
-          intent.player,
-          intent.team,
-          ...intent.keywords,
-          intent.statType,
-          ...detectedStats,
-        ].filter(Boolean).map(k => k.toLowerCase());
-
-        log('[Generator] Keywords for filtering:', keywords);
-
-        // ---- Filter by keywords (any match) ----
-        if (keywords.length > 0) {
-          workingSet = workingSet.filter(p => {
-            const player = (p.player_name || p.player || '').toLowerCase();
-            const team = (p.team || '').toLowerCase();
-            const stat = (p.stat_type || '').toLowerCase();
-            const game = (p.game || '').toLowerCase();
-
-            // Optional: debug log for Norman Powell (uncomment if needed)
-            // if (player.includes('norman powell')) {
-            //   console.log('Checking Norman Powell prop:', { player, team, stat, game, keywords });
-            //   keywords.forEach(k => {
-            //     console.log(`  keyword "${k}": playerInc=${player.includes(k)}, teamInc=${team.includes(k)}, statInc=${stat.includes(k)}, gameInc=${game.includes(k)}`);
-            //   });
-            // }
-
-            // Keep if ANY keyword matches
-            return keywords.some(k =>
-              player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
-            );
+          const detectedStats: string[] = [];
+          const queryLower = debouncedGenQuery.toLowerCase();
+          Object.entries(statMapping).forEach(([stat, aliases]) => {
+            if (aliases.some(alias => queryLower.includes(alias))) {
+              detectedStats.push(stat);
+              detectedStats.push(stat.replace(/s$/, ''));
+            }
           });
-          console.log('[Generator] After keyword filter:', workingSet.length);
+
+          const keywords = [
+            intent.player,
+            intent.team,
+            ...intent.keywords,
+            intent.statType,
+            ...detectedStats,
+          ].filter(Boolean).map(k => k.toLowerCase());
+
+          log('[Generator] Keywords for filtering:', keywords);
+
+          if (keywords.length > 0) {
+            workingSet = workingSet.filter(p => {
+              const player = (p.player_name || p.player || '').toLowerCase();
+              const team = (p.team || '').toLowerCase();
+              const stat = (p.stat_type || '').toLowerCase();
+              const game = (p.game || '').toLowerCase();
+              return keywords.some(k =>
+                player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
+              );
+            });
+            console.log('[Generator] After keyword filter:', workingSet.length);
+          }
+
+          workingSet = workingSet
+            .map(p => ({ ...p, relevanceScore: scorePropRelevance(p, intent) }))
+            .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+          log('[Generator] After relevance scoring, top score:', workingSet[0]?.relevanceScore);
+        } else {
+          switch (genStrategy) {
+            case 'edge':
+              workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
+              break;
+            case 'value':
+              workingSet.sort((a, b) => (b.value_score || 0) - (a.value_score || 0));
+              break;
+            case 'projection':
+              workingSet.sort((a, b) => (b.projection || 0) - (a.projection || 0));
+              break;
+          }
         }
 
-        // ---- Score and sort by relevance ----
-        workingSet = workingSet
-          .map(p => ({ ...p, relevanceScore: scorePropRelevance(p, intent) }))
-          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
-        log('[Generator] After relevance scoring, top score:', workingSet[0]?.relevanceScore);
-      } else {
-        // No query: use strategy
-        switch (genStrategy) {
-          case 'edge':
-            workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
-            break;
-          case 'value':
-            workingSet.sort((a, b) => (b.value_score || 0) - (a.value_score || 0));
-            break;
-          case 'projection':
-            workingSet.sort((a, b) => (b.projection || 0) - (a.projection || 0));
-            break;
-        }
+        const newSet = workingSet.slice(0, genCount);
+        log('[Generator] New set length:', newSet.length);
+
+        setGeneratedProps(newSet);
+        setGeneratedSets(prev => [...prev, newSet]);
+        setCurrentSetIndex(prev => prev + 1);
+
+        logPromptPerformance(
+          debouncedGenQuery || genStrategy,
+          newSet.length,
+          newSet.reduce((sum, p) => sum + (p.projectionEdge || 0) * 100, 0) / newSet.length,
+          'generator'
+        );
+      } catch (error) {
+        console.error('[Generator] Error:', error);
+        alert('Generator error: ' + error.message);
+      } finally {
+        setIsGenerating(false);
       }
-
-      const newSet = workingSet.slice(0, genCount);
-      log('[Generator] New set length:', newSet.length);
-
-      setGeneratedProps(newSet);
-      setGeneratedSets(prev => [...prev, newSet]);
-      setCurrentSetIndex(prev => prev + 1);
-
-      logPromptPerformance(
-        debouncedGenQuery || genStrategy,
-        newSet.length,
-        newSet.reduce((sum, p) => sum + (p.projectionEdge || 0) * 100, 0) / newSet.length,
-        'generator'
-      );
-    } catch (error) {
-      console.error('[Generator] Error:', error);
-      alert('Generator error: ' + error.message);
-    } finally {
-      setIsGenerating(false);
-    }
-  }, 50);
-}, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps, debouncedGenQuery]);
+    }, 50);
+  }, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps, debouncedGenQuery]);
 
   const handlePrevSet = () => {
     setCurrentSetIndex(prev => prev - 1);
@@ -728,6 +748,13 @@ const generateProps = useCallback(() => {
     setGeneratedProps([]);
     setGeneratedSets([]);
     setCurrentSetIndex(0);
+  };
+
+  // ===== NEW: Handler for prompt clicks =====
+  const handlePromptClick = (query: string) => {
+    setGenCustomQuery(query);
+    // Small delay to let state update, then trigger generation
+    setTimeout(() => generateProps(), 100);
   };
 
   // ===== UI COMPONENTS =====
@@ -776,7 +803,6 @@ const generateProps = useCallback(() => {
       </Box>
       {showFilters && (
         <>
-          {/* Advanced Value Filtering */}
           <Paper sx={{ mb: 3, p: 2, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <Typography variant="h6" sx={{ color: '#059669', fontWeight: 'bold' }}>
@@ -831,7 +857,6 @@ const generateProps = useCallback(() => {
             </Grid>
           </Paper>
 
-          {/* Kelly Criterion */}
           <Paper sx={{ mb: 3, p: 2, bgcolor: '#f0f9ff', border: '1px solid #bae6fd' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <AttachMoney sx={{ mr: 1, color: '#059669' }} />
@@ -878,7 +903,6 @@ const generateProps = useCallback(() => {
             )}
           </Paper>
 
-          {/* Original Filters */}
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={3}>
               <Typography>Min Edge: {filters.minEdge}%</Typography>
@@ -950,11 +974,11 @@ const generateProps = useCallback(() => {
     </Paper>
   );
 
-  // PlayerCard with React.memo (unchanged)
+  // PlayerCard with React.memo (FIXED: added isOver based on projection vs line)
   const PlayerCard = React.memo(({ item }: { item: PlayerProp }) => {
     const edge = typeof item.edge === 'number' ? item.edge : Number(item.edge) || 0;
     const projectionEdge = typeof item.projectionEdge === 'number' ? item.projectionEdge : Number(item.projectionEdge) || 0;
-    const isOver = item.value_side === 'over';
+    const isOver = (item.projection || 0) > (item.line || 0);  // ✅ FIX: Arrow direction based on projection
 
     return (
       <Card sx={{
@@ -1188,6 +1212,54 @@ const generateProps = useCallback(() => {
         )}
       </Paper>
 
+      {/* NEW: Generator Prompts */}
+      <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>⚡ Quick Prompts</Typography>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          {generatorPrompts.map((prompt, idx) => (
+            <Button
+              key={idx}
+              size="small"
+              variant="outlined"
+              onClick={() => handlePromptClick(prompt.query)}
+              sx={{ textTransform: 'none' }}
+            >
+              {prompt.label}
+            </Button>
+          ))}
+        </Box>
+      </Paper>
+
+      {/* Tabs for All Props / Top Value */}
+      <Paper sx={{ mb: 2 }}>
+        <Tabs value={activeTab} onChange={(_, val) => setActiveTab(val)}>
+          <Tab label="All Props" value="all" />
+          <Tab label="Top Value Picks" value="top" />
+        </Tabs>
+      </Paper>
+
+      {/* NEW: Sorting & Filter Controls */}
+      <Paper sx={{ p: 2, mb: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Typography variant="body2" fontWeight="bold">Sort by:</Typography>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <Select value={sortCriteria} onChange={(e) => setSortCriteria(e.target.value as any)}>
+            <MenuItem value="edge">Edge</MenuItem>
+            <MenuItem value="projection">Projection</MenuItem>
+            <MenuItem value="position">Position</MenuItem>
+          </Select>
+        </FormControl>
+
+        <Typography variant="body2" fontWeight="bold" sx={{ ml: 2 }}>Position:</Typography>
+        <FormControl size="small" sx={{ minWidth: 100 }}>
+          <Select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="G">Guard (G)</MenuItem>
+            <MenuItem value="F">Forward (F)</MenuItem>
+            <MenuItem value="C">Center (C)</MenuItem>
+          </Select>
+        </FormControl>
+      </Paper>
+
       {/* Generated Props Section */}
       {generatedProps.length > 0 && (
         <Box sx={{ mb: 3, minHeight: generatedProps.length ? 'auto' : 0 }}>
@@ -1205,14 +1277,6 @@ const generateProps = useCallback(() => {
           <Divider sx={{ my: 2 }} />
         </Box>
       )}
-
-      {/* Tabs for All Props / Top Value */}
-      <Paper sx={{ mb: 2 }}>
-        <Tabs value={activeTab} onChange={(_, val) => setActiveTab(val)}>
-          <Tab label="All Props" value="all" />
-          <Tab label="Top Value Picks" value="top" />
-        </Tabs>
-      </Paper>
 
       {/* Conditional Rendering Based on Tab */}
       {activeTab === 'top' && (
@@ -1251,7 +1315,7 @@ const generateProps = useCallback(() => {
         </Box>
       )}
 
-      {/* Debug Info (can be removed in production) */}
+      {/* Debug Info */}
       <DebugInfo />
 
       {/* Filter Panel */}
@@ -1265,7 +1329,6 @@ const generateProps = useCallback(() => {
             <Typography variant="body2" color="text.secondary">{sortedProps.length} total props</Typography>
           </Box>
           <Grid container spacing={2}>
-            {/* Compute counts outside JSX to avoid parser confusion */}
             {(() => {
               const positiveCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0).length;
               const strongCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0.03).length;

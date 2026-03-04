@@ -1,12 +1,11 @@
 // src/utils/usePhraseCache.ts
 import { useRef } from 'react';
-import { SecretPhrase } from '../pages/SecretPhrasesScreen';
 
-export function usePhraseCache() {
-  const cache = useRef<Map<string, { data: SecretPhrase[]; timestamp: number }>>(new Map());
+export function usePhraseCache<T = any>() {
+  const cache = useRef<Map<string, { data: T; timestamp: number }>>(new Map());
   const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  const getCached = (key: string): SecretPhrase[] | null => {
+  const getCached = (key: string): T | null => {
     const entry = cache.current.get(key);
     if (entry && Date.now() - entry.timestamp < CACHE_TTL) {
       return entry.data;
@@ -14,7 +13,7 @@ export function usePhraseCache() {
     return null;
   };
 
-  const setCached = (key: string, data: SecretPhrase[]) => {
+  const setCached = (key: string, data: T) => {
     cache.current.set(key, { data, timestamp: Date.now() });
   };
 

@@ -214,106 +214,79 @@ const TrendAnalysisScreen: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
 
   // ========== Fetch Trends Data ==========
-  const fetchTrends = async (sport: string): Promise<ApiTrendResponse> => {
-    try {
-      const url = new URL(`/api/trends?sport=${sport}`, API_BASE_URL);
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        console.warn(`Trends API returned ${response.status}. Using mock data.`);
-        throw new Error('API not available');
-      }
-      const data = await response.json();
-      console.log('Raw API response:', data);
-      if (!data.success) {
-        console.warn('Trends API returned unsuccessful. Using mock.');
-        throw new Error('API unsuccessful');
-      }
-      if (!data.data) {
-        console.warn('Trends API returned no data. Using mock.');
-        throw new Error('No data');
-      }
-      return data;
-    } catch (error) {
-      console.error('Failed to fetch trends:', error);
-      throw error;
-    }
-  };
+const fetchTrends = async (sport: string): Promise<any> => {
+  try {
+    const url = new URL(`/api/trends?sport=${sport}`, API_BASE_URL);
+    const response = await fetch(url.toString());
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    console.log('Raw API response:', data);
+    return data; // expected shape: { trends: [...] }
+  } catch (error) {
+    console.error('Failed to fetch trends:', error);
+    throw error;
+  }
+};  
 
-  const {
-    data: apiResponse,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery<ApiTrendResponse>({
-    queryKey: ['trends', selectedSport],
-    queryFn: () => fetchTrends(selectedSport),
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    retry: 1,
-  });
+const {
+  data: apiResponse,
+  isLoading,
+  error,
+  refetch,
+} = useQuery<any>({
+  queryKey: ['trends', selectedSport],
+  queryFn: () => fetchTrends(selectedSport),
+  staleTime: 5 * 60 * 1000,
+  refetchOnWindowFocus: false,
+  retry: 1,
+});
 
   // ========== Process Data ==========
-  const isRealData = apiResponse?.data?.is_real_data || false;
+const isRealData = !!(apiResponse?.trends && apiResponse.trends.length > 0);  
 
-  const trends = useMemo<GroupedTrends>(() => {
-    const apiTrends = apiResponse?.data?.trends;
-    if (apiTrends && Array.isArray(apiTrends) && apiTrends.length > 0) {
-      console.log('API trends array:', apiTrends);
-      console.log('First trend item:', apiTrends[0]);
-      console.log('Keys of first item:', Object.keys(apiTrends[0]));
+const trends = useMemo<GroupedTrends>(() => {
+  const apiTrends = apiResponse?.trends;
+  if (apiTrends && Array.isArray(apiTrends) && apiTrends.length > 0) {
+    // Map each trend item to our internal format
+    const allTrends: TrendMetric[] = apiTrends.map((item: any) => {
+      const current = typeof item.average === 'number' ? item.average : parseFloat(item.average) || 0;
+      const previous = typeof item.last_5_average === 'number' ? item.last_5_average : parseFloat(item.last_5_average) || current;
+      let change = item.change ? parseFloat(String(item.change).replace('%', '')) : (current - previous);
+      const trend = item.trend || (change > 0 ? 'up' : change < 0 ? 'down' : 'stable');
 
-      // Map each trend item to our internal format with safe fallbacks
-      const allTrends: TrendMetric[] = apiTrends.map((item: any) => {
-        // Extract numeric values safely
-        const current = typeof item.average === 'number' ? item.average : parseFloat(item.average) || 0;
-        const previous = typeof item.last_5_average === 'number' ? item.last_5_average : parseFloat(item.last_5_average) || current;
-        let change = 0;
-        if (item.change) {
-          const changeStr = String(item.change).replace('%', '');
-          change = parseFloat(changeStr) || 0;
-        } else {
-          change = current - previous;
-        }
-        const trend = item.trend || (change > 0 ? 'up' : change < 0 ? 'down' : 'stable');
+      let data: TrendDataPoint[] | undefined;
+      if (item.last_5_games && Array.isArray(item.last_5_games)) {
+        data = item.last_5_games
+          .filter((val: any) => typeof val === 'number')
+          .map((val: number, idx: number) => ({
+            date: `Game ${idx + 1}`,
+            value: val,
+          }));
+      }
 
-        // Create simple time series from last_5_games if available
-        let data: TrendDataPoint[] | undefined;
-        if (item.last_5_games && Array.isArray(item.last_5_games)) {
-          data = item.last_5_games
-            .filter((val: any) => typeof val === 'number') // ensure numbers
-            .map((val: number, idx: number) => ({
-              date: `Game ${idx + 1}`,
-              value: val,
-            }));
-        }
-
-        return {
-          id: item.id || String(Math.random()),
-          title: item.metric || 'Unknown Metric',
-          current,
-          previous,
-          change,
-          trend,
-          sport: item.sport?.toUpperCase() || selectedSport.toUpperCase(),
-          data: data && data.length > 0 ? data : undefined, // only include if non-empty
-        };
-      });
-
-      // Since all items are player-level, put them in playerTrends
-      const grouped: GroupedTrends = {
-        playerTrends: allTrends,
-        teamTrends: [],
-        marketTrends: [],
+      return {
+        id: item.id || String(Math.random()),
+        title: item.metric || 'Unknown Metric',
+        current,
+        previous,
+        change,
+        trend,
+        sport: item.sport?.toUpperCase() || selectedSport.toUpperCase(),
+        data: data && data.length > 0 ? data : undefined,
       };
+    });
 
-      console.log('Grouped trends:', grouped);
-      return grouped;
-    }
+    return {
+      playerTrends: allTrends,
+      teamTrends: [],   // API may not separate these; adjust if needed
+      marketTrends: [],
+    };
+  }
 
-    // Fallback to mock data
-    console.log('Using mock trends');
-    return generateMockTrends(selectedSport);
-  }, [apiResponse, selectedSport]);
+  // Fallback to mock data
+  console.log('Using mock trends');
+  return generateMockTrends(selectedSport);
+}, [apiResponse, selectedSport]);
 
   // ========== Render Helpers ==========
   const renderTrendIcon = (trend: string) => {
@@ -528,7 +501,7 @@ const TrendAnalysisScreen: React.FC = () => {
     }
   };
 
-  return (
+return (
     <Box p={3} sx={{ bgcolor: theme.palette.background.default, minHeight: '100vh' }}>
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -585,11 +558,11 @@ const TrendAnalysisScreen: React.FC = () => {
           Last updated:{' '}
           {apiResponse?.last_updated
             ? format(new Date(apiResponse.last_updated), 'MMM dd, yyyy HH:mm')
-            : 'N/A'}
+            : format(new Date(), 'MMM dd, yyyy HH:mm')}
         </Typography>
       </Box>
-    </Box>
-  );
-};
+    </Box>  // ← closes the root Box
+  );        // ← closes the return
+};           // ← closes the component function
 
 export default TrendAnalysisScreen;

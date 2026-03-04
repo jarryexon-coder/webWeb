@@ -1,541 +1,501 @@
-import React, { useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+// src/pages/CorrelationExplorerScreen.tsx
+import React, { useState, useMemo } from 'react';
 import {
-  Container,
-  Typography,
   Box,
+  Typography,
+  Paper,
+  Grid,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  CircularProgress,
+  Alert,
+  Chip,
+  Stack,
   Card,
   CardContent,
-  Chip,
-  Grid,
-  Divider,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Skeleton,
-  Alert,
+  useTheme,
   Button,
-  Tooltip,
-  IconButton,
-  LinearProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Collapse,
 } from '@mui/material';
-import {
-  ExpandMore as ExpandMoreIcon,
-  ArrowBack as ArrowBackIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  TrendingFlat as TrendingFlatIcon,
-  InfoOutlined as InfoIcon,
-  ScatterPlot as CorrelationIcon,
-} from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import { PieChart } from '@mui/x-charts/PieChart';
-import { ScatterChart } from '@mui/x-charts/ScatterChart';
+import {
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  ZAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
+import axios from 'axios';
 
 // ----------------------------------------------------------------------
-// Types (based on expected backend response)
+// Types
 // ----------------------------------------------------------------------
 
-interface CorrelatedLeg {
-  id: string;
-  description: string;
-  sport: string;
-  market: string;
-  odds: string;
-  confidence: number;
-  player_name?: string;
-  stat_type?: string;
-  line?: number;
-  implied_probability: number;
-}
-
-interface CorrelationPair {
-  leg_a_id: string;
-  leg_b_id: string;
-  correlation_coefficient: number; // -1 to 1
-  strength: 'positive' | 'negative' | 'neutral';
-  description: string;
-}
-
-interface CorrelatedParlayDetails {
-  id: string;
+interface Player {
+  id: string | number;
   name: string;
+  team: string;
+  position: string;
   sport: string;
-  legs: CorrelatedLeg[];
-  correlations: CorrelationPair[];
-  total_odds: string;
-  combined_probability: number;
-  expected_value: number;
-  edge_percentage: number;
-  confidence_score: number;
-  risk_level: string;
-  analysis: string;
-  timestamp: string;
-  is_real_data: boolean;
+  salary: number;
+  fantasy_points: number;
+  projected_points: number;
+  points: number;
+  rebounds: number;
+  assists: number;
+  usage_rate?: number;
+  minutes?: number;
+  value?: number;
 }
 
-interface CorrelatedParlayResponse {
-  success: boolean;
-  data: CorrelatedParlayDetails;
-  message?: string;
+interface CorrelationData {
+  x: number;
+  y: number;
+  player: string;
+  team: string;
+  position: string;
+  salary: number;
+  fantasy_points: number;
+}
+
+type MetricOption = {
+  value: keyof Player | 'salary' | 'fantasy_points' | 'projected_points' | 'points' | 'rebounds' | 'assists' | 'usage_rate' | 'minutes' | 'value';
+  label: string;
+  format?: (val: number) => string;
+};
+
+// ----------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://prizepicks-production.up.railway.app';
+
+const SPORTS = [
+  { value: 'nba', label: 'NBA' },
+  { value: 'nfl', label: 'NFL' },
+  { value: 'mlb', label: 'MLB' },
+  { value: 'nhl', label: 'NHL' },
+];
+
+// Metrics – keep all, but some may be 0 if not provided by the API
+const METRICS: MetricOption[] = [
+  { value: 'salary', label: 'Salary ($)' },
+  { value: 'fantasy_points', label: 'Fantasy Points' },
+  { value: 'projected_points', label: 'Projected Fantasy' },
+  { value: 'points', label: 'Points' },
+  { value: 'rebounds', label: 'Rebounds' },
+  { value: 'assists', label: 'Assists' },
+  { value: 'usage_rate', label: 'Usage Rate %' },
+  { value: 'minutes', label: 'Minutes' },
+  { value: 'value', label: 'Value (FP/$1K)' },
+];
+
+const POSITION_COLORS: Record<string, string> = {
+  PG: '#4e79a7',
+  SG: '#f28e2b',
+  SF: '#e15759',
+  PF: '#76b7b2',
+  C: '#59a14f',
+  QB: '#edc949',
+  RB: '#af7aa1',
+  WR: '#ff9da7',
+  TE: '#9c755f',
+  K: '#bab0ac',
+  DEF: '#e377c2',
+  Unknown: '#7f7f7f',
+};
+
+// Generate a consistent color for any string (team names)
+const stringToColor = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  let color = '#';
+  for (let i = 0; i < 3; i++) {
+    const value = (hash >> (i * 8)) & 0xff;
+    color += ('00' + value.toString(16)).substr(-2);
+  }
+  return color;
+};
+
+// ----------------------------------------------------------------------
+// Safe numeric parsing (from AnalyticsDashboardScreen)
+// ----------------------------------------------------------------------
+function safeParseNumber(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[$,\s]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  }
+  return null;
+}
+
+function extractNumeric(player: any, possibleKeys: string[]): number {
+  for (const key of possibleKeys) {
+    if (player[key] !== undefined) {
+      const val = safeParseNumber(player[key]);
+      if (val !== null) return val;
+    }
+  }
+  return 0;
 }
 
 // ----------------------------------------------------------------------
-// API client
+// Utility: Pearson correlation coefficient
 // ----------------------------------------------------------------------
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-
-const fetchCorrelatedParlayDetails = async (id: string): Promise<CorrelatedParlayDetails> => {
-  const url = `${API_BASE_URL}/api/parlay/correlated/${id}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch correlated parlay: ${response.statusText}`);
-  }
-  const json: CorrelatedParlayResponse = await response.json();
-  if (!json.success || !json.data) {
-    throw new Error(json.message || 'Invalid response');
-  }
-  return json.data;
-};
-
-// ----------------------------------------------------------------------
-// Helper components
-// ----------------------------------------------------------------------
-
-const OddsChip = ({ odds }: { odds: string }) => {
-  const numericOdds = parseInt(odds, 10);
-  const isFavorite = numericOdds < 0;
-  return (
-    <Chip
-      label={odds}
-      size="small"
-      color={isFavorite ? 'success' : 'error'}
-      variant="outlined"
-    />
-  );
-};
-
-const ConfidenceIndicator = ({ value }: { value: number }) => {
-  let color: 'success' | 'warning' | 'error' = 'success';
-  if (value < 60) color = 'error';
-  else if (value < 75) color = 'warning';
-  return (
-    <Box display="flex" alignItems="center" gap={1}>
-      <Typography variant="body2" color="text.secondary">
-        {value}%
-      </Typography>
-      <LinearProgress
-        variant="determinate"
-        value={value}
-        sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
-        color={color}
-      />
-    </Box>
-  );
-};
-
-const RiskChip = ({ risk }: { risk: string }) => {
-  let color: 'success' | 'warning' | 'error' = 'warning';
-  const lower = risk.toLowerCase();
-  if (lower.includes('low')) color = 'success';
-  else if (lower.includes('high')) color = 'error';
-  return <Chip label={risk} size="small" color={color} variant="filled" />;
-};
-
-const CorrelationStrengthChip = ({ coefficient }: { coefficient: number }) => {
-  let label: string;
-  let color: 'success' | 'warning' | 'error' | 'default';
-  if (coefficient > 0.5) {
-    label = 'Strong Positive';
-    color = 'success';
-  } else if (coefficient > 0.2) {
-    label = 'Moderate Positive';
-    color = 'success';
-  } else if (coefficient < -0.5) {
-    label = 'Strong Negative';
-    color = 'error';
-  } else if (coefficient < -0.2) {
-    label = 'Moderate Negative';
-    color = 'error';
-  } else {
-    label = 'Weak / Neutral';
-    color = 'default';
-  }
-  return <Chip label={label} size="small" color={color} variant="outlined" />;
-};
+function pearsonCorrelation(x: number[], y: number[]): number {
+  const n = x.length;
+  if (n === 0) return 0;
+  const sumX = x.reduce((a, b) => a + b, 0);
+  const sumY = y.reduce((a, b) => a + b, 0);
+  const sumX2 = x.reduce((a, b) => a + b * b, 0);
+  const sumY2 = y.reduce((a, b) => a + b * b, 0);
+  const sumXY = x.reduce((a, b, i) => a + b * y[i], 0);
+  const numerator = n * sumXY - sumX * sumY;
+  const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+  return denominator === 0 ? 0 : numerator / denominator;
+}
 
 // ----------------------------------------------------------------------
 // Main Component
 // ----------------------------------------------------------------------
 
-const CorrelatedParlayDetailsScreen: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+export const CorrelationExplorerScreen: React.FC = () => {
+  const theme = useTheme();
 
+  // State
+  const [sport, setSport] = useState<string>('nba');
+  const [xMetric, setXMetric] = useState<keyof Player>('salary');
+  const [yMetric, setYMetric] = useState<keyof Player>('fantasy_points');
+  const [colorBy, setColorBy] = useState<'position' | 'team'>('position');
+  const [showDebug, setShowDebug] = useState<boolean>(false);
+
+  // Fetch players from /api/players/master (same as AnalyticsDashboard)
   const {
-    data: parlay,
+    data: players,
     isLoading,
+    isError,
     error,
-    refetch,
-  } = useQuery({
-    queryKey: ['correlatedParlay', id],
-    queryFn: () => fetchCorrelatedParlayDetails(id!),
-    enabled: !!id,
-    staleTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: false,
+  } = useQuery<Player[]>({
+    queryKey: ['players_master', sport],
+    queryFn: async () => {
+      const response = await axios.get(`${API_BASE}/api/players/master`, {
+        params: { sport },
+      });
+
+      const responseData = response.data;
+
+      if (responseData.success === false) {
+        throw new Error(responseData.message || 'Failed to load player data');
+      }
+
+      let playersArray: any[] = [];
+
+      if (responseData.success && Array.isArray(responseData.data)) {
+        playersArray = responseData.data;
+      } else if (Array.isArray(responseData)) {
+        playersArray = responseData;
+      } else if (responseData.players && Array.isArray(responseData.players)) {
+        playersArray = responseData.players;
+      } else if (responseData.data && Array.isArray(responseData.data)) {
+        playersArray = responseData.data;
+      } else {
+        console.warn('Unexpected API response structure in /api/players/master:', responseData);
+        return [];
+      }
+
+      console.log('Sample player data (first 3):', playersArray.slice(0, 3));
+
+      return playersArray.map((p: any) => ({
+        id: p.id || p.player_id || '',
+        name: p.name || p.full_name || p.player_name || 'Unknown',
+        team: p.team || p.team_abbrev || p.teamAbbrev || 'Unknown',
+        position: p.position || p.pos || 'Unknown',
+        sport: p.sport || sport,
+        salary: extractNumeric(p, ['salary', 'Salary', 'sal', 'price']),
+        fantasy_points: extractNumeric(p, ['fantasy_points', 'fantasyPoints', 'fpts', 'projection', 'fp']),
+        projected_points: extractNumeric(p, ['projected_points', 'projectedPoints', 'proj_pts']),
+        points: extractNumeric(p, ['points', 'pts', 'PTS', 'ppg']),
+        rebounds: extractNumeric(p, ['rebounds', 'reb', 'REB', 'rpg']),
+        assists: extractNumeric(p, ['assists', 'ast', 'AST', 'apg']),
+        usage_rate: extractNumeric(p, ['usage_rate', 'usageRate', 'usg']),
+        minutes: extractNumeric(p, ['minutes', 'min', 'MIN', 'mp']),
+        value: extractNumeric(p, ['value', 'val']),
+      }));
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
-  // Process correlation data for scatter plot
-  const scatterData = useMemo(() => {
-    if (!parlay) return [];
-    return parlay.correlations.map((pair, index) => {
-      const legA = parlay.legs.find(l => l.id === pair.leg_a_id);
-      const legB = parlay.legs.find(l => l.id === pair.leg_b_id);
-      return {
-        id: index,
-        x: legA?.implied_probability || 0,
-        y: legB?.implied_probability || 0,
-        correlation: pair.correlation_coefficient,
-        label: `${legA?.description.substring(0, 10)}… / ${legB?.description.substring(0, 10)}…`,
-      };
-    });
-  }, [parlay]);
+  // Prepare data for scatter plot (filter out missing values)
+  const chartData = useMemo<CorrelationData[]>(() => {
+    if (!players) return [];
+    return players
+      .filter((p) => {
+        const x = p[xMetric];
+        const y = p[yMetric];
+        return x != null && y != null && !isNaN(Number(x)) && !isNaN(Number(y));
+      })
+      .map((p) => ({
+        x: Number(p[xMetric]),
+        y: Number(p[yMetric]),
+        player: p.name,
+        team: p.team || 'Unknown',
+        position: p.position || 'Unknown',
+        salary: p.salary,
+        fantasy_points: p.fantasy_points,
+      }));
+  }, [players, xMetric, yMetric]);
+
+  // Calculate correlation coefficient
+  const correlation = useMemo(() => {
+    if (chartData.length < 2) return 0;
+    const xVals = chartData.map((d) => d.x);
+    const yVals = chartData.map((d) => d.y);
+    return pearsonCorrelation(xVals, yVals);
+  }, [chartData]);
+
+  // Check if all x or y values are zero
+  const allXZero = useMemo(() => {
+    if (chartData.length === 0) return false;
+    return chartData.every(d => d.x === 0);
+  }, [chartData]);
+
+  const allYZero = useMemo(() => {
+    if (chartData.length === 0) return false;
+    return chartData.every(d => d.y === 0);
+  }, [chartData]);
+
+  const allValuesZero = allXZero && allYZero;
+  const showZeroWarning = allXZero || allYZero;
+
+  // Group data for color encoding
+  const colorDomain = useMemo(() => {
+    if (!chartData.length) return [];
+    if (colorBy === 'position') {
+      return Array.from(new Set(chartData.map((d) => d.position)));
+    }
+    return Array.from(new Set(chartData.map((d) => d.team)));
+  }, [chartData, colorBy]);
+
+  const handleSportChange = (event: React.ChangeEvent<{ value: unknown }>) => {
+    setSport(event.target.value as string);
+  };
 
   if (isLoading) {
     return (
-      <Container maxWidth="xl" sx={{ py: 4 }}>
-        <Box display="flex" alignItems="center" mb={3}>
-          <IconButton onClick={() => navigate(-1)} sx={{ mr: 2 }}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Skeleton width={300} height={40} />
-        </Box>
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={8}>
-            <Skeleton variant="rounded" height={400} />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Skeleton variant="rounded" height={400} />
-          </Grid>
-        </Grid>
-      </Container>
+      <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: 'background.default', color: 'text.primary', minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress />
+        <Typography variant="h6" sx={{ ml: 2 }}>Loading player data...</Typography>
+      </Box>
     );
   }
 
-  if (error || !parlay) {
+  if (isError) {
     return (
-      <Container maxWidth="xl" sx={{ py: 4 }}>
-        <Box display="flex" alignItems="center" mb={3}>
-          <IconButton onClick={() => navigate(-1)} sx={{ mr: 2 }}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h5">Correlated Parlay Details</Typography>
-        </Box>
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={() => refetch()}>
-              Retry
-            </Button>
-          }
-        >
-          Failed to load correlated parlay: {(error as Error)?.message || 'Unknown error'}
+      <Box sx={{ p: 3, bgcolor: 'background.default', color: 'text.primary' }}>
+        <Alert severity="error" variant="filled">
+          Failed to load player data: {error instanceof Error ? error.message : 'Unknown error'}
         </Alert>
-      </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header with back button */}
-      <Box display="flex" alignItems="center" mb={3}>
-        <IconButton onClick={() => navigate(-1)} sx={{ mr: 2 }}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h4" fontWeight="bold">
-          {parlay.name}
-        </Typography>
-        <Chip
-          label={parlay.sport}
-          size="small"
-          color="primary"
-          sx={{ ml: 2 }}
-        />
-        {parlay.is_real_data ? (
-          <Chip label="Live Data" size="small" color="success" sx={{ ml: 2 }} />
-        ) : (
-          <Chip label="Simulated" size="small" variant="outlined" sx={{ ml: 2 }} />
-        )}
-      </Box>
+    <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: 'background.default', color: 'text.primary' }}>
+      <Typography variant="h4" gutterBottom fontWeight="bold">
+        Correlation Explorer
+      </Typography>
+      <Typography variant="body1" color="text.secondary" paragraph>
+        Explore relationships between player statistics, salaries, and fantasy performance.
+      </Typography>
 
-      {/* Key metrics */}
+      {/* Controls */}
+      <Paper sx={{ p: 3, mb: 4 }} elevation={2}>
+        <Grid container spacing={3} alignItems="center">
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth>
+              <InputLabel>Sport</InputLabel>
+              <Select value={sport} label="Sport" onChange={handleSportChange}>
+                {SPORTS.map((s) => (
+                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth>
+              <InputLabel>X‑Axis</InputLabel>
+              <Select value={xMetric} label="X‑Axis" onChange={(e) => setXMetric(e.target.value as keyof Player)}>
+                {METRICS.map((m) => (
+                  <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth>
+              <InputLabel>Y‑Axis</InputLabel>
+              <Select value={yMetric} label="Y‑Axis" onChange={(e) => setYMetric(e.target.value as keyof Player)}>
+                {METRICS.map((m) => (
+                  <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <FormControl fullWidth>
+              <InputLabel>Color By</InputLabel>
+              <Select value={colorBy} label="Color By" onChange={(e) => setColorBy(e.target.value as 'position' | 'team')}>
+                <MenuItem value="position">Position</MenuItem>
+                <MenuItem value="team">Team</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Stats summary */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card variant="outlined">
+        <Grid item xs={12} md={6}>
+          <Card>
             <CardContent>
-              <Typography color="text.secondary" gutterBottom>
-                Total Odds
-              </Typography>
-              <Typography variant="h4" fontWeight="bold">
-                {parlay.total_odds}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography color="text.secondary" gutterBottom>
-                Combined Probability
-              </Typography>
-              <Typography variant="h4" fontWeight="bold">
-                {(parlay.combined_probability * 100).toFixed(1)}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography color="text.secondary" gutterBottom>
-                Expected Value
-              </Typography>
-              <Typography
-                variant="h4"
-                fontWeight="bold"
-                color={parlay.expected_value > 0 ? 'success.main' : 'error.main'}
-              >
-                {parlay.expected_value > 0 ? '+' : ''}
-                {parlay.expected_value.toFixed(1)}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography color="text.secondary" gutterBottom>
-                Risk Level
-              </Typography>
-              <RiskChip risk={parlay.risk_level} />
-              <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1 }}>
-                Edge: {parlay.edge_percentage > 0 ? '+' : ''}
-                {parlay.edge_percentage.toFixed(1)}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Main content: Legs and Correlations */}
-      <Grid container spacing={3}>
-        {/* Left column: Legs */}
-        <Grid item xs={12} lg={7}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Parlay Legs
-            </Typography>
-            <TableContainer component={Paper} variant="outlined">
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Description</TableCell>
-                    <TableCell align="center">Sport</TableCell>
-                    <TableCell align="center">Market</TableCell>
-                    <TableCell align="center">Odds</TableCell>
-                    <TableCell align="center">Impl. Prob.</TableCell>
-                    <TableCell align="right">Confidence</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {parlay.legs.map((leg) => (
-                    <TableRow key={leg.id}>
-                      <TableCell>
-                        <Typography variant="body2">{leg.description}</Typography>
-                        {leg.player_name && (
-                          <Typography variant="caption" color="text.secondary">
-                            {leg.player_name} – {leg.stat_type} {leg.line}
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip label={leg.sport} size="small" />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip label={leg.market} size="small" variant="outlined" />
-                      </TableCell>
-                      <TableCell align="center">
-                        <OddsChip odds={leg.odds} />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Typography variant="body2">
-                          {(leg.implied_probability * 100).toFixed(1)}%
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Box sx={{ minWidth: 120 }}>
-                          <ConfidenceIndicator value={leg.confidence} />
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
-
-          {/* Correlation pairs table */}
-          <Paper sx={{ p: 3 }}>
-            <Box display="flex" alignItems="center" mb={2}>
-              <CorrelationIcon sx={{ mr: 1, color: 'primary.main' }} />
-              <Typography variant="h6">Correlation Matrix</Typography>
-            </Box>
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Leg A</TableCell>
-                    <TableCell>Leg B</TableCell>
-                    <TableCell align="center">Coefficient</TableCell>
-                    <TableCell align="center">Strength</TableCell>
-                    <TableCell>Description</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {parlay.correlations.map((pair, idx) => {
-                    const legA = parlay.legs.find(l => l.id === pair.leg_a_id);
-                    const legB = parlay.legs.find(l => l.id === pair.leg_b_id);
-                    return (
-                      <TableRow key={idx}>
-                        <TableCell>
-                          <Typography variant="body2">{legA?.description || 'N/A'}</Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">{legB?.description || 'N/A'}</Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography
-                            variant="body2"
-                            fontWeight="bold"
-                            color={
-                              pair.correlation_coefficient > 0
-                                ? 'success.main'
-                                : pair.correlation_coefficient < 0
-                                ? 'error.main'
-                                : 'text.secondary'
-                            }
-                          >
-                            {pair.correlation_coefficient.toFixed(2)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <CorrelationStrengthChip coefficient={pair.correlation_coefficient} />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption" color="text.secondary">
-                            {pair.description}
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
-        </Grid>
-
-        {/* Right column: Analysis & Visualizations */}
-        <Grid item xs={12} lg={5}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              AI Analysis
-            </Typography>
-            <Typography variant="body1" paragraph>
-              {parlay.analysis}
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography variant="body2" color="text.secondary">
-                Confidence Score
-              </Typography>
-              <Box display="flex" alignItems="center" gap={1}>
-                <Typography variant="h6" fontWeight="bold">
-                  {parlay.confidence_score}%
+              <Typography variant="h6" gutterBottom>Correlation Coefficient</Typography>
+              <Box display="flex" alignItems="baseline">
+                <Typography variant="h2" component="span" color="primary" fontWeight="medium">
+                  {correlation.toFixed(3)}
                 </Typography>
-                {parlay.confidence_score >= 75 ? (
-                  <TrendingUpIcon color="success" />
-                ) : parlay.confidence_score >= 60 ? (
-                  <TrendingFlatIcon color="warning" />
-                ) : (
-                  <TrendingDownIcon color="error" />
-                )}
+                <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>(r)</Typography>
               </Box>
-            </Box>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mt={1}>
-              <Typography variant="body2" color="text.secondary">
-                Edge
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {Math.abs(correlation) > 0.7 ? 'Strong correlation' : Math.abs(correlation) > 0.4 ? 'Moderate correlation' : 'Weak or no correlation'}
               </Typography>
-              <Typography
-                variant="h6"
-                fontWeight="bold"
-                color={parlay.edge_percentage > 0 ? 'success.main' : 'error.main'}
-              >
-                {parlay.edge_percentage > 0 ? '+' : ''}
-                {parlay.edge_percentage.toFixed(1)}%
-              </Typography>
-            </Box>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mt={1}>
-              <Typography variant="body2" color="text.secondary">
-                Last Updated
-              </Typography>
-              <Typography variant="body2">
-                {new Date(parlay.timestamp).toLocaleString()}
-              </Typography>
-            </Box>
-          </Paper>
-
-          {/* Correlation Scatter Plot */}
-          {scatterData.length > 0 && (
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Implied Probability Correlation
-              </Typography>
-              <Box sx={{ height: 300, width: '100%' }}>
-                <ScatterChart
-                  dataset={scatterData}
-                  xAxis={[{ label: 'Leg A Implied Probability (%)' }]}
-                  yAxis={[{ label: 'Leg B Implied Probability (%)' }]}
-                  series={[
-                    {
-                      label: 'Correlation',
-                      data: scatterData.map(d => ({
-                        x: d.x * 100,
-                        y: d.y * 100,
-                        id: d.id,
-                      })),
-                      valueFormatter: ({ x, y }) => `${x.toFixed(1)}%, ${y.toFixed(1)}%`,
-                    },
-                  ]}
-                  tooltip={{ trigger: 'item' }}
-                />
-              </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-                Each point represents a pair of legs; proximity indicates correlation strength.
-              </Typography>
-            </Paper>
-          )}
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>Sample Size</Typography>
+              <Typography variant="h3" color="secondary">{chartData.length}</Typography>
+              <Typography variant="body2" color="text.secondary">players with valid data</Typography>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
-    </Container>
+
+      {/* Zero data warnings */}
+      {showZeroWarning && chartData.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {allValuesZero
+            ? '⚠️ All selected metric values are zero. The API may not provide this data for the selected sport.'
+            : 'Some selected data points are zero. This may indicate missing data from the API.'}
+        </Alert>
+      )}
+
+      {/* Debug toggle (like AnalyticsDashboard) */}
+      <Button variant="outlined" onClick={() => setShowDebug(!showDebug)} sx={{ mb: 2 }}>
+        {showDebug ? 'Hide' : 'Show'} Raw Data Sample
+      </Button>
+      <Collapse in={showDebug}>
+        <Paper sx={{ p: 2, mb: 2, maxHeight: 300, overflow: 'auto' }}>
+          <Typography variant="subtitle2" gutterBottom>First 5 players (mapped):</Typography>
+          <pre style={{ fontSize: '0.8rem' }}>{JSON.stringify(players?.slice(0, 5), null, 2)}</pre>
+        </Paper>
+      </Collapse>
+
+      {/* Scatter Plot */}
+      <Paper sx={{ p: 2, mb: 4 }} elevation={2}>
+        <Typography variant="h6" gutterBottom>
+          Scatter Plot: {METRICS.find((m) => m.value === xMetric)?.label} vs{' '}
+          {METRICS.find((m) => m.value === yMetric)?.label}
+        </Typography>
+        {chartData.length === 0 ? (
+          <Alert severity="info">No valid data points to display.</Alert>
+        ) : (
+          <ResponsiveContainer width="100%" height={500}>
+            <ScatterChart margin={{ top: 20, right: 50, bottom: 40, left: 60 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                type="number"
+                dataKey="x"
+                name={METRICS.find((m) => m.value === xMetric)?.label || 'X'}
+                unit={xMetric === 'value' ? '' : xMetric === 'usage_rate' ? '%' : ''}
+                label={{ value: METRICS.find((m) => m.value === xMetric)?.label || 'X', position: 'bottom', offset: 10 }}
+              />
+              <YAxis
+                type="number"
+                dataKey="y"
+                name={METRICS.find((m) => m.value === yMetric)?.label || 'Y'}
+                unit={yMetric === 'value' ? '' : yMetric === 'usage_rate' ? '%' : ''}
+                label={{ value: METRICS.find((m) => m.value === yMetric)?.label || 'Y', angle: -90, position: 'left', offset: 15 }}
+              />
+              <ZAxis type="number" range={[60, 400]} />
+              <Tooltip
+                cursor={{ strokeDasharray: '3 3' }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const data = payload[0].payload as CorrelationData;
+                    return (
+                      <Paper sx={{ p: 1.5, backgroundColor: theme.palette.background.paper }}>
+                        <Typography variant="subtitle2">{data.player}</Typography>
+                        <Typography variant="body2">{data.team} · {data.position}</Typography>
+                        <Typography variant="body2" color="primary">{METRICS.find((m) => m.value === xMetric)?.label}: {data.x.toLocaleString()}</Typography>
+                        <Typography variant="body2" color="secondary">{METRICS.find((m) => m.value === yMetric)?.label}: {data.y.toLocaleString()}</Typography>
+                      </Paper>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Legend wrapperStyle={{ paddingLeft: '20px' }} />
+              {colorDomain.map((category) => {
+                const color = colorBy === 'position' ? POSITION_COLORS[category] || stringToColor(category) : stringToColor(category);
+                return (
+                  <Scatter
+                    key={category}
+                    name={category}
+                    data={chartData.filter((d) => (colorBy === 'position' ? d.position : d.team) === category)}
+                    fill={color}
+                    line={false}
+                    shape="circle"
+                  />
+                );
+              })}
+            </ScatterChart>
+          </ResponsiveContainer>
+        )}
+      </Paper>
+
+      {/* Quick insights */}
+      <Paper sx={{ p: 3 }} elevation={2}>
+        <Typography variant="h6" gutterBottom>Insights</Typography>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+          <Chip label={`${chartData.length} players analyzed`} variant="outlined" color="default" />
+          <Chip label={`Correlation: ${correlation.toFixed(3)}`} variant="outlined" color={Math.abs(correlation) > 0.5 ? 'success' : 'default'} />
+          <Chip label={`X: ${METRICS.find((m) => m.value === xMetric)?.label}`} variant="outlined" />
+          <Chip label={`Y: ${METRICS.find((m) => m.value === yMetric)?.label}`} variant="outlined" />
+        </Stack>
+        <Typography variant="body2" color="text.secondary">
+          {Math.abs(correlation) > 0.8
+            ? 'Very strong linear relationship. Consider using this metric for lineup optimization.'
+            : Math.abs(correlation) > 0.6
+            ? 'Strong correlation — good predictive potential.'
+            : Math.abs(correlation) > 0.4
+            ? 'Moderate correlation. May be useful in combination with other factors.'
+            : 'Weak correlation. These two metrics move independently.'}
+        </Typography>
+      </Paper>
+    </Box>
   );
 };
 
-export default CorrelatedParlayDetailsScreen;
+export default CorrelationExplorerScreen;

@@ -17,27 +17,22 @@ interface NBAPropsProps {
   allPlayers: Player[];
 }
 
-interface PropItem {
-  stat: string;
-  line: number;
-  over_odds: number;
-  under_odds: number;
-  projected: number;
-}
-
-interface PlayerProps {
+interface PropSelection {
   id: string;
   player: string;
   team: string;
   position: string;
-  props: PropItem[];
-  last_updated: string;
-  is_mock: boolean;
-  source: string;
+  stat_type: string;
+  line: number;
+  projection: number;
+  edge?: number;
+  bookmaker: string;
+  away_team_abbr: string;
+  home_team_abbr: string;
 }
 
 const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
-  const [propsData, setPropsData] = useState<PlayerProps[]>([]);
+  const [props, setProps] = useState<PropSelection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,14 +42,14 @@ const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
       setError(null);
       try {
         const apiBase = 'https://python-api-fresh-production.up.railway.app';
-        const url = `${apiBase}/api/fantasy/props?sport=nba&limit=20`;
+        const url = `${apiBase}/api/fantasy/props?sport=nba&limit=50`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success && Array.isArray(data.props)) {
-          setPropsData(data.props);
+          setProps(data.props);
         } else {
-          setPropsData([]);
+          setProps([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load props');
@@ -66,27 +61,28 @@ const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
     fetchProps();
   }, []);
 
-  const getFullPlayer = (playerName: string): Player | undefined => {
-    if (!allPlayers) return undefined;
-    return allPlayers.find(p => p.name === playerName);
+  // Helper to compute edge if missing
+  const getEdge = (prop: PropSelection): number => {
+    if (prop.edge !== undefined) return parseFloat(prop.edge as any);
+    if (prop.projection && prop.line) {
+      return ((prop.projection - prop.line) / prop.line) * 100;
+    }
+    return 0;
   };
 
-  const handleAdd = (propPlayer: PlayerProps) => {
-    const full = getFullPlayer(propPlayer.player);
-    if (full) {
-      onAddToLineup(full);
+  const handleAdd = (prop: PropSelection) => {
+    const fullPlayer = allPlayers.find(p => p.name === prop.player);
+    if (fullPlayer) {
+      onAddToLineup(fullPlayer);
     } else {
-      // Improved fallback: estimate salary based on projection
-      const firstProp = propPlayer.props[0];
-      const estimatedProjection = firstProp?.projected || firstProp?.line || 15;
-      const estimatedSalary = Math.min(15000, Math.max(3000, Math.round(estimatedProjection * 250 + 2000)));
+      // Fallback with estimated salary
       onAddToLineup({
-        id: propPlayer.id,
-        name: propPlayer.player,
-        team: propPlayer.team,
-        position: propPlayer.position,
-        salary: estimatedSalary,
-        fantasy_projection: estimatedProjection,
+        id: prop.id,
+        name: prop.player,
+        team: prop.team,
+        position: prop.position,
+        salary: Math.min(15000, Math.max(3000, Math.round(prop.projection * 250 + 2000))),
+        fantasy_projection: prop.projection,
       });
     }
   };
@@ -101,59 +97,62 @@ const NBAProps: React.FC<NBAPropsProps> = ({ onAddToLineup, allPlayers }) => {
 
   if (error) {
     return (
-      <Alert severity="error" sx={{ mb: 2 }}>
-        {error}
-      </Alert>
+      <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
     );
   }
 
-// Filter out players with no valid props (line > 0)
-const validProps = propsData.filter(p => p.props && p.props.some(prop => prop.line > 0));
-if (validProps.length === 0) {
-  return (
-    <Alert severity="info">No real-time player props available at this time.</Alert>
-  );
-}
+  if (props.length === 0) {
+    return (
+      <Alert severity="info">No real-time player props available at this time.</Alert>
+    );
+  }
+
+  // Group by player for display
+  const grouped = props.reduce((acc, prop) => {
+    if (!acc[prop.player]) acc[prop.player] = [];
+    acc[prop.player].push(prop);
+    return acc;
+  }, {} as Record<string, PropSelection[]>);
 
   return (
     <Box>
-      {validProps.map(playerProps => (
-        <Card key={playerProps.id} sx={{ mb: 3 }}>
+      {Object.entries(grouped).map(([playerName, playerProps]) => (
+        <Card key={playerName} sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Box>
-                <Typography variant="h6">{playerProps.player}</Typography>
+                <Typography variant="h6">{playerName}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {playerProps.team} • {playerProps.position}
+                  {playerProps[0].team} • {playerProps[0].position}
                 </Typography>
               </Box>
-              <Chip
-                label={playerProps.is_mock ? 'Simulated' : 'Live'}
-                size="small"
-                color={playerProps.is_mock ? 'warning' : 'success'}
-              />
+              <Chip label="Live" size="small" color="success" />
             </Box>
 
             <Grid container spacing={2}>
-              {playerProps.props.map((prop, idx) => (
-                <Grid item xs={12} sm={6} md={4} key={idx}>
-                  <Box sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
-                    <Typography variant="subtitle2">{prop.stat}</Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                      <Typography variant="body2">Line: {prop.line}</Typography>
-                      <Typography variant="body2">Proj: {prop.projected?.toFixed(1)}</Typography>
+              {playerProps.map((prop, idx) => {
+                const edge = getEdge(prop);
+                const edgeColor = edge > 5 ? 'success' : edge < -5 ? 'error' : 'default';
+                return (
+                  <Grid item xs={12} sm={6} md={4} key={idx}>
+                    <Box sx={{ p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
+                      <Typography variant="subtitle2">{prop.stat_type}</Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                        <Typography variant="body2">Line: {prop.line}</Typography>
+                        <Typography variant="body2">Proj: {prop.projection?.toFixed(1)}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5, alignItems: 'center' }}>
+                        <Chip label={prop.bookmaker} size="small" variant="outlined" />
+                        <Chip label={`${edge.toFixed(1)}%`} size="small" color={edgeColor} variant="outlined" />
+                      </Box>
                     </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-                      <Chip label={`O ${prop.over_odds}`} size="small" variant="outlined" />
-                      <Chip label={`U ${prop.under_odds}`} size="small" variant="outlined" />
-                    </Box>
-                  </Box>
-                </Grid>
-              ))}
+                  </Grid>
+                );
+              })}
             </Grid>
 
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-              <Button variant="contained" size="small" onClick={() => handleAdd(playerProps)}>
+              <Button variant="contained" size="small" onClick={() => handleAdd(playerProps[0])}>
                 Add to Lineup
               </Button>
             </Box>
