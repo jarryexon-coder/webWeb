@@ -1,3 +1,4 @@
+// src/pages/GolfTournaments.tsx
 import React, { useMemo, useState } from 'react';
 import {
   Container,
@@ -43,20 +44,20 @@ import { useQuery } from '@tanstack/react-query';
 // ----------------------------------------------------------------------
 
 interface GolfTournament {
-  id: string;
+  id: string | number;
   name: string;
-  location: string;
+  location: string;          // e.g. "Kapalua, Maui, Hawaii"
   course: string;
   country: string;
-  start_date: string;
-  end_date: string;
+  start_date: string;        // ISO date or display string
+  end_date: string;          // may be ISO or display string like "Jan 2 - 5"
   purse_usd: number;
   format: 'Stroke Play' | 'Match Play' | 'Team' | 'Other';
   tour: 'PGA' | 'DP World' | 'LIV' | 'Champions' | 'Korn Ferry' | 'Other';
   status: 'upcoming' | 'ongoing' | 'completed';
-  defending_champion?: string;
-  winner?: string;
-  winner_score?: string;
+  defending_champion?: string | null;
+  winner?: string | null;
+  winner_score?: string | null;
 }
 
 interface GolfTournamentsData {
@@ -174,7 +175,52 @@ const getMockTournamentsData = (): GolfTournamentsData => ({
 // ----------------------------------------------------------------------
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
+// Helper to parse purse string like "$20,000,000" -> 20000000
+const parsePurse = (purseStr?: string): number => {
+  if (!purseStr) return 0;
+  const numeric = purseStr.replace(/[^0-9.]/g, '');
+  return parseFloat(numeric) || 0;
+};
+
+// Map API status to our status strings
+const mapStatus = (apiStatus: string): 'upcoming' | 'ongoing' | 'completed' => {
+  const upper = apiStatus?.toUpperCase() || '';
+  if (upper.includes('COMPLETE')) return 'completed';
+  if (upper.includes('UPCOMING')) return 'upcoming';
+  if (upper.includes('LIVE') || upper.includes('ONGOING')) return 'ongoing';
+  return 'upcoming'; // default
+};
+
+// Map raw API tournament object to our GolfTournament interface
+const mapApiTournament = (apiTournament: any): GolfTournament => {
+  const locationParts = [apiTournament.city, apiTournament.state].filter(Boolean);
+  const location = locationParts.join(', ') || apiTournament.city || '';
+
+  // Extract winner info from champion object
+  const champion = apiTournament.champion;
+  const winnerName = champion ? `${champion.first_name} ${champion.last_name}` : null;
+
+  return {
+    id: apiTournament.id,
+    name: apiTournament.name,
+    location,
+    course: apiTournament.course_name || '',
+    country: apiTournament.country || '',
+    start_date: apiTournament.start_date,
+    end_date: apiTournament.end_date, // may be non‑ISO string
+    purse_usd: parsePurse(apiTournament.purse),
+    format: 'Stroke Play', // not provided by API
+    tour: 'PGA', // all tournaments from this endpoint are PGA
+    status: mapStatus(apiTournament.status),
+    defending_champion: null, // not available
+    winner: winnerName,
+    winner_score: null, // not in tournaments endpoint
+  };
+};
+
+// Required fields after mapping – allow nulls, only require existence
 const requiredFields: (keyof GolfTournament)[] = [
+  'id',
   'name',
   'location',
   'course',
@@ -187,20 +233,19 @@ const requiredFields: (keyof GolfTournament)[] = [
   'status',
 ];
 
-function isTournamentComplete(t: any): t is GolfTournament {
-  return requiredFields.every(field => t[field] != null);
+function isTournamentMinimallyComplete(t: any): t is GolfTournament {
+  return requiredFields.every(field => t[field] !== undefined);
 }
 
 function areTournamentsComplete(tournaments: any[]): tournaments is GolfTournament[] {
-  return tournaments.length > 0 && tournaments.every(isTournamentComplete);
+  return tournaments.length > 0 && tournaments.every(isTournamentMinimallyComplete);
 }
 
-const fetchGolfTournaments = async (year?: number, tour?: string): Promise<GolfTournamentsData> => {
+const fetchGolfTournaments = async (season?: number, tour?: string): Promise<GolfTournamentsData> => {
   try {
     const baseUrl = API_BASE_URL || window.location.origin;
     const url = new URL('/api/golf/tournaments', baseUrl);
-
-    if (year) url.searchParams.append('year', String(year));
+    if (season) url.searchParams.append('season', String(season));
     if (tour && tour !== 'all') url.searchParams.append('tour', tour);
 
     const response = await fetch(url.toString());
@@ -209,18 +254,81 @@ const fetchGolfTournaments = async (year?: number, tour?: string): Promise<GolfT
       return getMockTournamentsData();
     }
     const json: GolfTournamentsResponse = await response.json();
+
+    // Debug logs (remove after fixing)
+    console.log('Raw API response data:', json.data);
+    console.log('First tournament item:', json.data?.tournaments?.[0]);
+
     if (!json.success || !json.data) {
       console.warn('API returned invalid response, using mock data');
       return getMockTournamentsData();
     }
 
-    // Validate that the tournaments array is complete
-    if (areTournamentsComplete(json.data.tournaments)) {
-      return json.data;
-    } else {
-      console.warn('API returned incomplete tournament data, using mock');
+    // ✅ If it's mock data from backend, just use our own mock (which is more complete)
+    if (!json.data.is_real_data) {
+      console.log('Backend mock is incomplete – using local mock');
       return getMockTournamentsData();
     }
+
+    // For real data, proceed with mapping/validation as before
+    let tournaments: GolfTournament[] = [];
+    const rawTournaments = json.data.tournaments;
+
+    if (Array.isArray(rawTournaments)) {
+      // Case 1: Already in our GolfTournament format
+      if (rawTournaments.length > 0 && rawTournaments.every(t => t.id !== undefined && t.name !== undefined)) {
+        tournaments = rawTournaments.map(t => ({
+          id: t.id ?? '',
+          name: t.name ?? 'Unknown',
+          location: t.location ?? '',
+          course: t.course ?? '',
+          country: t.country ?? '',
+          start_date: t.start_date ?? '',
+          end_date: t.end_date ?? '',
+          purse_usd: t.purse_usd ?? 0,
+          format: t.format ?? 'Stroke Play',
+          tour: t.tour ?? 'PGA',
+          status: t.status ?? 'upcoming',
+          defending_champion: t.defending_champion ?? null,
+          winner: t.winner ?? null,
+          winner_score: t.winner_score ?? null,
+        }));
+      }
+      // Case 2: Raw API data (has course_name, city, etc.)
+      else if (rawTournaments.length > 0 && rawTournaments[0].course_name !== undefined) {
+        tournaments = rawTournaments.map(mapApiTournament);
+        tournaments = tournaments.map(t => ({
+          ...t,
+          location: t.location ?? '',
+          course: t.course ?? '',
+          country: t.country ?? '',
+          start_date: t.start_date ?? '',
+          end_date: t.end_date ?? '',
+          purse_usd: t.purse_usd || 0,
+          format: t.format || 'Stroke Play',
+          tour: t.tour || 'PGA',
+          status: t.status || 'upcoming',
+        }));
+      } else {
+        console.warn('API returned unexpected data format, using mock');
+        return getMockTournamentsData();
+      }
+
+      // Final sanity check
+      if (!tournaments.every(t => t.id && t.name && t.start_date)) {
+        console.warn('Mapped tournaments missing essential fields, using mock');
+        return getMockTournamentsData();
+      }
+    } else {
+      console.warn('API returned non-array tournaments, using mock');
+      return getMockTournamentsData();
+    }
+
+    return {
+      tournaments,
+      last_updated: json.data.last_updated || new Date().toISOString(),
+      is_real_data: json.data.is_real_data || false,
+    };
   } catch (error) {
     console.error('Error fetching golf tournaments:', error);
     return getMockTournamentsData();
@@ -260,6 +368,17 @@ const TourChip = ({ tour }: { tour?: string }) => {
   return <Chip label={tour} size="small" color={color} variant="outlined" />;
 };
 
+// Helper to format date display safely
+const formatDate = (dateStr?: string): string => {
+  if (!dateStr) return 'TBD';
+  // If it's an ISO string, format it; otherwise return as is
+  const date = new Date(dateStr);
+  if (!isNaN(date.getTime())) {
+    return date.toLocaleDateString();
+  }
+  return dateStr; // non-ISO string like "Jan 2 - 5"
+};
+
 // ----------------------------------------------------------------------
 // Main Component
 // ----------------------------------------------------------------------
@@ -286,7 +405,6 @@ const GolfTournaments: React.FC = () => {
     refetchOnWindowFocus: false,
   });
 
-  // Ensure we have an array
   const tournaments = useMemo(() => tournamentsData?.tournaments ?? [], [tournamentsData]);
 
   const handleYearChange = (event: SelectChangeEvent) => {
@@ -319,7 +437,6 @@ const GolfTournaments: React.FC = () => {
     );
   }
 
-  // Show error only if we have no data at all (shouldn't happen due to mock)
   if (error && tournaments.length === 0) {
     return (
       <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
@@ -337,7 +454,6 @@ const GolfTournaments: React.FC = () => {
     );
   }
 
-  // Use the data, which might be mock
   const isRealData = tournamentsData?.is_real_data ?? false;
   const lastUpdated = tournamentsData?.last_updated ?? new Date().toISOString();
 
@@ -449,19 +565,17 @@ const GolfTournaments: React.FC = () => {
                     <TableCell align="center">
                       <Box display="flex" alignItems="center" gap={0.5}>
                         <LocationIcon fontSize="small" />
-                        {tournament.location ?? '—'}, {tournament.country ?? '—'}
+                        {tournament.location ? `${tournament.location}, ${tournament.country}` : tournament.country}
                       </Box>
                     </TableCell>
-                    <TableCell align="center">{tournament.course ?? '—'}</TableCell>
+                    <TableCell align="center">{tournament.course || '—'}</TableCell>
                     <TableCell align="center">
-                      {tournament.start_date && tournament.end_date
-                        ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                        : 'TBD'}
+                      {formatDate(tournament.start_date)} – {formatDate(tournament.end_date)}
                     </TableCell>
                     <TableCell align="center">
                       <Box display="flex" alignItems="center" gap={0.5}>
                         <PurseIcon fontSize="small" />
-                        ${((tournament.purse_usd ?? 0) / 1e6).toFixed(1)}M
+                        ${((tournament.purse_usd || 0) / 1e6).toFixed(1)}M
                       </Box>
                     </TableCell>
                     <TableCell align="center">
@@ -502,21 +616,19 @@ const GolfTournaments: React.FC = () => {
                         <TrophyIcon color="primary" />
                       </Box>
                       <Typography variant="body2" color="text.secondary" gutterBottom>
-                        {tournament.course ?? '—'}, {tournament.location ?? '—'}, {tournament.country ?? '—'}
+                        {tournament.course || '—'}, {tournament.location || '—'}, {tournament.country || '—'}
                       </Typography>
                       <Divider sx={{ my: 1 }} />
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2">Dates</Typography>
                         <Typography variant="body2">
-                          {tournament.start_date && tournament.end_date
-                            ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                            : 'TBD'}
+                          {formatDate(tournament.start_date)} – {formatDate(tournament.end_date)}
                         </Typography>
                       </Box>
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2">Purse</Typography>
                         <Typography variant="body2" fontWeight="bold">
-                          ${((tournament.purse_usd ?? 0) / 1e6).toFixed(1)}M
+                          ${((tournament.purse_usd || 0) / 1e6).toFixed(1)}M
                         </Typography>
                       </Box>
                       <Box display="flex" justifyContent="space-between">
@@ -570,12 +682,10 @@ const GolfTournaments: React.FC = () => {
                       <TableCell align="center">
                         <TourChip tour={tournament.tour} />
                       </TableCell>
-                      <TableCell align="center">{tournament.location ?? '—'}</TableCell>
+                      <TableCell align="center">{tournament.location || '—'}</TableCell>
+                      <TableCell align="center">{formatDate(tournament.start_date)}</TableCell>
                       <TableCell align="center">
-                        {tournament.start_date ? new Date(tournament.start_date).toLocaleDateString() : 'TBD'}
-                      </TableCell>
-                      <TableCell align="center">
-                        ${((tournament.purse_usd ?? 0) / 1e6).toFixed(1)}M
+                        ${((tournament.purse_usd || 0) / 1e6).toFixed(1)}M
                       </TableCell>
                     </TableRow>
                   ))}
@@ -608,22 +718,20 @@ const GolfTournaments: React.FC = () => {
                   .sort((a, b) => {
                     const aDate = a.end_date ? new Date(a.end_date).getTime() : 0;
                     const bDate = b.end_date ? new Date(b.end_date).getTime() : 0;
-                    return bDate - aDate; // most recent first
+                    return bDate - aDate;
                   })
                   .map((tournament) => (
                     <TableRow key={tournament.id} hover>
                       <TableCell>{tournament.name}</TableCell>
                       <TableCell align="center">
-                        {tournament.start_date && tournament.end_date
-                          ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                          : 'TBD'}
+                        {formatDate(tournament.start_date)} – {formatDate(tournament.end_date)}
                       </TableCell>
                       <TableCell align="center">
                         {tournament.winner ?? tournament.defending_champion ?? 'N/A'}
                       </TableCell>
                       <TableCell align="center">{tournament.winner_score ?? '-'}</TableCell>
                       <TableCell align="center">
-                        ${((tournament.purse_usd ?? 0) / 1e6).toFixed(1)}M
+                        ${((tournament.purse_usd || 0) / 1e6).toFixed(1)}M
                       </TableCell>
                     </TableRow>
                   ))}

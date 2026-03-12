@@ -35,7 +35,7 @@ import {
   LocationOn as LocationIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import tennisApi from '../services/tennis';
+import tennisApi from '../services/tennis'; // Keep for potential future use, not used in this component now
 
 // ----------------------------------------------------------------------
 // Types
@@ -175,7 +175,6 @@ const getMockTennisMatches = (): TennisMatch[] => {
       surface: 'Clay',
       best_of: 3,
     },
-    // Add more as needed
   ];
 };
 
@@ -207,50 +206,105 @@ function areMatchesComplete(matches: any[]): matches is TennisMatch[] {
 }
 
 // ----------------------------------------------------------------------
-// API function with fallback
+// API function with fallback – updated to use /api/atp/matches
 // ----------------------------------------------------------------------
 const fetchTennisMatches = async (date?: string, surface?: string): Promise<TennisApiResponse> => {
   try {
-    // Call the real API
-    const response = await tennisApi.getMatches(undefined, date);
-
-    // Handle different response shapes
-    if (Array.isArray(response)) {
-      if (areMatchesComplete(response)) {
-        return {
-          success: true,
-          data: {
-            matches: response,
-            last_updated: new Date().toISOString(),
-            is_real_data: true,
-          },
-        };
-      }
-    } else if (response?.data && Array.isArray(response.data.matches)) {
-      if (areMatchesComplete(response.data.matches)) {
-        return response as TennisApiResponse;
-      }
-    } else if (response?.matches && Array.isArray(response.matches)) {
-      if (areMatchesComplete(response.matches)) {
-        return {
-          success: true,
-          data: {
-            matches: response.matches,
-            last_updated: response.last_updated || new Date().toISOString(),
-            is_real_data: response.is_real_data ?? true,
-          },
-        };
-      }
+    // 1. Call our new ATP endpoint (backend proxies to balldontlie)
+    const season = new Date().getFullYear(); // Use current year (adjust if needed)
+    const baseUrl = import.meta.env.VITE_API_BASE_PYTHON || 'https://python-api-fresh-production.up.railway.app';
+    const url = `${baseUrl}/api/atp/matches?season=${season}&per_page=100`;    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
     }
-
-    // Fallback to mock data
-    console.warn('Tennis matches API returned incomplete/unexpected data, using mock');
+    
+    const json = await response.json();
+    
+    // The backend returns the balldontlie structure wrapped in our standard response.
+    // The actual matches are in json.data (array) if success is true.
+    if (json.success && json.data && Array.isArray(json.data.data)) {
+      const rawMatches = json.data.data; // balldontlie matches array
+      
+      // 2. Transform each match to our TennisMatch interface
+      const transformedMatches: TennisMatch[] = rawMatches.map((match: any) => {
+        // Determine best_of based on tournament category
+        const category = match.tournament?.category || '';
+        const bestOf = category === 'Grand Slam' ? 5 : 3;
+        
+        // Map status
+        let status: TennisMatch['status'] = 'scheduled';
+        if (match.match_status === 'finished') {
+          status = 'completed';
+        } else if (match.is_live) {
+          status = 'live';
+        } else if (match.match_status === 'postponed') {
+          status = 'postponed';
+        } else if (match.match_status === 'cancelled') {
+          status = 'cancelled';
+        }
+        
+        // Determine winner (1 = player1, 2 = player2)
+        let winner: 1 | 2 | undefined = undefined;
+        if (match.winner) {
+          if (match.winner.id === match.player1?.id) winner = 1;
+          else if (match.winner.id === match.player2?.id) winner = 2;
+        }
+        
+        return {
+          id: String(match.id),
+          tournament: match.tournament?.name || 'Unknown Tournament',
+          round: match.round || 'TBD',
+          player1: {
+            name: match.player1?.full_name || 'TBD',
+            // rank and seed are not directly available in this response
+          },
+          player2: {
+            name: match.player2?.full_name || 'TBD',
+          },
+          score: match.score || undefined,
+          status,
+          date: match.scheduled_time || new Date().toISOString(),
+          court: match.not_before_text, // not exactly a court name, but we can use it
+          surface: match.tournament?.surface || 'Hard',
+          best_of: bestOf,
+          winner,
+        };
+      });
+      
+      // 3. Apply client‑side filtering by date and surface
+      let filtered = transformedMatches;
+      
+      if (date) {
+        // Compare only the date part (YYYY-MM-DD)
+        filtered = filtered.filter(m => m.date.split('T')[0] === date);
+      }
+      
+      if (surface && surface !== 'all') {
+        filtered = filtered.filter(m => m.surface.toLowerCase() === surface.toLowerCase());
+      }
+      
+      // 4. Return in the expected format
+      return {
+        success: true,
+        data: {
+          matches: filtered,
+          last_updated: new Date().toISOString(),
+          is_real_data: true,
+        },
+      };
+    }
+    
+    // If data format is unexpected, fall back to mock
+    console.warn('Unexpected API response format, using mock data');
     return {
       success: true,
       data: getMockMatchesData(),
     };
   } catch (error) {
-    console.error('Error fetching tennis matches:', error);
+    console.error('Error fetching ATP matches:', error);
+    // Fallback to mock data
     return {
       success: true,
       data: getMockMatchesData(),

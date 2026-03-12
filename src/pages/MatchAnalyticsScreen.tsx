@@ -1,5 +1,5 @@
 // src/pages/MatchAnalyticsScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -23,24 +23,28 @@ import {
   Alert,
   Avatar,
   Container,
-  Badge,
   Tooltip,
   CircularProgress,
-  alpha,
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import {
   ArrowBack,
   Refresh,
   Search,
-  SportsFootball,
   SportsBasketball,
+  SportsFootball,
   SportsHockey,
+  SportsBaseball,
   CalendarToday,
-  AccessTime,
   LocationOn,
   Tv,
   TrendingUp,
@@ -65,253 +69,370 @@ import {
   Psychology,
   TrendingUp as TrendingUpIcon,
   Newspaper as NewspaperIcon,
-  Error as ErrorIcon,
   Update as UpdateIcon,
-  People
+  People,
 } from '@mui/icons-material';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
+import { format, parseISO, isValid } from 'date-fns';
 
 // Import React Query hook
-import { usePrizepicksSelections } from '../hooks/useUnifiedAPI';
+import { usePrizepicksSelections } from '../hooks/useunifiedAPI';
 
-// Mock Data (fallback only)
-const MOCK_DATA = {
-  nfl: {
-    games: [
-      {
-        id: 1,
-        homeTeam: { name: 'Chiefs', logo: 'KC', color: '#E31837' },
-        awayTeam: { name: 'Ravens', logo: 'BAL', color: '#241773' },
-        homeScore: 24,
-        awayScore: 21,
-        status: 'Final',
-        sport: 'NFL',
-        date: 'Jan 15, 2024',
-        time: '3:00 PM EST',
-        venue: 'Arrowhead Stadium',
-        weather: 'Clear, 42°F',
-        odds: { spread: '-3.5', total: '48.5' },
-        broadcast: 'CBS',
-        attendance: '78,000',
-        quarter: 'Final'
-      },
-      {
-        id: 2,
-        homeTeam: { name: '49ers', logo: 'SF', color: '#AA0000' },
-        awayTeam: { name: 'Packers', logo: 'GB', color: '#203731' },
-        homeScore: 31,
-        awayScore: 28,
-        status: 'Final',
-        sport: 'NFL',
-        date: 'Jan 20, 2024',
-        time: '6:30 PM EST',
-        venue: 'Levi\'s Stadium',
-        weather: 'Partly Cloudy, 48°F',
-        odds: { spread: '-6.5', total: '51.5' },
-        broadcast: 'FOX',
-        attendance: '68,500',
-        quarter: 'Final'
-      },
-      {
-        id: 3,
-        homeTeam: { name: 'Bills', logo: 'BUF', color: '#00338D' },
-        awayTeam: { name: 'Bengals', logo: 'CIN', color: '#FB4F14' },
-        homeScore: 27,
-        awayScore: 24,
-        status: 'Live',
-        sport: 'NFL',
-        date: 'Today',
-        time: '4:25 PM EST',
-        venue: 'Highmark Stadium',
-        weather: 'Snow, 28°F',
-        odds: { spread: '-2.5', total: '47.5' },
-        broadcast: 'NBC',
-        attendance: '71,000',
-        quarter: 'Q3 8:45'
-      }
-    ]
-  },
-  nba: {
-    games: [
-      {
-        id: 4,
-        homeTeam: { name: 'Lakers', logo: 'LAL', color: '#552583' },
-        awayTeam: { name: 'Warriors', logo: 'GSW', color: '#1D428A' },
-        homeScore: 115,
-        awayScore: 112,
-        status: 'Final',
-        sport: 'NBA',
-        date: 'Jan 18, 2024',
-        time: '10:00 PM EST',
-        venue: 'Crypto.com Arena',
-        weather: 'Indoor',
-        odds: { spread: '+3.5', total: '228.5' },
-        broadcast: 'TNT',
-        attendance: '18,997',
-        quarter: 'Final'
-      },
-      {
-        id: 5,
-        homeTeam: { name: 'Celtics', logo: 'BOS', color: '#007A33' },
-        awayTeam: { name: 'Heat', logo: 'MIA', color: '#98002E' },
-        homeScore: 108,
-        awayScore: 104,
-        status: 'Final',
-        sport: 'NBA',
-        date: 'Jan 19, 2024',
-        time: '7:30 PM EST',
-        venue: 'TD Garden',
-        weather: 'Indoor',
-        odds: { spread: '-5.5', total: '222.5' },
-        broadcast: 'ESPN',
-        attendance: '19,156',
-        quarter: 'Final'
-      },
-      {
-        id: 6,
-        homeTeam: { name: 'Bucks', logo: 'MIL', color: '#00471B' },
-        awayTeam: { name: 'Suns', logo: 'PHX', color: '#1D1160' },
-        homeScore: 122,
-        awayScore: 118,
-        status: 'Live',
-        sport: 'NBA',
-        date: 'Today',
-        time: '8:00 PM EST',
-        venue: 'Fiserv Forum',
-        weather: 'Indoor',
-        odds: { spread: '-3.5', total: '235.5' },
-        broadcast: 'TNT',
-        attendance: '17,341',
-        quarter: 'Q4 3:15'
-      }
-    ]
-  }
+// ================= Environment variables =================
+const ODDS_API_KEY = import.meta.env.VITE_ODDS_API_KEY;
+const PRIZEPICKS_API_BASE = import.meta.env.VITE_API_BASE_URL;        // used by usePrizepicksSelections internally
+const PYTHON_API_BASE = import.meta.env.VITE_PYTHON_API_URL || '';    // Python API for MLB/NHL
+
+// ================= Team‑to‑sport mappings (fallback) =================
+const NBA_TEAMS = new Set([
+  'ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW',
+  'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK',
+  'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS'
+]);
+
+const NHL_TEAMS = new Set([
+  'ANA', 'ARI', 'BOS', 'BUF', 'CAR', 'CBJ', 'CGY', 'CHI', 'COL', 'DAL',
+  'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NJD', 'NSH', 'NYI', 'NYR',
+  'OTT', 'PHI', 'PIT', 'SEA', 'SJS', 'STL', 'TBL', 'TOR', 'UTA', 'VAN',
+  'VGK', 'WPG', 'WSH'
+]);
+
+const MLB_TEAMS = new Set([
+  'ARI', 'ATL', 'BAL', 'BOS', 'CHC', 'CIN', 'CLE', 'COL', 'CWS', 'DET',
+  'HOU', 'KC', 'LAA', 'LAD', 'MIA', 'MIL', 'MIN', 'NYM', 'NYY', 'OAK',
+  'PHI', 'PIT', 'SD', 'SEA', 'SF', 'STL', 'TB', 'TEX', 'TOR', 'WAS'
+]);
+
+const NFL_TEAMS = new Set([
+  'ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE', 'DAL', 'DEN',
+  'DET', 'GB', 'HOU', 'IND', 'JAX', 'KC', 'LAC', 'LAR', 'LV', 'MIA',
+  'MIN', 'NE', 'NO', 'NYG', 'NYJ', 'PHI', 'PIT', 'SEA', 'SF', 'TB',
+  'TEN', 'WAS'
+]);
+
+// ================= Sport aliases =================
+const SPORT_ALIASES: Record<string, string[]> = {
+  nba: ['nba', 'basketball'],
+  nhl: ['nhl', 'hockey'],
+  mlb: ['mlb', 'baseball'],
+  nfl: ['nfl', 'football'],
 };
 
-const PROMPT_SUGGESTIONS = [
-  { text: "Live NFL games", icon: <Bolt />, color: '#ef4444' },
-  { text: "NBA scores today", icon: <SportsBasketball />, color: '#f59e0b' },
-  { text: "Upcoming matches", icon: <CalendarToday />, color: '#10b981' },
-  { text: "Team stats comparison", icon: <BarChart />, color: '#3b82f6' },
-];
-
-const TABS = [
-  { id: 'conditions', label: 'Conditions', icon: <Cloud /> },
-  { id: 'h2h', label: 'H2H Stats', icon: <CompareArrows /> },
-  { id: 'matchup', label: 'Matchup', icon: <Analytics /> },
-  { id: 'boxscore', label: 'Box Score', icon: <Scoreboard /> },
-  { id: 'teamstats', label: 'Team Stats', icon: <BarChart /> },
-  { id: 'plays', label: 'Key Plays', icon: <Whatshot /> },
-];
-
-const PROMPTS = [
-  { id: 'weather', icon: <Cloud />, title: 'Weather Impact', color: '#3b82f6', description: 'How weather affects gameplay' },
-  { id: 'homeAway', icon: <LocationOn />, title: 'Home/Away Trends', color: '#10b981', description: 'Venue performance analysis' },
-  { id: 'playerMatchup', icon: <Groups />, title: 'Player Matchup', color: '#ef4444', description: 'Key player comparisons' },
-  { id: 'recentForm', icon: <TrendingUpIcon />, title: 'Recent Form', color: '#f59e0b', description: 'Team performance trends' },
-  { id: 'injury', icon: <EmojiEvents />, title: 'Injury Report', color: '#8b5cf6', description: 'Injury impact assessment' },
-  { id: 'predictive', icon: <Psychology />, title: 'Predictive Stats', color: '#ec4899', description: 'Win probability & projections' },
-];
-
-// Helper functions
-const randomChoice = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
-
+// ================= Helper functions =================
 const getTeamColor = (teamName: string): string => {
   if (!teamName) return '#3b82f6';
-  
   const teamColors: Record<string, string> = {
-    // NBA Teams
-    'LAL': '#552583', 'GSW': '#1D428A', 'BOS': '#007A33', 'MIA': '#98002E',
-    'MIL': '#00471B', 'PHX': '#1D1160', 'DEN': '#0E2240', 'PHI': '#006BB6',
-    'BKN': '#000000', 'NYK': '#006BB6', 'CHI': '#CE1141', 'LAC': '#C8102E',
-    'DAL': '#00538C', 'ATL': '#C8102E', 'CLE': '#860038', 'MEM': '#5D76A9',
-    'MIN': '#0C2340', 'NOP': '#0C2340', 'OKC': '#007AC1', 'ORL': '#0077C0',
-    'POR': '#E03A3E', 'SAC': '#5A2D81', 'SAS': '#C4CED4', 'TOR': '#CE1141',
-    'UTA': '#002B5C', 'WAS': '#002B5C', 'HOU': '#CE1141', 'CHA': '#1D1160',
-    'DET': '#C8102E', 'IND': '#002D62',
-    // NFL Teams (only those not already in NBA)
-    'KC': '#E31837', 'BAL': '#241773', 'SF': '#AA0000', 'GB': '#203731',
-    'BUF': '#00338D', 'CIN': '#FB4F14', 'TEN': '#4B92DB', 'JAX': '#006778',
-    'LV': '#000000', 'SEA': '#002244', 'ARI': '#97233F', 'LAR': '#003594',
-    'CAR': '#0085CA', 'NO': '#D3BC8D', 'TB': '#D50A0A', 'NYJ': '#125740',
-    'PIT': '#FFB612', 'NE': '#002244'
+    // NBA
+    LAL: '#552583', GSW: '#1D428A', BOS: '#007A33', MIA: '#98002E',
+    MIL: '#00471B', PHX: '#1D1160', DAL: '#00538C', UTA: '#002B5C',
+    // NFL
+    KC: '#E31837', BAL: '#241773', SF: '#AA0000', GB: '#203731',
+    BUF: '#00338D', CIN: '#FB4F14',
+    // NHL
+    NYR: '#0038A8', BOS: '#000000', CHI: '#CF0A2C', LAK: '#111111',
+    // MLB
+    NYY: '#132448', BOS_MLB: '#BD3039', LAD: '#005A9C', CHC: '#0E3386',
   };
-  
-  // Try to match by abbreviation (first 2-3 characters)
   const abbr = teamName.substring(0, 3).toUpperCase();
   const abbr2 = teamName.substring(0, 2).toUpperCase();
-  
-  return teamColors[abbr] || teamColors[abbr2] || '#3b82f6'; // Default blue
+  return teamColors[abbr] || teamColors[abbr2] || '#3b82f6';
 };
 
 const getGameStatus = (status: string): string => {
   if (!status) return 'Scheduled';
-  const statusLower = status.toLowerCase();
-  if (statusLower.includes('live') || statusLower.includes('in') || statusLower === 'live') return 'Live';
-  if (statusLower.includes('final') || statusLower.includes('complete') || statusLower === 'final') return 'Final';
+  const s = status.toLowerCase();
+  if (s.includes('live') || s.includes('in') || s === 'live') return 'Live';
+  if (s.includes('final') || s.includes('complete') || s === 'final') return 'Final';
   return 'Scheduled';
 };
 
 const extractTeamName = (teamStr: string): string => {
   if (!teamStr) return 'Unknown';
-  
-  // Remove common prefixes/suffixes
-  const cleanStr = teamStr
-    .replace(/^[A-Z]{2,3}\s+/, '') // Remove team abbreviations at start
-    .replace(/\s+\([A-Z]{2,3}\)$/, '') // Remove abbreviations in parentheses at end
-    .trim();
-  
-  return cleanStr || teamStr;
+  return teamStr.replace(/^[A-Z]{2,3}\s+/, '').replace(/\s+\([A-Z]{2,3}\)$/, '').trim() || teamStr;
 };
 
 const extractTeamAbbreviation = (teamStr: string): string => {
-  if (!teamStr) return '???';
-  
-  // Common NBA team abbreviations
-  const teamAbbreviations: Record<string, string> = {
-    'lakers': 'LAL', 'warriors': 'GSW', 'celtics': 'BOS', 'heat': 'MIA',
-    'bucks': 'MIL', 'suns': 'PHX', 'nuggets': 'DEN', '76ers': 'PHI',
-    'nets': 'BKN', 'knicks': 'NYK', 'bulls': 'CHI', 'clippers': 'LAC',
-    'mavericks': 'DAL', 'hawks': 'ATL', 'cavaliers': 'CLE', 'grizzlies': 'MEM',
-    'timberwolves': 'MIN', 'pelicans': 'NOP', 'thunder': 'OKC', 'magic': 'ORL',
-    'trail blazers': 'POR', 'kings': 'SAC', 'spurs': 'SAS', 'raptors': 'TOR',
-    'jazz': 'UTA', 'wizards': 'WAS', 'rockets': 'HOU', 'hornets': 'CHA',
-    'pistons': 'DET', 'pacers': 'IND'
+  const map: Record<string, string> = {
+    // NBA full names
+    'atlanta hawks': 'ATL',
+    'boston celtics': 'BOS',
+    'brooklyn nets': 'BKN',
+    'charlotte hornets': 'CHA',
+    'chicago bulls': 'CHI',
+    'cleveland cavaliers': 'CLE',
+    'dallas mavericks': 'DAL',
+    'denver nuggets': 'DEN',
+    'detroit pistons': 'DET',
+    'golden state warriors': 'GSW',
+    'houston rockets': 'HOU',
+    'indiana pacers': 'IND',
+    'los angeles clippers': 'LAC',
+    'los angeles lakers': 'LAL',
+    'memphis grizzlies': 'MEM',
+    'miami heat': 'MIA',
+    'milwaukee bucks': 'MIL',
+    'minnesota timberwolves': 'MIN',
+    'new orleans pelicans': 'NOP',
+    'new york knicks': 'NYK',
+    'oklahoma city thunder': 'OKC',
+    'orlando magic': 'ORL',
+    'philadelphia 76ers': 'PHI',
+    'phoenix suns': 'PHX',
+    'portland trail blazers': 'POR',
+    'sacramento kings': 'SAC',
+    'san antonio spurs': 'SAS',
+    'toronto raptors': 'TOR',
+    'utah jazz': 'UTA',
+    'washington wizards': 'WAS',
+    // Common nicknames
+    lakers: 'LAL',
+    warriors: 'GSW',
+    celtics: 'BOS',
+    heat: 'MIA',
+    bucks: 'MIL',
+    suns: 'PHX',
+    mavericks: 'DAL',
+    jazz: 'UTA',
+    // NFL
+    chiefs: 'KC',
+    ravens: 'BAL',
+    niners: 'SF',
+    packers: 'GB',
+    bills: 'BUF',
+    bengals: 'CIN',
+    // NHL
+    rangers: 'NYR',
+    bruins: 'BOS',
+    blackhawks: 'CHI',
+    kings: 'LAK',
+    // MLB
+    yankees: 'NYY',
+    redsox: 'BOS_MLB',
+    dodgers: 'LAD',
+    cubs: 'CHC',
   };
-  
-  const teamLower = teamStr.toLowerCase();
-  
-  // Check for exact matches
-  for (const [key, value] of Object.entries(teamAbbreviations)) {
-    if (teamLower.includes(key)) {
-      return value;
-    }
+  const lower = teamStr.toLowerCase();
+  for (const [key, val] of Object.entries(map)) {
+    if (lower.includes(key)) return val;
   }
-  
-  // Fallback: use first 3 letters
-  return teamStr.substring(0, 3).toUpperCase();
+  // Fallback: take first three uppercase characters
+  const match = teamStr.match(/[A-Z]{2,3}/);
+  return match ? match[0] : teamStr.substring(0, 3).toUpperCase();
 };
 
+// ================= API Fetching Helpers =================
+const fetchOddsGames = async (sportKey: string, apiKey: string) => {
+  const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds/?apiKey=${apiKey}&regions=us&markets=h2h,spreads,totals&oddsFormat=american`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Odds API error: ${response.status}`);
+  return response.json();
+};
+
+// NHL games from Python API (with enhanced logging)
+const fetchNHLGames = async (date: string) => {
+  if (!PYTHON_API_BASE) throw new Error('Python API URL not configured (VITE_PYTHON_API_URL)');
+  console.log(`🏒 Fetching NHL games for date: ${date} from ${PYTHON_API_BASE}/api/nhl/games`);
+  const response = await fetch(`${PYTHON_API_BASE}/api/nhl/games?date=${date}`);
+  if (!response.ok) throw new Error(`NHL API error: ${response.status}`);
+  const data = await response.json();
+  console.log(`🏒 NHL games response:`, data);
+  if (data.games && data.games.length > 0) {
+    console.log('🏒 First NHL game:', data.games[0]);
+  } else {
+    console.warn('🏒 No NHL games returned for', date);
+  }
+  return data.games || [];
+};
+
+// MLB games from Python API (with logging)
+const fetchMLBGames = async (date: string) => {
+  if (!PYTHON_API_BASE) throw new Error('Python API URL not configured (VITE_PYTHON_API_URL)');
+  console.log(`⚾ Fetching MLB games for date: ${date} from ${PYTHON_API_BASE}/api/mlb/games`);
+  const response = await fetch(`${PYTHON_API_BASE}/api/mlb/games?date=${date}`);
+  if (!response.ok) throw new Error(`MLB API error: ${response.status}`);
+  const data = await response.json();
+  console.log(`⚾ MLB games response:`, data);
+  if (data.games && data.games.length > 0) {
+    console.log('⚾ First MLB game:', data.games[0]);
+  } else {
+    console.warn('⚾ No MLB games returned for', date);
+  }
+  return data.games || [];
+};
+
+const mergeOddsWithGames = (games: any[], oddsGames: any[]) => {
+  const oddsMap = new Map();
+  oddsGames.forEach(og => {
+    oddsMap.set(og.home_team, og);
+    oddsMap.set(og.away_team, og);
+  });
+  games.forEach(game => {
+    const homeTeam = game.homeTeam?.name || game.home_team?.name || game.home;
+    const oddsGame = oddsMap.get(homeTeam);
+    if (oddsGame) {
+      game.odds = oddsGame;
+    }
+  });
+};
+
+const getUniqueDatesFromSelections = (selections: any[]): Set<string> => {
+  const dates = new Set<string>();
+  selections.forEach((sel: any) => {
+    if (sel.game_time) {
+      try {
+        const parsed = parseISO(sel.game_time);
+        if (isValid(parsed)) {
+          dates.add(format(parsed, 'yyyy-MM-dd'));
+        } else {
+          // Try new Date() as fallback
+          const fallback = new Date(sel.game_time);
+          if (!isNaN(fallback.getTime())) {
+            dates.add(format(fallback, 'yyyy-MM-dd'));
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  });
+  // If no valid dates found, default to today
+  if (dates.size === 0) {
+    dates.add(format(new Date(), 'yyyy-MM-dd'));
+  }
+  return dates;
+};
+
+// ================= Main Component =================
 const MatchAnalyticsScreen = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  
-  // Use the prize picks hook instead of analytics
-  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb'>('nba');
- 
-const prizepicks = usePrizepicksSelections();
-const { 
-  data: prizePicksData, 
-  isLoading, 
-  error, 
-  refetch,
-  isRefetching 
-} = prizepicks.usePrizepicksSelectionsQuery(selectedSport);
-  
-  // Extract selections and convert them to "games"
+  const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'nhl' | 'mlb'>('nba');
+
+  const prizepicks = usePrizepicksSelections();
+  const {
+    data: prizePicksData,
+    isLoading: selectionsLoading,
+    error: selectionsError,
+    refetch,
+    isRefetching,
+  } = prizepicks.usePrizepicksSelectionsQuery(selectedSport);
+
   const selectionsFromApi = prizePicksData?.selections || [];
-  
+
+  // ========== Log selections for debugging ==========
+  useEffect(() => {
+    if (selectionsFromApi.length > 0) {
+      console.log(`📦 ${selectedSport.toUpperCase()} selections received:`, selectionsFromApi.slice(0, 3));
+      const hasSportField = selectionsFromApi.some((s: any) => s.sport || s.league);
+      console.log(`🔍 Selections contain sport/league field?`, hasSportField);
+      console.log('Sample selection sport values:', selectionsFromApi.slice(0,5).map(s => ({
+        player: s.player,
+        sport: s.sport,
+        league: s.league,
+        team: s.team,
+        teamAbbr: extractTeamAbbreviation(s.team || '')
+      })));
+    }
+  }, [selectionsFromApi, selectedSport]);
+
+  // ========== Sport‑specific game data states ==========
+  const [nbaGamesData, setNbaGamesData] = useState<any[]>([]);
+  const [nbaGamesLoading, setNbaGamesLoading] = useState(false);
+  const [nbaGamesError, setNbaGamesError] = useState<string | null>(null);
+
+  const [nhlGamesData, setNhlGamesData] = useState<any[]>([]);
+  const [nhlGamesLoading, setNhlGamesLoading] = useState(false);
+  const [nhlGamesError, setNhlGamesError] = useState<string | null>(null);
+
+  const [mlbGamesData, setMlbGamesData] = useState<any[]>([]);
+  const [mlbGamesLoading, setMlbGamesLoading] = useState(false);
+  const [mlbGamesError, setMlbGamesError] = useState<string | null>(null);
+
+  // Refs to prevent infinite loop
+  const lastFetchedKeyRef = useRef<string>('');
+
+  // Compute a stable key based on the set of dates from selections
+  const datesKey = useMemo(() => {
+    const dates = getUniqueDatesFromSelections(selectionsFromApi);
+    return `${selectedSport}|${Array.from(dates).sort().join(',')}`;
+  }, [selectionsFromApi, selectedSport]);
+
+  // ========== Fetch games based on selected sport and datesKey ==========
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchGames = async () => {
+      if (lastFetchedKeyRef.current === datesKey) {
+        return;
+      }
+
+      if (selectedSport === 'nba') {
+        setNbaGamesData([]);
+        setNbaGamesError(null);
+      } else if (selectedSport === 'nhl') {
+        setNhlGamesData([]);
+        setNhlGamesError(null);
+      } else if (selectedSport === 'mlb') {
+        setMlbGamesData([]);
+        setMlbGamesError(null);
+      }
+
+      try {
+        if (!ODDS_API_KEY) throw new Error('Odds API key missing');
+
+        if (selectedSport === 'nba') {
+          setNbaGamesLoading(true);
+          const games = await fetchOddsGames('basketball_nba', ODDS_API_KEY);
+          if (isMounted) {
+            setNbaGamesData(games);
+            lastFetchedKeyRef.current = datesKey;
+          }
+        } else if (selectedSport === 'nhl') {
+          setNhlGamesLoading(true);
+          const [firstDate] = datesKey.split('|')[1].split(',');
+          console.log(`📅 Fetching NHL games for date: ${firstDate}`);
+          const nhlGames = await fetchNHLGames(firstDate);
+          if (isMounted) {
+            setNhlGamesData(nhlGames);
+            lastFetchedKeyRef.current = datesKey;
+          }
+        } else if (selectedSport === 'mlb') {
+          setMlbGamesLoading(true);
+          const [firstDate] = datesKey.split('|')[1].split(',');
+          console.log(`📅 Fetching MLB games for date: ${firstDate}`);
+          const mlbGames = await fetchMLBGames(firstDate);
+          if (isMounted) {
+            setMlbGamesData(mlbGames);
+            lastFetchedKeyRef.current = datesKey;
+          }
+        } else if (selectedSport === 'nfl') {
+          // NFL may be added later – for now just set the key
+          if (isMounted) {
+            lastFetchedKeyRef.current = datesKey;
+          }
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          if (selectedSport === 'nba') setNbaGamesError(err.message);
+          else if (selectedSport === 'nhl') setNhlGamesError(err.message);
+          else if (selectedSport === 'mlb') setMlbGamesError(err.message);
+          console.error(`Failed to fetch ${selectedSport} games:`, err);
+        }
+      } finally {
+        if (isMounted) {
+          if (selectedSport === 'nba') setNbaGamesLoading(false);
+          else if (selectedSport === 'nhl') setNhlGamesLoading(false);
+          else if (selectedSport === 'mlb') setMlbGamesLoading(false);
+        }
+      }
+    };
+
+    fetchGames();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [datesKey, selectedSport]);
+
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGame, setSelectedGame] = useState<any>(null);
@@ -321,547 +442,470 @@ const {
   const [loadingAI, setLoadingAI] = useState(false);
   const [activeTab, setActiveTab] = useState('conditions');
   const [filteredGames, setFilteredGames] = useState<any[]>([]);
-  
-  // Transform prize picks selections into game data – using real data, no fake scores
-  const games = React.useMemo(() => {
-    if (selectionsFromApi && selectionsFromApi.length > 0) {
-      console.log(`✅ Using REAL data from prize picks: ${selectionsFromApi.length} selections`);
-      
-      // Create a map of games from player selections
-      const gameMap = new Map();
-      
-      selectionsFromApi.forEach((selection: any, index: number) => {
-        try {
-          // Extract team and opponent - handle different field names
-          const playerTeamRaw = selection.team || selection.teamAbbrev || selection.team_full || 'Unknown';
-          const playerTeam = extractTeamName(playerTeamRaw);
-          
-          // Extract opponent from game field - improved parsing
-          let homeTeam = playerTeam;
-          let awayTeam = 'TBD';
-          const gameField = selection.game || selection.opponent || '';
-          
-          if (gameField) {
-            // Try to parse as "Team A vs Team B", "Team A @ Team B", or "Team A at Team B"
-            const vsIndex = gameField.indexOf(' vs ');
-            const atIndex = gameField.indexOf(' @ ');
-            const atWordIndex = gameField.indexOf(' at ');
-            
-            if (vsIndex !== -1) {
-              homeTeam = extractTeamName(gameField.substring(0, vsIndex).trim());
-              awayTeam = extractTeamName(gameField.substring(vsIndex + 4).trim());
-            } else if (atIndex !== -1) {
-              homeTeam = extractTeamName(gameField.substring(0, atIndex).trim());
-              awayTeam = extractTeamName(gameField.substring(atIndex + 3).trim());
-            } else if (atWordIndex !== -1) {
-              homeTeam = extractTeamName(gameField.substring(0, atWordIndex).trim());
-              awayTeam = extractTeamName(gameField.substring(atWordIndex + 4).trim());
-            } else {
-              // No delimiter found – assume gameField is the opponent (if different from player's team)
-              if (gameField !== playerTeamRaw && !gameField.includes(playerTeamRaw)) {
-                awayTeam = extractTeamName(gameField);
-              } else {
-                awayTeam = 'TBD';
-              }
-            }
-          } else {
-            awayTeam = 'TBD';
+
+  // ================= Transform selections into games, enriched with sport‑specific game data =================
+  const games = useMemo(() => {
+    if (!selectionsFromApi.length) {
+      return [];
+    }
+
+    // Determine the correct team set for the selected sport
+    let teamSet: Set<string> | null = null;
+    if (selectedSport === 'nba') teamSet = NBA_TEAMS;
+    else if (selectedSport === 'nhl') teamSet = NHL_TEAMS;
+    else if (selectedSport === 'mlb') teamSet = MLB_TEAMS;
+    else if (selectedSport === 'nfl') teamSet = NFL_TEAMS;
+
+    // 🎯 FILTER selections using sport/league field with aliases, and double‑check team abbreviation
+    const filteredSelections = selectionsFromApi.filter((sel: any) => {
+      const selSportRaw = (sel.sport || sel.league || '').toLowerCase().trim();
+      const teamAbbr = extractTeamAbbreviation(sel.team || '').toUpperCase();
+
+      // If sport field exists
+      if (selSportRaw) {
+        const aliases = SPORT_ALIASES[selectedSport] || [selectedSport];
+        if (aliases.includes(selSportRaw)) {
+          // Sport matches, but verify team if we have a teamSet
+          if (teamSet && !teamSet.has(teamAbbr)) {
+            console.log(`🧪 Filter [${selectedSport}]: ${sel.player} | team: ${teamAbbr} | sport: "${selSportRaw}" matches alias BUT team not in ${selectedSport} set => DROP`);
+            return false;
           }
-          
-          // Get team abbreviations
-          const homeAbbr = extractTeamAbbreviation(homeTeam);
-          const awayAbbr = awayTeam !== 'TBD' ? extractTeamAbbreviation(awayTeam) : 'TBD';
-          
-          // Create a unique game key. If we have both teams, use them. Otherwise, fallback to game field or player team + date.
-          let gameKey;
-          if (awayAbbr !== 'TBD' && homeAbbr !== 'TBD' && awayAbbr !== homeAbbr) {
-            gameKey = `${homeAbbr} vs ${awayAbbr}`;
-          } else {
-            // Fallback: use a combination of player team and game time (if available)
-            const gameTime = selection.game_time ? new Date(selection.game_time).toISOString().split('T')[0] : 'unknown';
-            gameKey = `${playerTeamRaw}-${gameTime}`;
-          }
-          
-          if (!gameMap.has(gameKey)) {
-            // Parse game_time if available
-            const gameTime = selection.game_time ? new Date(selection.game_time) : null;
-            const gameDate = gameTime ? format(gameTime, 'MMM dd, yyyy') : 'Today';
-            const gameTimeStr = gameTime ? format(gameTime, 'h:mm a') : 'TBD';
-            
-            // Derive quarter from status
-            const gameStatus = getGameStatus(selection.status);
-            const quarter = gameStatus === 'Live' ? 'In Progress' 
-                          : gameStatus === 'Final' ? 'Final' 
-                          : 'Scheduled';
-            
-            gameMap.set(gameKey, {
-              id: `game-${gameKey}-${index}`,
-              homeTeam: { 
-                name: homeTeam, 
-                logo: homeAbbr, 
-                color: getTeamColor(homeTeam)
-              },
-              awayTeam: { 
-                name: awayTeam, 
-                logo: awayAbbr, 
-                color: getTeamColor(awayTeam)
-              },
-              homeScore: null,
-              awayScore: null,
-              status: gameStatus,
-              sport: selection.sport || selectedSport.toUpperCase(),
-              date: gameDate,
-              time: gameTimeStr,
-              venue: `${homeTeam} Arena`,
-              weather: 'Indoor',
-              odds: { 
-                spread: '–',
-                total: '–'
-              },
-              broadcast: 'TBD',
-              attendance: '–',
-              quarter,
-              players: [selection.player],
-              selectionData: [selection],
-              rawGameData: selection.game
-            });
-          } else {
-            // Add player to existing game
-            const existingGame = gameMap.get(gameKey);
-            if (!existingGame.players.includes(selection.player)) {
-              existingGame.players.push(selection.player);
-              existingGame.selectionData.push(selection);
-            }
-          }
-        } catch (err) {
-          console.warn('Error processing selection:', err, selection);
+          console.log(`🧪 Filter [${selectedSport}]: ${sel.player} | team: ${teamAbbr} | sport: "${selSportRaw}" matches alias and team valid => KEEP`);
+          return true;
+        }
+        // Sport field exists but doesn't match any alias
+        console.log(`🧪 Filter [${selectedSport}]: ${sel.player} | team: ${teamAbbr} | sport: "${selSportRaw}" does not match any alias for ${selectedSport} => DROP`);
+        return false;
+      }
+
+      // No sport field: fallback to team abbreviation set
+      if (teamSet && teamSet.has(teamAbbr)) {
+        console.log(`🧪 Filter [${selectedSport}]: ${sel.player} | team: ${teamAbbr} | no sport field, team in set => KEEP`);
+        return true;
+      }
+      console.log(`🧪 Filter [${selectedSport}]: ${sel.player} | team: ${teamAbbr} | no sport field, team not in set => DROP`);
+      return false;
+    });
+
+    console.log(`🎯 Filtered selections for ${selectedSport}: ${filteredSelections.length} of ${selectionsFromApi.length}`);
+    if (filteredSelections.length === 0) {
+      console.warn(`⚠️ No selections left after filtering for ${selectedSport}`);
+    }
+
+    let gameData: any[] = [];
+    if (selectedSport === 'nba') gameData = nbaGamesData;
+    else if (selectedSport === 'nhl') gameData = nhlGamesData;
+    else if (selectedSport === 'mlb') gameData = mlbGamesData;
+
+    console.log(`🎮 ${selectedSport.toUpperCase()} gameData length:`, gameData.length);
+
+    // Create a lookup map: key = team identifier + date -> game object
+    const gameByTeamDate = new Map();
+
+    gameData.forEach((game: any) => {
+      let homeNames: string[] = [];
+      let awayNames: string[] = [];
+      let gameDate: string;
+
+      if (selectedSport === 'nba') {
+        const homeFull = game.home_team;
+        const awayFull = game.away_team;
+        const homeAbbr = extractTeamAbbreviation(homeFull);
+        const awayAbbr = extractTeamAbbreviation(awayFull);
+        homeNames = [homeFull, homeAbbr];
+        awayNames = [awayFull, awayAbbr];
+        gameDate = format(parseISO(game.commence_time), 'yyyy-MM-dd');
+      } else if (selectedSport === 'nhl') {
+        homeNames = [game.home_abbrev, game.home_team];
+        awayNames = [game.away_abbrev, game.away_team];
+        // 🛠️ FIX: Use 'date' field, with fallback to today if missing
+        gameDate = game.date;
+        if (!gameDate) {
+          console.warn('⚠️ NHL game missing date, using fallback today:', game);
+          gameDate = format(new Date(), 'yyyy-MM-dd');
+        }
+      } else if (selectedSport === 'mlb') {
+        homeNames = [game.home_abbrev, game.home_full];
+        awayNames = [game.away_abbrev, game.away_full];
+        gameDate = game.game_date;
+      }
+
+      [...homeNames, ...awayNames].forEach(teamId => {
+        if (teamId) {
+          const key = `${teamId}|${gameDate}`;
+          gameByTeamDate.set(key, game);
         }
       });
-      
-      // Convert map to array
-      const gamesFromSelections = Array.from(gameMap.values());
-      
-      // If we have real games, use them
-      if (gamesFromSelections.length > 0) {
-        console.log(`🎮 Created ${gamesFromSelections.length} games from selections`);
-        return gamesFromSelections;
+    });
+
+    console.log(`🔍 ${selectedSport.toUpperCase()} game map keys:`, Array.from(gameByTeamDate.keys()));
+
+    const gameMap = new Map(); // key -> our internal game object
+
+    filteredSelections.forEach((selection: any) => {
+      try {
+        const playerTeamRaw = selection.team || selection.teamAbbrev || 'Unknown';
+        const playerTeamAbbr = extractTeamAbbreviation(playerTeamRaw);
+        const playerTeamName = extractTeamName(playerTeamRaw);
+
+        // ========== IMPROVED DATE PARSING with fallback to today ==========
+        let gameTime = null;
+        if (selection.game_time) {
+          try {
+            // Try ISO first
+            gameTime = parseISO(selection.game_time);
+            if (!isValid(gameTime)) {
+              // Fallback to Date constructor
+              const fallback = new Date(selection.game_time);
+              if (!isNaN(fallback.getTime())) {
+                gameTime = fallback;
+              } else {
+                console.warn('❌ Invalid game_time format:', selection.game_time);
+              }
+            }
+          } catch (e) {
+            console.warn('❌ Error parsing game_time:', selection.game_time, e);
+          }
+        }
+
+        // If no valid gameTime, default to today
+        if (!gameTime) {
+          gameTime = new Date();
+          console.log(`📅 No game_time for ${selection.player} (${playerTeamAbbr}), using today`);
+        }
+
+        const dateStr = format(gameTime, 'yyyy-MM-dd');
+        console.log(`📅 Selection: ${selection.player} (${playerTeamAbbr}) -> date: ${dateStr}`);
+
+        // Try to find a game using the team abbreviation
+        const lookupKey = `${playerTeamAbbr}|${dateStr}`;
+        console.log(`🔍 Looking up ${lookupKey}`);
+        let externalGame = gameByTeamDate.get(lookupKey);
+
+        // If not found, try using the full team name
+        if (!externalGame && playerTeamName !== 'Unknown') {
+          const fullNameKey = `${playerTeamName}|${dateStr}`;
+          console.log(`🔍 Also trying ${fullNameKey}`);
+          externalGame = gameByTeamDate.get(fullNameKey);
+        }
+
+        let homeTeamObj, awayTeamObj;
+        let homeScore = null, awayScore = null;
+        let gameStatus = getGameStatus(selection.status);
+        let quarter = gameStatus === 'Live' ? 'In Progress' : gameStatus === 'Final' ? 'Final' : 'Scheduled';
+        let venue = `${playerTeamName} Arena`;
+        let broadcast = 'TBD';
+        let attendance = '–';
+        let odds = { spread: '–', total: '–', moneyline: { home: '–', away: '–' } };
+
+        if (externalGame) {
+          console.log(`✅ Found external game for ${playerTeamName} on ${dateStr}`);
+          if (selectedSport === 'nba') {
+            const isHome = externalGame.home_team === playerTeamName || 
+                           extractTeamAbbreviation(externalGame.home_team) === playerTeamAbbr;
+            homeTeamObj = {
+              name: externalGame.home_team,
+              logo: extractTeamAbbreviation(externalGame.home_team),
+              color: getTeamColor(externalGame.home_team),
+            };
+            awayTeamObj = {
+              name: externalGame.away_team,
+              logo: extractTeamAbbreviation(externalGame.away_team),
+              color: getTeamColor(externalGame.away_team),
+            };
+            if (!isHome) [homeTeamObj, awayTeamObj] = [awayTeamObj, homeTeamObj];
+            homeScore = externalGame.scores?.home || null;
+            awayScore = externalGame.scores?.away || null;
+            gameStatus = externalGame.completed ? 'Final' : externalGame.scores ? 'Live' : 'Scheduled';
+
+            if (externalGame.bookmakers?.length > 0) {
+              const bookmaker = externalGame.bookmakers[0];
+              const h2hMarket = bookmaker.markets.find((m: any) => m.key === 'h2h');
+              const spreadsMarket = bookmaker.markets.find((m: any) => m.key === 'spreads');
+              const totalsMarket = bookmaker.markets.find((m: any) => m.key === 'totals');
+              if (h2hMarket) {
+                const homeOutcome = h2hMarket.outcomes.find((o: any) => o.name === homeTeamObj.name);
+                const awayOutcome = h2hMarket.outcomes.find((o: any) => o.name === awayTeamObj.name);
+                odds.moneyline = {
+                  home: homeOutcome?.price ? (homeOutcome.price > 0 ? `+${homeOutcome.price}` : homeOutcome.price.toString()) : '–',
+                  away: awayOutcome?.price ? (awayOutcome.price > 0 ? `+${awayOutcome.price}` : awayOutcome.price.toString()) : '–',
+                };
+              }
+              if (spreadsMarket) {
+                const homeSpread = spreadsMarket.outcomes.find((o: any) => o.name === homeTeamObj.name);
+                if (homeSpread) odds.spread = `${homeSpread.point > 0 ? '+' : ''}${homeSpread.point}`;
+              }
+              if (totalsMarket) {
+                const over = totalsMarket.outcomes.find((o: any) => o.name === 'Over');
+                if (over) odds.total = over.point.toString();
+              }
+            }
+            quarter = externalGame.period || '';
+            venue = externalGame.venue || `${homeTeamObj.name} Arena`;
+          } else if (selectedSport === 'nhl') {
+            const isHome = (externalGame.home_abbrev || externalGame.home_team) === playerTeamAbbr;
+            homeTeamObj = {
+              name: externalGame.home_team || 'Home',
+              logo: externalGame.home_abbrev || '???',
+              color: getTeamColor(externalGame.home_abbrev || ''),
+            };
+            awayTeamObj = {
+              name: externalGame.away_team || 'Away',
+              logo: externalGame.away_abbrev || '???',
+              color: getTeamColor(externalGame.away_abbrev || ''),
+            };
+            if (!isHome) [homeTeamObj, awayTeamObj] = [awayTeamObj, homeTeamObj];
+            homeScore = externalGame.home_score;
+            awayScore = externalGame.away_score;
+            gameStatus = externalGame.status || 'Scheduled';
+            quarter = externalGame.period ? `P${externalGame.period}` : '';
+            venue = externalGame.venue || 'NHL Arena';
+            if (externalGame.odds) {
+              // similar odds extraction if needed
+            }
+          } else if (selectedSport === 'mlb') {
+            const isHome = (externalGame.home_abbrev || externalGame.home_team) === playerTeamAbbr;
+            homeTeamObj = {
+              name: externalGame.home_full || externalGame.home_team,
+              logo: externalGame.home_abbrev || externalGame.home_team,
+              color: getTeamColor(externalGame.home_abbrev || externalGame.home_team),
+            };
+            awayTeamObj = {
+              name: externalGame.away_full || externalGame.away_team,
+              logo: externalGame.away_abbrev || externalGame.away_team,
+              color: getTeamColor(externalGame.away_abbrev || externalGame.away_team),
+            };
+            if (!isHome) [homeTeamObj, awayTeamObj] = [awayTeamObj, homeTeamObj];
+            homeScore = externalGame.home_score;
+            awayScore = externalGame.away_score;
+            gameStatus = externalGame.status || 'Scheduled';
+            quarter = externalGame.inning ? `Top ${externalGame.inning}` : '';
+            venue = externalGame.venue || 'MLB Stadium';
+          }
+        } else {
+          // No external game – fallback to team‑only
+          console.log(`⚠️ No external game found for ${playerTeamName} on ${dateStr}`);
+          homeTeamObj = { name: playerTeamName, logo: playerTeamAbbr, color: getTeamColor(playerTeamAbbr) };
+          awayTeamObj = { name: 'TBD', logo: 'TBD', color: '#757575' };
+        }
+
+        const gameKey = externalGame?.id ? `${selectedSport}-${externalGame.id}` : `${playerTeamAbbr}-${dateStr}`;
+
+        if (!gameMap.has(gameKey)) {
+          const gameDate = format(gameTime, 'MMM dd, yyyy');
+          const gameTimeStr = format(gameTime, 'h:mm a');
+
+          gameMap.set(gameKey, {
+            id: gameKey,
+            homeTeam: homeTeamObj,
+            awayTeam: awayTeamObj,
+            homeScore,
+            awayScore,
+            status: gameStatus,
+            sport: selectedSport.toUpperCase(),
+            date: gameDate,
+            time: gameTimeStr,
+            venue,
+            weather: selectedSport === 'nba' ? 'Indoor' : 'Outdoor',
+            odds,
+            broadcast,
+            attendance,
+            quarter,
+            players: [selection.player],
+            selectionData: [selection],
+            externalGameId: externalGame?.id,
+          });
+        } else {
+          const existing = gameMap.get(gameKey);
+          if (!existing.players.includes(selection.player)) {
+            existing.players.push(selection.player);
+            existing.selectionData.push(selection);
+          }
+          if (externalGame && !existing.externalGameId) {
+            existing.homeTeam = homeTeamObj;
+            existing.awayTeam = awayTeamObj;
+            existing.homeScore = homeScore;
+            existing.awayScore = awayScore;
+            existing.status = gameStatus;
+            existing.quarter = quarter;
+            existing.venue = venue;
+            existing.odds = odds;
+            existing.externalGameId = externalGame.id;
+          }
+        }
+      } catch (err) {
+        console.warn('Error processing selection:', err, selection);
       }
-    }
-    
-    // Fallback to mock data
-    console.log('⚠️ Using mock analytics data');
-    return MOCK_DATA[selectedSport as keyof typeof MOCK_DATA]?.games || MOCK_DATA.nfl.games;
-    
-  }, [selectionsFromApi, selectedSport]);
+    });
 
-  // Sport‑specific stats data
-  const getStatsForSport = (sport: string) => {
-    if (sport === 'nba') {
-      return [
-        { label: 'Points', home: 112, away: 108, icon: <BarChart /> },
-        { label: 'Rebounds', home: 48, away: 42, icon: <BarChart /> },
-        { label: 'Assists', home: 26, away: 24, icon: <BarChart /> },
-        { label: 'Steals', home: 8, away: 6, icon: <BarChart /> },
-        { label: 'Blocks', home: 5, away: 4, icon: <BarChart /> },
-        { label: 'Turnovers', home: 12, away: 14, icon: <BarChart /> },
-        { label: 'FG%', home: '48%', away: '45%', icon: <TrendingUp /> },
-        { label: '3P%', home: '37%', away: '34%', icon: <TrendingUp /> },
-      ];
-    } else if (sport === 'nfl') {
-      return [
-        { label: 'Total Yards', home: 385, away: 320, icon: <CompareArrows /> },
-        { label: 'Passing Yards', home: 265, away: 210, icon: <TrendingUp /> },
-        { label: 'Rushing Yards', home: 120, away: 110, icon: <TrendingUp /> },
-        { label: 'Turnovers', home: 1, away: 2, icon: <BarChart /> },
-        { label: 'Time of Possession', home: '32:15', away: '27:45', icon: <AccessTime /> },
-        { label: 'First Downs', home: 22, away: 18, icon: <BarChart /> },
-        { label: 'Third Down %', home: '45%', away: '38%', icon: <TrendingUp /> },
-        { label: 'Red Zone %', home: '75%', away: '60%', icon: <LocationOn /> },
-      ];
-    } else {
-      // MLB fallback
-      return [
-        { label: 'Hits', home: 8, away: 6, icon: <BarChart /> },
-        { label: 'Runs', home: 5, away: 3, icon: <BarChart /> },
-        { label: 'Errors', home: 1, away: 2, icon: <BarChart /> },
-        { label: 'ERA', home: '3.20', away: '4.10', icon: <TrendingUp /> },
-      ];
-    }
-  };
+    const gamesArray = Array.from(gameMap.values());
+    console.log(`🎮 Created ${gamesArray.length} games from selections (enriched with ${selectedSport} data)`);
+    return gamesArray;
+  }, [selectionsFromApi, selectedSport, nbaGamesData, nhlGamesData, mlbGamesData]);
 
-  // Set initial selected game
+  // ================= Set initial selected game =================
   useEffect(() => {
     if (games.length > 0 && !selectedGame) {
       setSelectedGame(games[0]);
     }
-  }, [games]);
+  }, [games, selectedGame]);
 
-  // Filter games based on search
-  useEffect(() => {
-    if (searchInput.trim()) {
-      const results = games.filter(game => 
-        game.homeTeam.name.toLowerCase().includes(searchInput.toLowerCase()) ||
-        game.awayTeam.name.toLowerCase().includes(searchInput.toLowerCase()) ||
-        game.sport.toLowerCase().includes(searchInput.toLowerCase())
-      );
-      setFilteredGames(results);
-    } else {
+  // ================= Derived stats for selected game =================
+  const playerTrends = useMemo(() => {
+    if (!selectedGame?.selectionData) return [];
+    const map = new Map();
+    selectedGame.selectionData.forEach((sel: any) => {
+      const player = sel.player;
+      if (!player) return;
+      const edge = sel.edge ? parseFloat(sel.edge) : sel.confidence === 'high' ? 15 : sel.confidence === 'medium' ? 10 : 5;
+      const curr = map.get(player) || { totalEdge: 0, count: 0, player, team: sel.team };
+      curr.totalEdge += edge;
+      curr.count += 1;
+      map.set(player, curr);
+    });
+    return Array.from(map.values())
+      .map(p => ({ ...p, avgEdge: p.totalEdge / p.count }))
+      .sort((a, b) => b.avgEdge - a.avgEdge);
+  }, [selectedGame]);
+
+  const teamStats = useMemo(() => {
+    if (!selectedGame?.selectionData) return [];
+    const stats: Record<string, { totalEdge: number; count: number; players: Set<string> }> = {};
+    selectedGame.selectionData.forEach((sel: any) => {
+      const team = sel.team;
+      if (!team || team === 'UNKNOWN') return;
+      if (!stats[team]) stats[team] = { totalEdge: 0, count: 0, players: new Set() };
+      stats[team].totalEdge += parseFloat(sel.edge || 0);
+      stats[team].count += 1;
+      stats[team].players.add(sel.player);
+    });
+    return Object.entries(stats).map(([team, data]) => ({
+      team,
+      avgEdge: data.totalEdge / data.count,
+      propCount: data.count,
+      uniquePlayers: data.players.size,
+    }));
+  }, [selectedGame]);
+
+  // ================= Handlers =================
+  const handleSelectGame = (game: any) => {
+    try {
+      setSelectedGame(game);
+      setSearchQuery('');
+      setSearchInput('');
       setFilteredGames([]);
+      const sport = game.sport.toLowerCase();
+      if (sport === 'nba' || sport === 'nfl' || sport === 'nhl' || sport === 'mlb') {
+        setSelectedSport(sport);
+      }
+    } catch (err) {
+      console.error('Error selecting game:', err);
     }
-  }, [searchInput, games]);
+  };
 
-  const handleSearchSubmit = (query: string | null = null) => {
-    const searchText = query || searchInput.trim();
-    if (searchText) {
-      setSearchQuery(searchText);
-      const results = games.filter(game => 
-        game.homeTeam.name.toLowerCase().includes(searchText.toLowerCase()) ||
-        game.awayTeam.name.toLowerCase().includes(searchText.toLowerCase()) ||
-        game.sport.toLowerCase().includes(searchText.toLowerCase())
+  const handleSportChange = (sportId: string) => {
+    setSelectedSport(sportId as 'nba' | 'nfl' | 'nhl' | 'mlb');
+    setSelectedGame(null);
+    lastFetchedKeyRef.current = '';
+  };
+
+  const handleSearchSubmit = (query?: string) => {
+    const text = query || searchInput.trim();
+    if (text) {
+      setSearchQuery(text);
+      const results = games.filter(
+        g =>
+          g.homeTeam.name.toLowerCase().includes(text.toLowerCase()) ||
+          g.awayTeam.name.toLowerCase().includes(text.toLowerCase()) ||
+          g.sport.toLowerCase().includes(text.toLowerCase())
       );
       setFilteredGames(results);
     }
   };
 
-  const handleSearch = (query: string) => {
-    setSearchInput(query);
-    if (!query.trim()) {
+  const handleSearch = (q: string) => {
+    setSearchInput(q);
+    if (!q.trim()) {
       setSearchQuery('');
       setFilteredGames([]);
     }
   };
 
-  const handleRefresh = () => {
-    refetch();
-  };
-
-  const handleSelectGame = (game: any) => {
-    setSelectedGame(game);
-    setSearchQuery('');
-    setSearchInput('');
-    setFilteredGames([]);
-    // Update selected sport based on the selected game
-    const sport = game.sport.toLowerCase();
-    if (sport === 'nba' || sport === 'nfl' || sport === 'mlb') {
-      setSelectedSport(sport);
-    }
-  };
-
-  const handleSportChange = (sportId: string) => {
-    setSelectedSport(sportId as 'nba' | 'nfl' | 'mlb');
-    // Reset selected game when sport changes
-    setSelectedGame(null);
-  };
+  const handleRefresh = () => refetch();
 
   const generateAIAnalysis = async (promptType: string) => {
     setLoadingAI(true);
     setShowAIModal(true);
-    
-    // Get selection data for the selected game
-    const selectionData = selectedGame?.selectionData || [];
-    
     setTimeout(() => {
       let analysis = '';
-      
-      switch(promptType) {
-        case 'weather':
-          analysis = `**Weather Impact Analysis**\n\n**Game:** ${selectedGame?.homeTeam?.name || 'Home'} vs ${selectedGame?.awayTeam?.name || 'Away'}\n**Weather:** ${selectedGame?.weather || 'Clear'}\n\n**Impact Analysis:**\n• Temperature: 72°F - Optimal for basketball\n• Indoor arena - No weather impact\n• Home court advantage: +3.5 points`;
-          break;
-          
+      switch (promptType) {
         case 'playerMatchup':
-          if (selectionData.length > 0) {
-            const topPlayers = selectionData.slice(0, 3).map((sel: any) => {
-              const playerName = sel.player || 'Unknown Player';
-              const teamName = sel.team || 'Unknown Team';
-              const statType = sel.stat_type || sel.stat || 'stat';
-              const line = sel.line || 'N/A';
-              const projection = sel.projection || 'N/A';
-              const edge = sel.edge ? `${sel.edge}%` : 'N/A';
-              
-              return `${playerName} (${teamName}): ${statType} ${line} (Projection: ${projection}, Edge: ${edge})`;
-            }).join('\n• ');
-            
-            analysis = `**Player Matchup Analysis**\n\n**Key Players in this game:**\n• ${topPlayers}\n\n**Analysis:** These players have the highest projection edges based on recent performance.`;
+          if (playerTrends.length) {
+            analysis = playerTrends
+              .slice(0, 3)
+              .map(p => `**${p.player}** (${p.team || 'Unknown'}): Avg Edge ${p.avgEdge.toFixed(1)}% over ${p.count} props`)
+              .join('\n\n');
           } else {
-            analysis = `**Player Matchup Analysis**\n\nNo specific player data available for this matchup.`;
+            analysis = 'No player data available.';
           }
           break;
-          
-        case 'predictive':
-          if (selectionData.length > 0) {
-            const edges = selectionData.map((sel: any) => {
-              if (sel.edge && typeof sel.edge === 'number') return sel.edge;
-              if (sel.projection_edge && typeof sel.projection_edge === 'number') return sel.projection_edge * 100;
-              return 0;
-            });
-            
-            const avgEdge = edges.length > 0 
-              ? edges.reduce((sum: number, edge: number) => sum + edge, 0) / edges.length 
-              : 0;
-            
-            const winProb = Math.min(70 + avgEdge, 85).toFixed(1);
-            
-            analysis = `**Predictive Statistics**\n\n**Based on ${selectionData.length} player selections:**\n• Average Edge: ${avgEdge.toFixed(1)}%\n• Home Win Probability: ${winProb}%\n• Expected Total Points: ${selectedGame?.odds?.total || '225.5'}\n\n**Key Insight:** ${avgEdge > 5 ? 'Positive value detected in player projections' : 'Market appears efficient'}`;
-          } else {
-            analysis = `**Predictive Statistics**\n\n**Win Probability:**\n• Home: 62%\n• Away: 38%\n\n**Expected Score:**\n• Home: 112.3 points\n• Away: 108.1 points`;
-          }
-          break;
-          
         case 'recentForm':
-          analysis = `**Recent Form Analysis**\n\n**${selectedGame?.homeTeam?.name || 'Home'} (Last 10):**\n• Record: 7-3\n• Avg Points: 118.4\n• Defensive Rating: 110.2\n\n**${selectedGame?.awayTeam?.name || 'Away'} (Last 10):**\n• Record: 6-4\n• Avg Points: 115.8\n• Defensive Rating: 112.7`;
+          if (teamStats.length) {
+            analysis = teamStats.map(ts => `**${ts.team}**: Avg Edge ${ts.avgEdge.toFixed(1)}% (${ts.propCount} props, ${ts.uniquePlayers} players)`).join('\n\n');
+          } else {
+            analysis = 'No team data available.';
+          }
           break;
-          
-        case 'injury':
-          analysis = `**Injury Impact Assessment**\n\n**${selectedGame?.homeTeam?.name || 'Home'} Injuries:**\n• Starting SF (questionable)\n• Backup PG (out)\n\n**${selectedGame?.awayTeam?.name || 'Away'} Injuries:**\n• Starting C (probable)\n• 6th Man (out)\n\n**Overall Impact:** Moderate - favors home team`;
-          break;
-          
-        case 'homeAway':
-          analysis = `**Home/Away Trends**\n\n**${selectedGame?.homeTeam?.name || 'Home'} at Home:**\n• Win Rate: 75%\n• Points/Game: 116.8\n• Defensive Rank: 5th\n\n**${selectedGame?.awayTeam?.name || 'Away'} on Road:**\n• Win Rate: 45%\n• Points/Game: 112.3\n• Defensive Rank: 12th`;
-          break;
-          
         default:
-          analysis = `**${PROMPTS.find(p => p.id === promptType)?.title || 'Analysis'}**\n\nDetailed analysis for ${selectedGame?.homeTeam?.name || 'Home'} vs ${selectedGame?.awayTeam?.name || 'Away'}\n\nBased on real player data and projections.`;
+          analysis = `**${promptType} analysis**\n\nGame: ${selectedGame?.homeTeam?.name} vs ${selectedGame?.awayTeam?.name}`;
       }
-      
       setAiResponse(analysis);
       setLoadingAI(false);
     }, 1500);
   };
 
-  const renderTabContent = () => {
-    if (!selectedGame) return null;
-    
-    switch(activeTab) {
-      case 'conditions':
-        return (
-          <Grid container spacing={3}>
-            <Grid item xs={12} sm={6}>
-              <Card sx={{ height: '100%' }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <Cloud sx={{ color: '#3b82f6', mr: 1 }} />
-                    <Typography variant="h6">Weather Conditions</Typography>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" paragraph>
-                    {selectedGame.weather}
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Info sx={{ fontSize: 16, color: 'text.secondary' }} />
-                    <Typography variant="caption" color="text.secondary">
-                      Optimal playing conditions expected
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <Card sx={{ height: '100%' }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <LocationOn sx={{ color: '#10b981', mr: 1 }} />
-                    <Typography variant="h6">Venue Details</Typography>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" paragraph>
-                    {selectedGame.venue}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Capacity: {selectedGame.attendance}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Surface: Hardwood
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-        );
-      case 'h2h':
-        return (
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Head-to-Head Stats</Typography>
-              <Box sx={{ display: 'flex', justifyContent: 'space-around', mb: 3 }}>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="h4" color="primary">3</Typography>
-                  <Typography variant="body2" color="text.secondary">Home Wins</Typography>
-                </Box>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="h4" color="text.secondary">VS</Typography>
-                  <Typography variant="body2" color="text.secondary">Last 5 meetings</Typography>
-                </Box>
-                <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="h4" color="secondary">2</Typography>
-                  <Typography variant="body2" color="text.secondary">Away Wins</Typography>
-                </Box>
-              </Box>
-              <Alert severity="info">
-                Home team has won 4 of the last 5 meetings
-              </Alert>
-            </CardContent>
-          </Card>
-        );
-      case 'matchup':
-        return (
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>Key Matchup Analysis</Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="subtitle1" fontWeight="bold">
-                      {selectedGame.homeTeam?.name || 'Home'} Advantages
-                    </Typography>
-                    <Box component="ul" sx={{ pl: 2, mt: 1 }}>
-                      <li><Typography variant="body2">Three-point shooting</Typography></li>
-                      <li><Typography variant="body2">Fast break points</Typography></li>
-                      <li><Typography variant="body2">Rebounding</Typography></li>
-                    </Box>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
-                    <Typography variant="subtitle1" fontWeight="bold">
-                      {selectedGame.awayTeam?.name || 'Away'} Advantages
-                    </Typography>
-                    <Box component="ul" sx={{ pl: 2, mt: 1 }}>
-                      <li><Typography variant="body2">Defensive efficiency</Typography></li>
-                      <li><Typography variant="body2">Turnover creation</Typography></li>
-                      <li><Typography variant="body2">Free throw percentage</Typography></li>
-                    </Box>
-                  </Box>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        );
-      default:
-        return (
-          <Card>
-            <CardContent>
-              <Box sx={{ textAlign: 'center', py: 4 }}>
-                <Analytics sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" gutterBottom>
-                  Detailed Analysis
-                </Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>
-                  In-depth {activeTab} analysis is available with premium access
-                </Typography>
-                <Button 
-                  variant="contained" 
-                  onClick={() => navigate('/subscription')}
-                >
-                  View Premium Analysis
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-        );
-    }
-  };
-
-  const renderStatusBadge = (status: string) => {
-    switch(status) {
-      case 'Live':
-        return (
-          <Chip
-            icon={<RadioButtonChecked />}
-            label="LIVE"
-            size="small"
-            sx={{ 
-              bgcolor: '#ef4444', 
-              color: 'white',
-              fontWeight: 'bold'
-            }}
-          />
-        );
-      case 'Final':
-        return (
-          <Chip
-            icon={<CheckCircle />}
-            label="FINAL"
-            size="small"
-            sx={{ 
-              bgcolor: '#10b981', 
-              color: 'white',
-              fontWeight: 'bold'
-            }}
-          />
-        );
-      default:
-        return (
-          <Chip
-            icon={<Schedule />}
-            label={status}
-            size="small"
-            sx={{ 
-              bgcolor: '#f59e0b', 
-              color: 'white',
-              fontWeight: 'bold'
-            }}
-          />
-        );
-    }
-  };
-
+  // ================= GameCard component =================
   const GameCard = ({ game, isSelected = false, onSelect }: { game: any; isSelected?: boolean; onSelect: (game: any) => void }) => {
     const homeTeam = game.homeTeam || { name: 'Home', logo: 'H', color: '#3b82f6' };
     const awayTeam = game.awayTeam || { name: 'Away', logo: 'A', color: '#ef4444' };
-    
     return (
-      <Card 
-        sx={{ 
-          mb: 2, 
+      <Card
+        sx={{
           cursor: 'pointer',
           border: isSelected ? '2px solid #1976d2' : '1px solid #e0e0e0',
           transition: 'all 0.2s',
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: 3
-          }
+          '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 },
         }}
         onClick={() => onSelect(game)}
       >
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Avatar sx={{ 
-                bgcolor: homeTeam.color,
-                width: 32,
-                height: 32,
-                fontSize: 14,
-                fontWeight: 'bold'
-              }}>
+              <Avatar sx={{ bgcolor: homeTeam.color, width: 32, height: 32, fontSize: 14, fontWeight: 'bold' }}>
                 {homeTeam.logo}
               </Avatar>
               <Typography variant="body2" fontWeight="medium">
                 {homeTeam.name}
               </Typography>
             </Box>
-            <Typography variant="caption" color="text.secondary">vs</Typography>
+            <Typography variant="caption" color="text.secondary">
+              vs
+            </Typography>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="body2" fontWeight="medium">
                 {awayTeam.name === 'TBD' ? 'TBD' : awayTeam.name}
               </Typography>
-              <Avatar sx={{ 
-                bgcolor: awayTeam.color,
-                width: 32,
-                height: 32,
-                fontSize: 14,
-                fontWeight: 'bold'
-              }}>
+              <Avatar sx={{ bgcolor: awayTeam.color, width: 32, height: 32, fontSize: 14, fontWeight: 'bold' }}>
                 {awayTeam.logo === 'TBD' ? '?' : awayTeam.logo}
               </Avatar>
             </Box>
           </Box>
-          
-          {/* Show player count if available */}
-          {game.players && game.players.length > 0 && (
+          {game.players?.length > 0 && (
             <Typography variant="caption" color="primary" sx={{ display: 'block', mb: 1 }}>
               <People sx={{ fontSize: 12, verticalAlign: 'middle', mr: 0.5 }} />
               {game.players.length} player{game.players.length !== 1 ? 's' : ''}
             </Typography>
           )}
-          
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <CalendarToday sx={{ fontSize: 14, color: 'text.secondary' }} />
@@ -869,12 +913,119 @@ const {
                 {game.date || 'Today'}
               </Typography>
             </Box>
-            {renderStatusBadge(game.status || 'Scheduled')}
+            <Chip
+              label={game.status}
+              size="small"
+              sx={{
+                bgcolor:
+                  game.status === 'Live' ? '#ef4444' : game.status === 'Final' ? '#10b981' : '#f59e0b',
+                color: 'white',
+                fontWeight: 'bold',
+              }}
+            />
           </Box>
         </CardContent>
       </Card>
     );
   };
+
+  // ================= Tab content renderer =================
+  const renderTabContent = () => {
+    if (!selectedGame) return null;
+    switch (activeTab) {
+      case 'teamstats':
+        return (
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Team Performance (from props)
+              </Typography>
+              {teamStats.length ? (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Team</TableCell>
+                        <TableCell align="right">Props</TableCell>
+                        <TableCell align="right">Avg Edge</TableCell>
+                        <TableCell align="right">Unique Players</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {teamStats.map(row => (
+                        <TableRow key={row.team}>
+                          <TableCell>{row.team}</TableCell>
+                          <TableCell align="right">{row.propCount}</TableCell>
+                          <TableCell align="right">{row.avgEdge.toFixed(1)}%</TableCell>
+                          <TableCell align="right">{row.uniquePlayers}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">No team data available.</Typography>
+              )}
+            </CardContent>
+          </Card>
+        );
+      case 'player-trends':
+        return (
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Player Trends
+              </Typography>
+              {playerTrends.length ? (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Player</TableCell>
+                        <TableCell>Team</TableCell>
+                        <TableCell align="right">Props</TableCell>
+                        <TableCell align="right">Avg Edge</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {playerTrends.map((row, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell>{row.player}</TableCell>
+                          <TableCell>{row.team || 'Unknown'}</TableCell>
+                          <TableCell align="right">{row.count}</TableCell>
+                          <TableCell align="right">{row.avgEdge.toFixed(1)}%</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary">No player trends available.</Typography>
+              )}
+            </CardContent>
+          </Card>
+        );
+      default:
+        return (
+          <Card>
+            <CardContent sx={{ textAlign: 'center', py: 4 }}>
+              <Analytics sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6">Detailed Analysis</Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                In-depth {activeTab} analysis is available with premium access.
+              </Typography>
+              <Button variant="contained" onClick={() => navigate('/subscription')}>
+                View Premium Analysis
+              </Button>
+            </CardContent>
+          </Card>
+        );
+    }
+  };
+
+  // ================= Combined loading / error states =================
+  const isLoading = selectionsLoading || nbaGamesLoading || nhlGamesLoading || mlbGamesLoading;
+  const error = selectionsError || nbaGamesError || nhlGamesError || mlbGamesError;
 
   if (isLoading) {
     return (
@@ -887,9 +1038,6 @@ const {
     );
   }
 
-  // Get sport‑specific stats for rendering
-  const statsData = getStatsForSport(selectedSport);
-
   return (
     <Container maxWidth="lg">
       {/* Header */}
@@ -901,61 +1049,50 @@ const {
           <Typography variant="h4" fontWeight="bold">
             Game Analytics
           </Typography>
-<Typography variant="body1" color="text.secondary" component="span">
-  Live scores, stats, and in-depth analysis
-  {selectionsFromApi.length > 0 && (
-    <Chip 
-      label={`${selectionsFromApi.length} real player selections`} 
-      size="small" 
-      color="success" 
-      sx={{ ml: 1 }}
-    />
-  )}
-</Typography>
+          <Typography variant="body1" color="text.secondary" component="span">
+            Live scores, stats, and in-depth analysis
+            {selectionsFromApi.length > 0 && (
+              <Chip
+                label={`${selectionsFromApi.length} real player selections`}
+                size="small"
+                color="success"
+                sx={{ ml: 1 }}
+              />
+            )}
+          </Typography>
         </Box>
-        
-        {/* Sport Selector */}
+
         <FormControl sx={{ minWidth: 120 }}>
           <InputLabel>Sport</InputLabel>
-          <Select
-            value={selectedSport}
-            label="Sport"
-            onChange={(e) => handleSportChange(e.target.value)}
-          >
+          <Select value={selectedSport} label="Sport" onChange={e => handleSportChange(e.target.value)}>
             <MenuItem value="nba">NBA</MenuItem>
             <MenuItem value="nfl">NFL</MenuItem>
+            <MenuItem value="nhl">NHL</MenuItem>
             <MenuItem value="mlb">MLB</MenuItem>
           </Select>
         </FormControl>
-        
+
         <Tooltip title="Refresh">
-          <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching}>
-            <Refresh />
-          </IconButton>
+          <span>
+            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching}>
+              <Refresh />
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
 
-      {/* Error State */}
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           <Typography variant="body1" fontWeight="bold">
-            Failed to load game analytics
+            Failed to load data
           </Typography>
-          <Typography variant="body2">
-            {error instanceof Error ? error.message : 'Unknown error'}
-          </Typography>
-          <Button 
-            variant="outlined" 
-            size="small" 
-            onClick={handleRefresh}
-            sx={{ mt: 1 }}
-          >
+          <Typography variant="body2">{error}</Typography>
+          <Button variant="outlined" size="small" onClick={handleRefresh} sx={{ mt: 1 }}>
             Try Again
           </Button>
         </Alert>
       )}
 
-      {/* Loading/Refreshing Indicator */}
       {(isLoading || isRefetching) && <LinearProgress sx={{ mb: 2 }} />}
 
       {/* Search Bar */}
@@ -965,8 +1102,8 @@ const {
           variant="outlined"
           placeholder="Search games, teams, or leagues..."
           value={searchInput}
-          onChange={(e) => handleSearch(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSearchSubmit()}
+          onChange={e => handleSearch(e.target.value)}
+          onKeyPress={e => e.key === 'Enter' && handleSearchSubmit()}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -979,167 +1116,124 @@ const {
                   <Close />
                 </IconButton>
               </InputAdornment>
-            )
+            ),
           }}
         />
-        
-        {searchInput && !searchQuery && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Try searching for:
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              {PROMPT_SUGGESTIONS.map((suggestion, index) => (
-                <Chip
-                  key={index}
-                  icon={suggestion.icon}
-                  label={suggestion.text}
-                  onClick={() => handleSearchSubmit(suggestion.text)}
-                  sx={{ 
-                    bgcolor: `${suggestion.color}10`,
-                    borderColor: suggestion.color,
-                    color: suggestion.color,
-                    '&:hover': {
-                      bgcolor: `${suggestion.color}20`
-                    }
-                  }}
-                  variant="outlined"
-                />
-              ))}
-            </Box>
-          </Box>
-        )}
 
         {filteredGames.length > 0 && (
           <Box sx={{ mt: 2 }}>
             <Typography variant="body2" color="text.secondary" gutterBottom>
               Found {filteredGames.length} game{filteredGames.length !== 1 ? 's' : ''}
             </Typography>
-            {filteredGames.slice(0, 3).map((game) => (
-              <GameCard
-                key={game.id}
-                game={game}
-                isSelected={selectedGame?.id === game.id}
-                onSelect={() => handleSelectGame(game)}
-              />
-            ))}
+            <Grid container spacing={2}>
+              {filteredGames.slice(0, 3).map(game => (
+                <Grid item xs={12} sm={6} md={4} key={game.id}>
+                  <GameCard game={game} isSelected={selectedGame?.id === game.id} onSelect={handleSelectGame} />
+                </Grid>
+              ))}
+            </Grid>
           </Box>
         )}
       </Paper>
 
-      {!searchQuery && selectedGame && (
+      {/* If no games, show empty state */}
+      {games.length === 0 && !isLoading && (
+        <Box sx={{ textAlign: 'center', py: 8 }}>
+          <NewspaperIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
+          <Typography variant="h6" color="text.secondary">
+            No games available for {selectedSport.toUpperCase()}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Try refreshing or selecting a different sport
+          </Typography>
+          <Button variant="outlined" startIcon={<UpdateIcon />} onClick={handleRefresh} sx={{ mt: 2 }}>
+            Refresh Games
+          </Button>
+        </Box>
+      )}
+
+      {/* Selected Game Detail View (if any) */}
+      {selectedGame && !searchQuery && (
         <>
-          {/* Selected Game Header */}
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <Grid container spacing={3} alignItems="center">
                 <Grid item xs={12} md={4}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Avatar sx={{ 
-                      bgcolor: selectedGame.homeTeam?.color || '#3b82f6',
-                      width: 80,
-                      height: 80,
-                      fontSize: 32,
-                      fontWeight: 'bold',
-                      mb: 2
-                    }}>
+                    <Avatar sx={{ bgcolor: selectedGame.homeTeam?.color || '#3b82f6', width: 80, height: 80, fontSize: 32, fontWeight: 'bold', mb: 2 }}>
                       {selectedGame.homeTeam?.logo || 'H'}
                     </Avatar>
                     <Typography variant="h5" fontWeight="bold">
                       {selectedGame.homeTeam?.name || 'Home'}
                     </Typography>
                     <Typography variant="h3" color="primary" fontWeight="bold">
-                      {selectedGame.homeScore !== null ? selectedGame.homeScore : '–'}
+                      {selectedGame.homeScore ?? '–'}
                     </Typography>
                   </Box>
                 </Grid>
-                
                 <Grid item xs={12} md={4}>
                   <Box sx={{ textAlign: 'center' }}>
                     <Box sx={{ mb: 2 }}>
-                      {renderStatusBadge(selectedGame.status)}
+                      <Chip
+                        label={selectedGame.status}
+                        sx={{
+                          bgcolor:
+                            selectedGame.status === 'Live' ? '#ef4444' : selectedGame.status === 'Final' ? '#10b981' : '#f59e0b',
+                          color: 'white',
+                          fontWeight: 'bold',
+                        }}
+                      />
                       {selectedGame.quarter && (
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                           {selectedGame.quarter}
                         </Typography>
                       )}
                     </Box>
-                    
                     <Typography variant="h6" color="text.secondary" gutterBottom>
                       {selectedGame.date} • {selectedGame.time}
                     </Typography>
-                    
                     <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-                      <Chip
-                        icon={<LocationOn />}
-                        label={selectedGame.venue}
-                        size="small"
-                        variant="outlined"
-                      />
-                      <Chip
-                        icon={<Tv />}
-                        label={selectedGame.broadcast}
-                        size="small"
-                        variant="outlined"
-                      />
+                      <Chip icon={<LocationOn />} label={selectedGame.venue} size="small" variant="outlined" />
+                      <Chip icon={<Tv />} label={selectedGame.broadcast} size="small" variant="outlined" />
                     </Box>
-                    
                     <Typography variant="body2" color="text.secondary">
                       {selectedGame.sport} • {selectedGame.attendance} attendance
                     </Typography>
                   </Box>
                 </Grid>
-                
                 <Grid item xs={12} md={4}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Avatar sx={{ 
-                      bgcolor: selectedGame.awayTeam?.color || '#ef4444',
-                      width: 80,
-                      height: 80,
-                      fontSize: 32,
-                      fontWeight: 'bold',
-                      mb: 2
-                    }}>
+                    <Avatar sx={{ bgcolor: selectedGame.awayTeam?.color || '#ef4444', width: 80, height: 80, fontSize: 32, fontWeight: 'bold', mb: 2 }}>
                       {selectedGame.awayTeam?.logo === 'TBD' ? '?' : selectedGame.awayTeam?.logo || 'A'}
                     </Avatar>
                     <Typography variant="h5" fontWeight="bold">
                       {selectedGame.awayTeam?.name === 'TBD' ? 'TBD' : selectedGame.awayTeam?.name || 'Away'}
                     </Typography>
                     <Typography variant="h3" color="secondary" fontWeight="bold">
-                      {selectedGame.awayScore !== null ? selectedGame.awayScore : '–'}
+                      {selectedGame.awayScore ?? '–'}
                     </Typography>
                   </Box>
                 </Grid>
               </Grid>
-              
-              {/* Odds Bar */}
-              <Paper sx={{ 
-                mt: 3, 
-                p: 2, 
-                bgcolor: 'background.default',
-                display: 'flex',
-                justifyContent: 'space-around'
-              }}>
+              <Paper sx={{ mt: 3, p: 2, bgcolor: 'background.default', display: 'flex', justifyContent: 'space-around' }}>
                 <Box sx={{ textAlign: 'center' }}>
                   <TrendingUp sx={{ color: 'text.secondary', mb: 0.5 }} />
                   <Typography variant="body2" color="text.secondary">Spread</Typography>
-                  <Typography variant="h6" fontWeight="bold">
-                    {selectedGame.odds?.spread || '–'}
-                  </Typography>
+                  <Typography variant="h6" fontWeight="bold">{selectedGame.odds?.spread || '–'}</Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem />
                 <Box sx={{ textAlign: 'center' }}>
                   <BarChart sx={{ color: 'text.secondary', mb: 0.5 }} />
                   <Typography variant="body2" color="text.secondary">Total</Typography>
-                  <Typography variant="h6" fontWeight="bold">
-                    {selectedGame.odds?.total || '–'}
-                  </Typography>
+                  <Typography variant="h6" fontWeight="bold">{selectedGame.odds?.total || '–'}</Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem />
                 <Box sx={{ textAlign: 'center' }}>
                   <AttachMoney sx={{ color: 'text.secondary', mb: 0.5 }} />
                   <Typography variant="body2" color="text.secondary">Moneyline</Typography>
-                  <Typography variant="h6" fontWeight="bold">–</Typography>
+                  <Typography variant="h6" fontWeight="bold">
+                    {selectedGame.odds?.moneyline?.home || '–'} / {selectedGame.odds?.moneyline?.away || '–'}
+                  </Typography>
                 </Box>
               </Paper>
             </CardContent>
@@ -1149,58 +1243,23 @@ const {
           <Paper sx={{ mb: 3 }}>
             <Tabs
               value={activeTab}
-              onChange={(e, newValue) => setActiveTab(newValue)}
+              onChange={(e, v) => setActiveTab(v)}
               variant="scrollable"
               scrollButtons="auto"
               sx={{ borderBottom: 1, borderColor: 'divider' }}
             >
-              {TABS.map((tab) => (
-                <Tab
-                  key={tab.id}
-                  value={tab.id}
-                  label={tab.label}
-                  icon={tab.icon}
-                  iconPosition="start"
-                />
+              {[
+                { id: 'conditions', label: 'Conditions', icon: <Cloud /> },
+                { id: 'h2h', label: 'H2H Stats', icon: <CompareArrows /> },
+                { id: 'matchup', label: 'Matchup', icon: <Analytics /> },
+                { id: 'boxscore', label: 'Box Score', icon: <Scoreboard /> },
+                { id: 'teamstats', label: 'Team Stats', icon: <BarChart /> },
+                { id: 'player-trends', label: 'Player Trends', icon: <TrendingUpIcon /> },
+              ].map(tab => (
+                <Tab key={tab.id} value={tab.id} label={tab.label} icon={tab.icon} iconPosition="start" />
               ))}
             </Tabs>
-            <Box sx={{ p: 3 }}>
-              {renderTabContent()}
-            </Box>
-          </Paper>
-
-          {/* Stats Section – now sport‑specific */}
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <BarChart /> Game Statistics ({selectedSport.toUpperCase()})
-            </Typography>
-            <Grid container spacing={2}>
-              {statsData.map((stat, index) => (
-                <Grid item xs={12} sm={6} md={3} key={index}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                        {stat.icon}
-                        <Typography variant="body2" sx={{ ml: 1, fontWeight: 'medium' }}>
-                          {stat.label}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="h6" color="primary">
-                          {stat.home}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          vs
-                        </Typography>
-                        <Typography variant="h6" color="secondary">
-                          {stat.away}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
+            <Box sx={{ p: 3 }}>{renderTabContent()}</Box>
           </Paper>
 
           {/* AI Analysis Prompts */}
@@ -1210,55 +1269,44 @@ const {
                 <Lightbulb sx={{ color: '#fbbf24' }} /> AI Analysis Prompts
               </Typography>
               <IconButton onClick={() => setShowPrompts(!showPrompts)}>
-                <ChevronRight sx={{ 
-                  transform: showPrompts ? 'rotate(90deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.2s'
-                }} />
+                <ChevronRight
+                  sx={{ transform: showPrompts ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                />
               </IconButton>
             </Box>
-            
             {showPrompts && (
               <Grid container spacing={2}>
-                {PROMPTS.map((prompt) => (
+                {[
+                  { id: 'weather', icon: <Cloud />, title: 'Weather Impact', color: '#3b82f6' },
+                  { id: 'homeAway', icon: <LocationOn />, title: 'Home/Away Trends', color: '#10b981' },
+                  { id: 'playerMatchup', icon: <Groups />, title: 'Player Matchup', color: '#ef4444' },
+                  { id: 'recentForm', icon: <TrendingUpIcon />, title: 'Recent Form', color: '#f59e0b' },
+                  { id: 'injury', icon: <EmojiEvents />, title: 'Injury Report', color: '#8b5cf6' },
+                  { id: 'predictive', icon: <Psychology />, title: 'Predictive Stats', color: '#ec4899' },
+                ].map(prompt => (
                   <Grid item xs={12} sm={6} md={4} key={prompt.id}>
                     <Card
                       sx={{
                         cursor: 'pointer',
                         transition: 'all 0.2s',
-                        '&:hover': {
-                          transform: 'translateY(-2px)',
-                          boxShadow: 3,
-                          borderLeft: `4px solid ${prompt.color}`
-                        },
-                        borderLeft: `4px solid ${prompt.color}`
+                        '&:hover': { transform: 'translateY(-2px)', boxShadow: 3, borderLeft: `4px solid ${prompt.color}` },
+                        borderLeft: `4px solid ${prompt.color}`,
                       }}
                       onClick={() => generateAIAnalysis(prompt.id)}
                     >
                       <CardContent>
                         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                          <Avatar sx={{ 
-                            bgcolor: prompt.color,
-                            width: 40,
-                            height: 40,
-                            mr: 2
-                          }}>
+                          <Avatar sx={{ bgcolor: prompt.color, width: 40, height: 40, mr: 2 }}>
                             {prompt.icon}
                           </Avatar>
                           <Typography variant="h6" fontWeight="bold">
                             {prompt.title}
                           </Typography>
                         </Box>
-                        <Typography variant="body2" color="text.secondary" paragraph>
-                          {prompt.description}
-                        </Typography>
                         <Chip
                           label="Free AI Analysis"
                           size="small"
-                          sx={{ 
-                            bgcolor: `${prompt.color}10`,
-                            color: prompt.color,
-                            fontSize: '0.75rem'
-                          }}
+                          sx={{ bgcolor: `${prompt.color}10`, color: prompt.color, fontSize: '0.75rem' }}
                         />
                       </CardContent>
                     </Card>
@@ -1267,63 +1315,36 @@ const {
               </Grid>
             )}
           </Paper>
-
-          {/* More Games */}
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <MoreHoriz /> More Games
-            </Typography>
-            <Grid container spacing={2}>
-              {games
-                .filter(game => game.id !== selectedGame?.id)
-                .slice(0, 3)
-                .map((game) => (
-                  <Grid item xs={12} sm={6} md={4} key={game.id}>
-                    <GameCard
-                      game={game}
-                      onSelect={() => handleSelectGame(game)}
-                    />
-                  </Grid>
-                ))}
-            </Grid>
-          </Paper>
         </>
       )}
 
-      {/* Empty State */}
-      {!searchQuery && games.length === 0 && !isLoading && (
-        <Box sx={{ textAlign: 'center', py: 8 }}>
-          <NewspaperIcon sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">
-            No games available for {selectedSport.toUpperCase()}
+      {/* Always show list of games (if any) */}
+      {games.length > 0 && (
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <MoreHoriz /> {selectedGame ? 'More Games' : 'Select a Game'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Try refreshing or selecting a different sport
-          </Typography>
-          <Button 
-            variant="outlined" 
-            startIcon={<UpdateIcon />}
-            onClick={handleRefresh}
-            sx={{ mt: 2 }}
-          >
-            Refresh Games
-          </Button>
-        </Box>
+          <Grid container spacing={2}>
+            {games
+              .filter(game => !selectedGame || game.id !== selectedGame.id)
+              .slice(0, 6)
+              .map(game => (
+                <Grid item xs={12} sm={6} md={4} key={game.id}>
+                  <GameCard game={game} isSelected={false} onSelect={handleSelectGame} />
+                </Grid>
+              ))}
+          </Grid>
+        </Paper>
       )}
 
-      {/* AI Analysis Modal */}
-      <Dialog 
-        open={showAIModal} 
-        onClose={() => setShowAIModal(false)}
-        maxWidth="md"
-        fullWidth
-      >
+      {/* AI Modal */}
+      <Dialog open={showAIModal} onClose={() => setShowAIModal(false)} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Lightbulb sx={{ color: '#fbbf24' }} />
           AI Analysis
           {selectedGame && (
             <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-              {selectedGame.homeTeam?.name || 'Home'} vs {selectedGame.awayTeam?.name || 'Away'}
+              {selectedGame.homeTeam?.name} vs {selectedGame.awayTeam?.name}
             </Typography>
           )}
         </DialogTitle>
@@ -1334,53 +1355,17 @@ const {
               <Typography variant="body1" sx={{ mt: 2 }}>
                 Generating AI analysis...
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Analyzing game data and trends
-              </Typography>
             </Box>
           ) : (
-            <>
-              <Paper sx={{ p: 3, mb: 3, bgcolor: 'background.default' }}>
-                <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                  {aiResponse}
-                </Typography>
-              </Paper>
-              
-              <Typography variant="h6" gutterBottom>
-                Try another analysis:
+            <Paper sx={{ p: 3, bgcolor: 'background.default' }}>
+              <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                {aiResponse}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                {PROMPTS
-                  .filter(p => p.id !== activeTab)
-                  .slice(0, 3)
-                  .map((prompt) => (
-                    <Chip
-                      key={prompt.id}
-                      icon={prompt.icon}
-                      label={prompt.title}
-                      onClick={() => {
-                        setShowAIModal(false);
-                        setTimeout(() => generateAIAnalysis(prompt.id), 300);
-                      }}
-                      sx={{ 
-                        bgcolor: `${prompt.color}10`,
-                        borderColor: prompt.color,
-                        color: prompt.color,
-                        '&:hover': {
-                          bgcolor: `${prompt.color}20`
-                        }
-                      }}
-                      variant="outlined"
-                    />
-                  ))}
-              </Box>
-            </>
+            </Paper>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowAIModal(false)}>
-            Close
-          </Button>
+          <Button onClick={() => setShowAIModal(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Container>

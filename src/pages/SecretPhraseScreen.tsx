@@ -1,4 +1,8 @@
 // src/pages/SecretPhrasesScreen.tsx - FULL INTEGRATION with Secret Phrases & Easter Egg
+// Updated with a 20‑prompt dropdown for NBA, NHL, Golf, Tennis
+// ADDED DEBUG LOGS: Raw API response, state update, and renderPhraseCard
+// FIXED: renderPhraseCard now correctly displays phrase.phrase
+// ADDED: Generator request limit (2 requests) and "Show More" functionality
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -131,6 +135,14 @@ const SecretPhrasesScreen: React.FC = () => {
   const [customQuery, setCustomQuery] = useState('');
   const [generatedResult, setGeneratedResult] = useState<any>(null);
   const [selectedPromptCategory, setSelectedPromptCategory] = useState('Insider Tips');
+  const [selectedPrompt, setSelectedPrompt] = useState(''); // dropdown prompt selection
+
+  // Generator request limit and pagination states
+  const [availablePhrases, setAvailablePhrases] = useState<SecretPhrase[]>([]);
+  const [displayedPhrases, setDisplayedPhrases] = useState<SecretPhrase[]>([]);
+  const [showMoreButton, setShowMoreButton] = useState(false);
+  const [remainingRequests, setRemainingRequests] = useState(2);
+  const [usedPhraseIds, setUsedPhraseIds] = useState<Set<string>>(new Set());
 
   // Secret phrase states
   const [secretPhraseResult, setSecretPhraseResult] = useState<any>(null);
@@ -144,6 +156,36 @@ const SecretPhrasesScreen: React.FC = () => {
   // API URL
   // ============================================
   const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
+
+  // ============================================
+  // 20 useful prompts for NBA, NHL, Golf, Tennis
+  // ============================================
+  const USEFUL_PROMPTS_EXTENDED = [
+    // NBA
+    "Generate insider tips for tonight's NBA games",
+    "Which NBA players have the best prop value tonight?",
+    "Show me sharp money moves for NBA",
+    "NBA injury updates affecting tonight's games",
+    "Advanced analytics suggesting an NBA breakout player",
+    // NHL
+    "NHL goalie fatigue insights for tonight",
+    "Best NHL player props based on defensive matchups",
+    "NHL line movements with sharp action",
+    "NHL power play regression candidates",
+    "NHL back-to-back travel advantages",
+    // Golf
+    "Golf DFS picks for this week's tournament",
+    "Golf course fit – which players excel at this venue?",
+    "Golf weather impact – wind and rain predictions",
+    "Top 10 finish predictions for PGA event",
+    "Golf betting odds movement – sharp money",
+    // Tennis
+    "Tennis head-to-head trends for upcoming matches",
+    "Tennis surface advantage – clay vs grass specialists",
+    "Tennis injury updates affecting match odds",
+    "Tennis underdog value picks this week",
+    "Tennis serve stats – players with high ace rates"
+  ];
 
   // ============================================
   // Generate comprehensive mock phrases
@@ -323,6 +365,13 @@ const SecretPhrasesScreen: React.FC = () => {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`API error: ${response.status}`);
       const data: ApiResponse = await response.json();
+      
+      // 🔍 DEBUG: Raw API response and first phrase
+      console.log('🔍 Raw API response:', data);
+      if (data.phrases && data.phrases.length > 0) {
+        console.log('🔍 First phrase from API:', data.phrases[0]);
+      }
+      
       console.log('✅ API Response:', data);
       console.log(`📊 Phrases count: ${data.count}`);
       
@@ -352,6 +401,8 @@ const SecretPhrasesScreen: React.FC = () => {
       try {
         const data = await fetchSecretPhrases(selectedSport, selectedCategory, minConfidence);
         setPhrases(data);
+        // 🔍 DEBUG: Phrases state updated
+        console.log('🔍 Phrases state updated:', data);
         setLastUpdated(new Date());
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load secret phrases');
@@ -674,7 +725,7 @@ const SecretPhrasesScreen: React.FC = () => {
     },
     // Special Teams Regression
     '26special_teams_regression': {
-      triggers: ['26special teams regression', 'special teams regression', 'power play regression', 'penalty kill regression', 'pp/pk regression'],
+      triggers: ['26special teams regression', 'special teams regression', 'power play regression', 'penalty kick regression', 'pp/pk regression'],
       category: 'nhl_specific',
       handler: async (context) => ({
         type: 'special_teams',
@@ -852,7 +903,7 @@ const SecretPhrasesScreen: React.FC = () => {
   ];
 
   // ============================================
-  // Useful prompts for generator
+  // Useful prompts for generator (original)
   // ============================================
   const USEFUL_PROMPTS = [
     {
@@ -939,7 +990,7 @@ const SecretPhrasesScreen: React.FC = () => {
   }, [selectedSport, selectedCategory, minConfidence, fetchSecretPhrases]);
 
   // ============================================
-  // Generator logic (with secret phrase detection)
+  // Generator logic (with secret phrase detection and request limits)
   // ============================================
   const handleGeneratePredictions = async () => {
     if (!customQuery.trim()) {
@@ -947,12 +998,12 @@ const SecretPhrasesScreen: React.FC = () => {
       return;
     }
 
-    // Check for Easter egg first
+    // Check for Easter egg first (does NOT consume a request)
     if (checkForEasterEgg(customQuery)) {
       return; // Easter egg already opens modal and sets result
     }
 
-    // Check for other secret phrases
+    // Check for other secret phrases (also does NOT consume a request)
     const matchedPhrase = checkForSecretPhrase(customQuery);
     if (matchedPhrase) {
       setGenerating(true);
@@ -1001,7 +1052,12 @@ const SecretPhrasesScreen: React.FC = () => {
       return;
     }
 
-    // If not a secret phrase, fall back to normal generation (fetch and filter)
+    // ----- Normal generation – consumes a request -----
+    if (remainingRequests <= 0) {
+      alert('You have no generator requests left. Please upgrade your membership.');
+      return;
+    }
+
     setGenerating(true);
     setShowGeneratorModal(true);
 
@@ -1010,72 +1066,178 @@ const SecretPhrasesScreen: React.FC = () => {
       const freshPhrases = await fetchSecretPhrases(selectedSport, 'all', 0);
       const phrasesArray = Array.isArray(freshPhrases) ? freshPhrases : [];
 
-      // Filter based on custom query safely
+      // Keyword-based matching
       const query = customQuery.toLowerCase();
-      const matchingPhrases = phrasesArray.filter(p => {
-        const phrase = p.phrase?.toLowerCase() || '';
-        const player = p.player?.toLowerCase() || '';
-        const team = p.team?.toLowerCase() || '';
-        const category = p.category?.toLowerCase() || '';
-        const tags = p.tags?.map(t => t?.toLowerCase() || '') || [];
-        
-        return phrase.includes(query) ||
-               player.includes(query) ||
-               team.includes(query) ||
-               category.includes(query) ||
-               tags.some(tag => tag.includes(query));
-      });
+      const keywords = query
+        .split(/\s+/)
+        .filter(word => word.length > 2)
+        .map(word => word.replace(/[^\w]/g, ''));
 
-      const phrasesToShow = matchingPhrases.length > 0 ? matchingPhrases : phrasesArray;
-      const note = matchingPhrases.length === 0 ? '⚠️ No phrases directly matching your query – showing all available phrases.' : '';
+      let matched = phrasesArray;
+      if (keywords.length > 0) {
+        matched = phrasesArray.filter(p => {
+          const phrase = p.phrase?.toLowerCase() || '';
+          const player = p.player?.toLowerCase() || '';
+          const team = p.team?.toLowerCase() || '';
+          const category = p.category?.toLowerCase() || '';
+          const tags = p.tags?.map(t => t?.toLowerCase() || '') || [];
+          return keywords.some(keyword =>
+            phrase.includes(keyword) ||
+            player.includes(keyword) ||
+            team.includes(keyword) ||
+            category.includes(keyword) ||
+            tags.some(tag => tag.includes(keyword))
+          );
+        });
+      }
 
-      // Classify confidence
-      const highConfidence = phrasesToShow.filter(p => p.confidence >= 80);
-      const mediumConfidence = phrasesToShow.filter(p => p.confidence >= 60 && p.confidence < 80);
-      const lowConfidence = phrasesToShow.filter(p => p.confidence < 60);
+      // Fallback if no matches
+      const allRelevant = matched.length > 0 ? matched : phrasesArray;
+      const note = matched.length === 0 ? '⚠️ No phrases directly matching your query – showing all available phrases.' : '';
 
-      const formattedResult = {
+      // Filter out phrases already shown in previous requests
+      const unusedPhrases = allRelevant.filter(p => !usedPhraseIds.has(p.id));
+
+      if (unusedPhrases.length === 0) {
+        // No new phrases left
+        setGeneratedResult({
+          success: true,
+          analysis: `You have seen all available phrases for "${customQuery}". Try a different query or upgrade your membership.`,
+          model: 'info',
+          timestamp: new Date().toISOString(),
+          source: 'System'
+        });
+        setGenerating(false);
+        return;
+      }
+
+      // Randomly select up to 3 from unused phrases
+      const shuffled = [...unusedPhrases].sort(() => 0.5 - Math.random());
+      const initialPhrases = shuffled.slice(0, 3);
+
+      // Mark these as used
+      const newUsedIds = new Set(usedPhraseIds);
+      initialPhrases.forEach(p => newUsedIds.add(p.id));
+      setUsedPhraseIds(newUsedIds);
+
+      // Store the full unused list for the "Show More" button
+      setAvailablePhrases(unusedPhrases);
+      setDisplayedPhrases(initialPhrases);
+      setShowMoreButton(unusedPhrases.length > initialPhrases.length);
+
+      // Decrement remaining requests
+      setRemainingRequests(prev => prev - 1);
+
+      // Confidence breakdown for display
+      const highConfidence = allRelevant.filter(p => p.confidence >= 80).length;
+      const mediumConfidence = allRelevant.filter(p => p.confidence >= 60 && p.confidence < 80).length;
+      const lowConfidence = allRelevant.filter(p => p.confidence < 60).length;
+
+      const analysis = `🎯 **AI Secret Phrase Generation Results**\n\n` +
+        `Based on ${allRelevant.length} secret phrases for "${customQuery}":\n` +
+        (note ? `${note}\n\n` : '\n') +
+        `📊 **Confidence Breakdown:**\n` +
+        `   • High Confidence (80%+): ${highConfidence}\n` +
+        `   • Medium Confidence (60-79%): ${mediumConfidence}\n` +
+        `   • Low Confidence (<60%): ${lowConfidence}\n\n` +
+        `🔐 **Showing ${initialPhrases.length} of ${unusedPhrases.length} new phrases:**\n\n` +
+        initialPhrases.map((p, idx) =>
+          `**${idx + 1}. ${p.category?.replace(/_/g, ' ') || 'Unknown'}**\n` +
+          `   📝 **Phrase:** ${p.phrase || 'N/A'}\n` +
+          `   💎 **Confidence:** ${p.confidence || 0}%\n` +
+          `   🏷️ **Source:** ${p.source || 'Unknown'}\n` +
+          (p.player ? `   👤 **Player:** ${p.player}\n` : '') +
+          (p.team ? `   🏀 **Team:** ${p.team}\n` : '') +
+          (p.game ? `   🎮 **Game:** ${p.game}\n` : '') +
+          (p.analysis ? `   🔍 **Analysis:** ${p.analysis}` : '')
+        ).join('\n\n') +
+        `\n\n_Requests remaining: ${remainingRequests - 1}_`;
+
+      setGeneratedResult({
         success: true,
-        analysis: `🎯 **AI Secret Phrase Generation Results**\n\nBased on ${phrasesToShow.length} secret phrases for "${customQuery}":\n\n` +
-          (note ? `${note}\n\n` : '') +
-          `📊 **Confidence Breakdown:**\n` +
-          `   • High Confidence (80%+): ${highConfidence.length} phrases\n` +
-          `   • Medium Confidence (60-79%): ${mediumConfidence.length} phrases\n` +
-          `   • Low Confidence (<60%): ${lowConfidence.length} phrases\n\n` +
-          `🔐 **Top Phrases for ${selectedSport.toUpperCase()}:**\n\n` +
-          (phrasesToShow.slice(0, 5).map((p, idx) =>
-            `**${idx + 1}. ${p.category?.replace(/_/g, ' ') || 'Unknown'}**\n` +
-            `   📝 **Phrase:** ${p.phrase || 'N/A'}\n` +
-            `   💎 **Confidence:** ${p.confidence || 0}%\n` +
-            `   🏷️ **Source:** ${p.source || 'Unknown'}\n` +
-            (p.player ? `   👤 **Player:** ${p.player}\n` : '') +
-            (p.team ? `   🏀 **Team:** ${p.team}\n` : '') +
-            (p.game ? `   🎮 **Game:** ${p.game}\n` : '') +
-            (p.analysis ? `   🔍 **Analysis:** ${p.analysis}` : '')
-          ).join('\n\n') || '❌ No phrases available'),
+        analysis,
         model: 'secret-phrases-ai',
         timestamp: new Date().toISOString(),
         source: 'Secret Phrases API',
         rawData: {
-          total: phrasesToShow.length,
-          highConfidence: highConfidence.length,
-          mediumConfidence: mediumConfidence.length,
-          lowConfidence: lowConfidence.length
+          total: allRelevant.length,
+          newAvailable: unusedPhrases.length,
+          shown: initialPhrases.length
         }
-      };
+      });
 
-      setGeneratedResult(formattedResult);
     } catch (error) {
       console.error('❌ Error generating:', error);
       setGeneratedResult({
         success: true,
-        analysis: `Based on current ${selectedSport} data for "${customQuery}":\n\n• ${customQuery}\n\nAI Analysis: Several high-confidence secret phrases available in this category. Check the filtered view for details.`,
-        model: 'deepseek-chat',
+        analysis: `Error generating phrases. Please try again.`,
+        model: 'error',
         timestamp: new Date().toISOString(),
-        source: 'AI Analysis (Fallback)'
+        source: 'System'
       });
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Load more phrases within the same request (does NOT consume a request)
+  const loadMorePhrases = () => {
+    if (availablePhrases.length <= displayedPhrases.length) {
+      setShowMoreButton(false);
+      return;
+    }
+
+    // Get phrases not yet shown in this request
+    const shownIds = new Set(displayedPhrases.map(p => p.id));
+    const remaining = availablePhrases.filter(p => !shownIds.has(p.id));
+
+    if (remaining.length === 0) {
+      setShowMoreButton(false);
+      return;
+    }
+
+    // Randomly select up to 3 from remaining
+    const shuffled = [...remaining].sort(() => 0.5 - Math.random());
+    const newPhrases = shuffled.slice(0, 3);
+
+    // Mark these as used globally
+    const newUsedIds = new Set(usedPhraseIds);
+    newPhrases.forEach(p => newUsedIds.add(p.id));
+    setUsedPhraseIds(newUsedIds);
+
+    // Update displayed phrases
+    const updatedDisplayed = [...displayedPhrases, ...newPhrases];
+    setDisplayedPhrases(updatedDisplayed);
+
+    // Hide button if no more left
+    if (updatedDisplayed.length >= availablePhrases.length) {
+      setShowMoreButton(false);
+    }
+
+    // Update the modal content
+    if (generatedResult) {
+      const highConfidence = availablePhrases.filter(p => p.confidence >= 80).length;
+      const mediumConfidence = availablePhrases.filter(p => p.confidence >= 60 && p.confidence < 80).length;
+      const lowConfidence = availablePhrases.filter(p => p.confidence < 60).length;
+
+      const updatedAnalysis = generatedResult.analysis.split('\n🔐')[0] + '\n\n' +
+        `🔐 **Showing ${updatedDisplayed.length} of ${availablePhrases.length} new phrases:**\n\n` +
+        updatedDisplayed.map((p, idx) =>
+          `**${idx + 1}. ${p.category?.replace(/_/g, ' ') || 'Unknown'}**\n` +
+          `   📝 **Phrase:** ${p.phrase || 'N/A'}\n` +
+          `   💎 **Confidence:** ${p.confidence || 0}%\n` +
+          `   🏷️ **Source:** ${p.source || 'Unknown'}\n` +
+          (p.player ? `   👤 **Player:** ${p.player}\n` : '') +
+          (p.team ? `   🏀 **Team:** ${p.team}\n` : '') +
+          (p.game ? `   🎮 **Game:** ${p.game}\n` : '') +
+          (p.analysis ? `   🔍 **Analysis:** ${p.analysis}` : '')
+        ).join('\n\n') +
+        `\n\n_Requests remaining: ${remainingRequests}_`;
+
+      setGeneratedResult({
+        ...generatedResult,
+        analysis: updatedAnalysis
+      });
     }
   };
 
@@ -1286,7 +1448,13 @@ const SecretPhrasesScreen: React.FC = () => {
     </Paper>
   );
 
+  // ============================================
+  // FIXED renderPhraseCard – uses phrase.phrase for main text
+  // ============================================
   const renderPhraseCard = (phrase: SecretPhrase) => {
+    // 🔍 DEBUG: Log phrase being rendered
+    console.log('🔍 Rendering phrase card with:', phrase);
+    
     const confidenceColor =
       phrase.confidence >= 80 ? 'success' :
       phrase.confidence >= 60 ? 'warning' : 'default';
@@ -1317,6 +1485,7 @@ const SecretPhrasesScreen: React.FC = () => {
             />
           </Box>
 
+          {/* ✅ ALWAYS use phrase.phrase for the main text */}
           <Typography variant="body1" sx={{ my: 2, fontStyle: 'italic' }}>
             "{phrase.phrase || 'No phrase'}"
           </Typography>
@@ -1440,9 +1609,16 @@ const SecretPhrasesScreen: React.FC = () => {
       </DialogContent>
       <DialogActions>
         {!generating && (
-          <Button onClick={() => setShowGeneratorModal(false)} variant="contained" fullWidth>
-            Close
-          </Button>
+          <Box sx={{ display: 'flex', gap: 2, width: '100%' }}>
+            {showMoreButton && (
+              <Button onClick={loadMorePhrases} variant="outlined" color="primary">
+                Show 3 More Phrases
+              </Button>
+            )}
+            <Button onClick={() => setShowGeneratorModal(false)} variant="contained" sx={{ flex: 1 }}>
+              Close
+            </Button>
+          </Box>
         )}
       </DialogActions>
     </Dialog>
@@ -1460,9 +1636,38 @@ const SecretPhrasesScreen: React.FC = () => {
         </Typography>
       </Box>
 
+      {/* Display remaining requests */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        <Typography variant="body2" color="text.secondary">
+          Generator requests remaining: <strong>{remainingRequests}</strong>
+        </Typography>
+      </Box>
+
+      {/* NEW: Dropdown with 20 prompts for NBA, NHL, Golf, Tennis */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Quick Queries
+          Quick Prompts (NBA, NHL, Golf, Tennis)
+        </Typography>
+        <FormControl fullWidth>
+          <InputLabel>Select a prompt</InputLabel>
+          <Select
+            value={selectedPrompt}
+            label="Select a prompt"
+            onChange={(e) => {
+              setSelectedPrompt(e.target.value);
+              setCustomQuery(e.target.value);
+            }}
+          >
+            {USEFUL_PROMPTS_EXTENDED.map((prompt, idx) => (
+              <MenuItem key={idx} value={prompt}>{prompt}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
+
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Quick Queries (Original Categories)
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
           {USEFUL_PROMPTS.flatMap(cat => cat.prompts).slice(0, 8).map((query, index) => (

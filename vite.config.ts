@@ -6,6 +6,10 @@ import { visualizer } from 'rollup-plugin-visualizer';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
+  // Use VITE_API_BASE_PYTHON if set, otherwise fallback to production URL
+  const apiTarget = env.VITE_API_BASE_PYTHON || 'https://python-api-fresh-production.up.railway.app';
+  console.log(`🚀 Proxy target: ${apiTarget}`);
+
   return {
     plugins: [
       react(),
@@ -48,16 +52,16 @@ export default defineConfig(({ mode }) => {
       host: true,
       proxy: {
         '/api': {
-          target: 'https://python-api-fresh-production.up.railway.app',
+          target: apiTarget,
           changeOrigin: true,
           secure: false,
-          // Do NOT rewrite the path – send /api/... as is
+          rewrite: (path) => path, // explicitly keep the original path
           configure: (proxy) => {
             proxy.on('error', (err, req, res) => {
               console.log('❌ Proxy error:', err);
             });
             proxy.on('proxyReq', (proxyReq, req, res) => {
-              console.log('🔄 Proxying:', req.method, req.url);
+              console.log('🔄 Proxying:', req.method, req.url, '→', apiTarget + req.url);
             });
             proxy.on('proxyRes', (proxyRes, req, res) => {
               console.log('✅ Proxy response:', proxyRes.statusCode, req.url);

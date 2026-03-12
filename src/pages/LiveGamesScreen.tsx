@@ -49,8 +49,8 @@ import {
   Cancel as CancelIcon
 } from '@mui/icons-material';
 
-// ADD THIS IMPORT
-import { useOddsGames } from '../hooks/useUnifiedAPI';
+// UPDATED IMPORT: useLiveScores instead of useOddsGames
+import { useLiveScores } from '../hooks/useunifiedAPI';
 
 interface Game {
   id: string;
@@ -86,7 +86,7 @@ const LiveGamesScreen = () => {
   }, []);
 
   // Main states
-  const [selectedSport, setSelectedSport] = useState('all');
+  const [selectedSport, setSelectedSport] = useState('NBA'); // default to NBA
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
@@ -110,19 +110,19 @@ const LiveGamesScreen = () => {
     { id: 1, sport: 'all', time: 'Just now', text: 'Loading live games...' },
   ]);
 
-  // Sports data - Map frontend sport IDs to API sport keys
+  // Sports data - Map frontend sport IDs to API sport keys (used by useLiveScores)
   const sports = [
     { id: 'all', name: 'All Sports', icon: <WhatshotIcon />, color: '#8b5cf6', apiKey: '' },
-    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444', apiKey: 'basketball_nba' },
-    { id: 'NFL', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6', apiKey: 'americanfootball_nfl' },
-    { id: 'NHL', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af', apiKey: 'icehockey_nhl' },
-    { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981', apiKey: 'baseball_mlb' }
+    { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444', apiKey: 'nba' },
+    { id: 'NFL', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6', apiKey: 'nfl' },
+    { id: 'NHL', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af', apiKey: 'nhl' },
+    { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981', apiKey: 'mlb' }
   ];
 
-  // Get API sport key for selected sport
+  // Get API sport key for selected sport (lowercase for useLiveScores)
   const getApiSportKey = () => {
     const sportObj = sports.find(s => s.id === selectedSport);
-    return sportObj?.apiKey || 'basketball_nba'; // Default to NBA
+    return sportObj?.apiKey || 'nba';
   };
 
   // Mock games data as fallback
@@ -152,32 +152,23 @@ const LiveGamesScreen = () => {
     }
   ];
 
-  // ===== USE ODDS GAMES HOOK =====
+  // ===== USE LIVE SCORES HOOK =====
   const {
     data: gamesData,
     isLoading,
     error: hookError,
     refetch,
-    isRefetching
-  } = useOddsGames(
-    getApiSportKey(),
-    'us',
-    'h2h,spreads,totals',
-    {
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      refetchOnWindowFocus: true,
-      refetchInterval: autoRefresh ? 30 * 1000 : false, // 30 seconds if autoRefresh enabled
-      retry: 2,
-      retryDelay: 1000
-    }
-  );
+    isRefetching,
+    endpoint // the actual endpoint being used (for debugging)
+  } = useLiveScores(getApiSportKey()); // pass the selected sport key
 
   // Transform API data to our format
   const transformApiData = useCallback((apiData: any): Game[] => {
     console.log('🔄 Transforming API data:', apiData);
     
     if (!apiData || !apiData.games) {
-      return mockGamesData; // Fallback to mock data
+      console.warn('No games array in API response, using mock data');
+      return mockGamesData;
     }
 
     try {
@@ -216,7 +207,7 @@ const LiveGamesScreen = () => {
     
     let filtered = [...games];
     
-    // Apply sport filter
+    // Apply sport filter (if 'all', show all; otherwise filter by selected sport)
     if (selectedSport !== 'all') {
       filtered = filtered.filter(game => game.sport === selectedSport);
     }
@@ -256,7 +247,7 @@ const LiveGamesScreen = () => {
           id: 1, 
           sport: 'all', 
           time: 'Just now', 
-          text: `Loaded ${filtered.length} ${selectedSport === 'all' ? 'games' : selectedSport + ' games'} from ${gamesData?.source || 'API'}`
+          text: `Loaded ${filtered.length} ${selectedSport === 'all' ? 'games' : selectedSport + ' games'} from ${endpoint || 'API'}`
         },
         { 
           id: 2, 
@@ -273,7 +264,7 @@ const LiveGamesScreen = () => {
       ];
       setLiveUpdates(newUpdates);
     }
-  }, [selectedSport, searchQuery, gamesData?.source]);
+  }, [selectedSport, searchQuery, endpoint]);
 
   // Process data when API data changes
   useEffect(() => {
@@ -281,7 +272,8 @@ const LiveGamesScreen = () => {
       console.log('📊 Games data received:', gamesData);
       
       // Show success message
-      setSuccess(`✅ Loaded ${gamesData.games?.length || 0} games from ${gamesData.source || 'API'}`);
+      const source = endpoint ? `endpoint: ${endpoint}` : 'API';
+      setSuccess(`✅ Loaded ${gamesData.games?.length || 0} games from ${source}`);
       setError(null);
       
       // Transform and process data
@@ -296,7 +288,7 @@ const LiveGamesScreen = () => {
       // Use mock data on error
       processGames(mockGamesData);
     }
-  }, [gamesData, hookError, transformApiData, processGames]);
+  }, [gamesData, hookError, transformApiData, processGames, endpoint]);
 
   // Handle manual refresh
   const handleRefresh = () => {
@@ -363,7 +355,7 @@ const LiveGamesScreen = () => {
                 Real-time sports action and scores
               </Typography>
               <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
-                Source: {gamesData?.source ? `${gamesData.source} API` : 'Demo Data'}
+                Source: {endpoint ? `${endpoint}` : 'Demo Data'}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -894,7 +886,7 @@ const LiveGamesScreen = () => {
             Loading live games...
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Using: {getApiSportKey()}
+            Using sport: {getApiSportKey()}
           </Typography>
         </Box>
       </Container>
@@ -936,7 +928,7 @@ const LiveGamesScreen = () => {
           <Typography variant="h5">
             {selectedSport === 'all' ? 'All Sports' : selectedSport} Games
             <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
-              Source: {gamesData?.source ? `${gamesData.source} API` : 'Demo Data'}
+              Source: {endpoint ? endpoint : 'Demo Data'}
             </Typography>
           </Typography>
           <Chip
@@ -999,7 +991,7 @@ const LiveGamesScreen = () => {
           Current Sport API Key: {getApiSportKey()}
         </Typography>
         <Typography variant="body2">
-          Data Source: {gamesData?.source || 'Demo Data'}
+          Data Source: {endpoint ? endpoint : 'Demo Data'}
         </Typography>
       </Paper>
       

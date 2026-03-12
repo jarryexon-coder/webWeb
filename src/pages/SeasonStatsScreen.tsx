@@ -93,7 +93,13 @@ import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 
 // =============================================
-// TYPES
+// CONSTANTS – same as PlayerStatsScreen
+// =============================================
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+
+// =============================================
+// TYPES – extended with NHL/MLB fields
 // =============================================
 
 interface PlayerStats {
@@ -108,13 +114,11 @@ interface PlayerStats {
   weight?: number;
   experience?: number;
   
-  // Game stats
   gamesPlayed: number;
   gamesStarted: number;
   minutes: number;
   minutesPerGame: number;
   
-  // Offensive stats
   points: number;
   pointsPerGame: number;
   fieldGoalsMade: number;
@@ -127,17 +131,14 @@ interface PlayerStats {
   freeThrowsAttempted: number;
   freeThrowPercentage: number;
   
-  // Rebounding
   rebounds: number;
   reboundsPerGame: number;
   offensiveRebounds: number;
   defensiveRebounds: number;
   
-  // Playmaking
   assists: number;
   assistsPerGame: number;
   
-  // Defense
   steals: number;
   stealsPerGame: number;
   blocks: number;
@@ -147,7 +148,6 @@ interface PlayerStats {
   fouls: number;
   foulsPerGame: number;
   
-  // Advanced metrics
   efficiency: number;
   trueShootingPercentage: number;
   effectiveFieldGoalPercentage: number;
@@ -156,23 +156,34 @@ interface PlayerStats {
   boxPlusMinus: number;
   valueOverReplacement: number;
   
-  // Fantasy stats
   fantasyPoints: number;
   fantasyPointsPerGame: number;
   fanduelSalary?: number;
   draftkingsSalary?: number;
   valueScore?: number;
   
-  // Trend data
   last5Avg: number;
   last10Avg: number;
   seasonHigh: number;
   seasonLow: number;
   trend: 'up' | 'down' | 'stable';
   
-  // Injury
   injuryStatus?: string;
   injuryDetails?: string;
+
+  // ========== NHL specific ==========
+  goalsPerGame?: number;
+  shotsPerGame?: number;
+  hitsPerGame?: number;
+  plusMinus?: number;
+  penaltyMinutes?: number;   // alias for fouls
+
+  // ========== MLB specific ==========
+  homeRuns?: number;         // total HR
+  avg?: number;              // batting average
+  obp?: number;              // on‑base percentage
+  slg?: number;              // slugging percentage
+  ops?: number;              // on‑base plus slugging
 }
 
 interface TeamStats {
@@ -184,7 +195,6 @@ interface TeamStats {
   logo?: string;
   primaryColor?: string;
   
-  // Record
   wins: number;
   losses: number;
   winPercentage: number;
@@ -195,7 +205,6 @@ interface TeamStats {
   last10: string;
   streak: string;
   
-  // Offensive stats
   pointsPerGame: number;
   offensiveRating: number;
   fieldGoalPercentage: number;
@@ -204,7 +213,6 @@ interface TeamStats {
   reboundsPerGame: number;
   assistsPerGame: number;
   
-  // Defensive stats
   opponentPointsPerGame: number;
   defensiveRating: number;
   opponentFieldGoalPercentage: number;
@@ -212,13 +220,11 @@ interface TeamStats {
   opponentReboundsPerGame: number;
   opponentAssistsPerGame: number;
   
-  // Advanced
   pace: number;
   netRating: number;
   trueShootingPercentage: number;
   effectiveFieldGoalPercentage: number;
   
-  // Rankings
   offensiveRank: number;
   defensiveRank: number;
   netRank: number;
@@ -236,38 +242,33 @@ interface SeasonLeaders {
   efficiency: PlayerStats[];
 }
 
-interface HistoricalData {
-  season: string;
-  playerId: string;
-  playerName: string;
-  stats: {
-    points: number;
-    rebounds: number;
-    assists: number;
-    gamesPlayed: number;
-  };
-}
-
 // =============================================
-// API FUNCTIONS - Connects to your Flask backend
+// UPDATED API FUNCTIONS – NBA via Node, others via Python
 // =============================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://python-api-fresh-production.up.railway.app';
-
-// Fetch player stats from your comprehensive JSON databases
 const fetchPlayerStats = async (sport: string = 'nba') => {
   try {
-    // Your Flask backend serves the comprehensive player data
-    const response = await axios.get(`${API_BASE_URL}/api/players`, {
-      params: { 
-        sport, 
-        limit: 500,
-        realtime: false // Use comprehensive JSON database
-      }
-    });
+    let url: string;
+    if (sport === 'mlb' || sport === 'nhl') {
+      // Use Python API for MLB and NHL
+      url = `${PYTHON_API_BASE}/api/players?sport=${sport}&realtime=true&limit=500`;
+    } else {
+      // Use Node API for NBA and NFL
+      url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${sport}`;
+    }
+
+    const response = await axios.get(url);
     
-    if (response.data.success) {
-      return transformPlayerStats(response.data.players, sport);
+    if (sport === 'mlb' || sport === 'nhl') {
+      // Python API returns { success, data: { players, is_real_data } }
+      if (response.data.success && response.data.data?.players) {
+        return transformPlayerStats(response.data.data.players, sport);
+      }
+    } else {
+      // Node API returns { success, data: [...] }
+      if (response.data.success && Array.isArray(response.data.data)) {
+        return transformPlayerStats(response.data.data, sport);
+      }
     }
     return null;
   } catch (error) {
@@ -276,18 +277,11 @@ const fetchPlayerStats = async (sport: string = 'nba') => {
   }
 };
 
-// Fetch team stats from your sports_stats_database_comprehensive.json
 const fetchTeamStats = async (sport: string = 'nba') => {
   try {
-    const response = await axios.get(`${API_BASE_URL}/api/stats/database`, {
-      params: { 
-        sport,
-        category: 'team_stats'
-      }
-    });
-    
-    if (response.data.success) {
-      return transformTeamStats(response.data.database, sport);
+    const players = await fetchPlayerStats(sport);
+    if (players && players.length > 0) {
+      return transformTeamStatsFromPlayers(players, sport);
     }
     return null;
   } catch (error) {
@@ -296,194 +290,277 @@ const fetchTeamStats = async (sport: string = 'nba') => {
   }
 };
 
-// Fetch season leaders from your player data
 const fetchSeasonLeaders = async (sport: string = 'nba') => {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/api/players`, {
-      params: { 
-        sport, 
-        limit: 200,
-        sort: 'pointsPerGame',
-        order: 'desc'
-      }
-    });
-    
-    if (response.data.success) {
-      return transformSeasonLeaders(response.data.players);
-    }
-    return null;
-  } catch (error) {
-    console.log('Using mock season leaders data');
-    return null;
+  const players = await fetchPlayerStats(sport);
+  if (players) {
+    return transformSeasonLeaders(players);
   }
+  return null;
 };
 
-// Fetch player trends from your /api/trends endpoint
 const fetchPlayerTrends = async (sport: string = 'nba') => {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/api/trends`, {
-      params: { sport }
-    });
-    return response.data.trends || [];
-  } catch (error) {
-    console.log('Using mock player trends');
-    return [];
+  const players = await fetchPlayerStats(sport);
+  if (players) {
+    return players
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        team: p.teamAbbrev,
+        trend: p.trend,
+        diff: p.last5Avg - p.pointsPerGame,
+        last5Avg: p.last5Avg,
+        seasonAvg: p.pointsPerGame
+      }))
+      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   }
+  return [];
 };
 
-// Transform API response to PlayerStats format
+// =============================================
+// TRANSFORM FUNCTIONS (enhanced for NHL/MLB)
+// =============================================
+
 const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
+  // Log the first player for debugging
+  if (players.length > 0) {
+    console.log(`First ${sport} player data (raw):`, players[0]);
+  }
+
   return players.map((p, index) => {
-    // Extract or generate realistic stats
-    const gamesPlayed = p.games_played || p.gp || 65;
+    // Determine games played – if missing, use a reasonable default for the sport
+    let gamesPlayed = p.games_played || p.gp;
+    if (!gamesPlayed) {
+      if (sport === 'nhl') gamesPlayed = 70;   // typical NHL season games
+      else if (sport === 'mlb') gamesPlayed = 162;
+      else gamesPlayed = 65;                    // fallback for others
+      console.warn(`games_played missing for ${sport} player ${p.name}, using default ${gamesPlayed}`);
+    }
+
     const minutes = p.minutes || p.min || 32.5;
-    const points = p.points || p.pts || 22.4;
-    const rebounds = p.rebounds || p.reb || 7.2;
-    const assists = p.assists || p.ast || 5.1;
-    const steals = p.steals || p.stl || 1.2;
-    const blocks = p.blocks || p.blk || 0.8;
-    const turnovers = p.turnovers || p.tov || 2.3;
-    const fgm = points * 0.45;
-    const fga = points * 0.95;
-    const fgp = (fgm / fga) * 100;
-    const tpm = p.threePoints || p.tpm || 2.4;
-    const tpa = tpm * 2.5;
-    const tpp = (tpm / tpa) * 100;
-    
-    // Advanced metrics
-    const efficiency = points + rebounds + assists + steals + blocks - turnovers;
-    const trueShooting = (points / (2 * (fga + 0.44 * (p.fta || 4.5)))) * 100;
-    const usageRate = 24.5 + (Math.random() * 6 - 3);
-    const winShares = 4.2 + (Math.random() * 3);
-    
-    // Fantasy points (FanDuel scoring)
-    const fantasyPoints = points + (rebounds * 1.2) + (assists * 1.5) + (steals * 3) + (blocks * 3) - turnovers;
-    
+
+    // Sport‑specific stat extraction
+    let pointsPerGame, reboundsPerGame, assistsPerGame, stealsPerGame, blocksPerGame, turnoversPerGame, foulsPerGame;
+    let points, rebounds, assists, steals, blocks, turnovers, fouls;
+
+    // Additional variables for NHL/MLB
+    let goals = 0, assistsNhl = 0, shots = 0, hits = 0, plusMinus = 0;
+    let homeRuns = 0, avg = 0, obp = 0, slg = 0, ops = 0;
+
+    if (sport === 'nhl') {
+      // NHL: totals for goals, assists, points, penalty minutes, plus/minus
+      points = p.points || 0;
+      assists = p.assists || 0;
+      rebounds = 0;          // NHL doesn't track rebounds
+      steals = p.steals || 0;
+      blocks = p.blocks || 0;
+      turnovers = p.turnovers || 0;
+      fouls = p.penalty_minutes || p.pim || 0;
+
+      // Additional NHL stats
+      goals = p.goals || 0;
+      shots = p.shots || 0;
+      hits = p.hits || 0;
+      plusMinus = p.plus_minus || 0;
+
+      pointsPerGame = gamesPlayed > 0 ? points / gamesPlayed : 0;
+      reboundsPerGame = 0;
+      assistsPerGame = gamesPlayed > 0 ? assists / gamesPlayed : 0;
+      stealsPerGame = gamesPlayed > 0 ? steals / gamesPlayed : 0;
+      blocksPerGame = gamesPlayed > 0 ? blocks / gamesPlayed : 0;
+      turnoversPerGame = gamesPlayed > 0 ? turnovers / gamesPlayed : 0;
+      foulsPerGame = gamesPlayed > 0 ? fouls / gamesPlayed : 0;
+    } else if (sport === 'mlb') {
+      // MLB: typical stats (runs, hits, RBI, steals) plus advanced
+      const runs = p.runs || 0;
+      const hitsMlb = p.hits || 0;
+      const rbi = p.rbi || 0;
+      const stealsMlb = p.steals || 0;
+      homeRuns = p.home_runs || 0;
+      const atBats = p.at_bats || (gamesPlayed * 3.5); // fallback
+      const walks = p.walks || 0;
+      // Use provided advanced stats or compute approximations
+      avg = p.avg || (hitsMlb / atBats) || 0;
+      obp = p.obp || (hitsMlb + walks) / (atBats + walks) || 0;
+      slg = p.slg || ((hitsMlb + 2 * (p.doubles || 0) + 3 * (p.triples || 0) + 4 * homeRuns) / atBats) || 0;
+      ops = obp + slg;
+
+      points = runs;
+      rebounds = hitsMlb;
+      assists = rbi;
+      steals = stealsMlb;
+      blocks = 0;
+      turnovers = 0;
+      fouls = 0;
+
+      pointsPerGame = gamesPlayed > 0 ? runs / gamesPlayed : 0;
+      reboundsPerGame = gamesPlayed > 0 ? hitsMlb / gamesPlayed : 0;
+      assistsPerGame = gamesPlayed > 0 ? rbi / gamesPlayed : 0;
+      stealsPerGame = gamesPlayed > 0 ? stealsMlb / gamesPlayed : 0;
+      blocksPerGame = 0;
+      turnoversPerGame = 0;
+      foulsPerGame = 0;
+    } else {
+      // NBA/NFL – API already returns per‑game averages
+      pointsPerGame = p.points || p.pts || 0;
+      reboundsPerGame = p.rebounds || p.reb || 0;
+      assistsPerGame = p.assists || p.ast || 0;
+      stealsPerGame = p.steals || p.stl || 0;
+      blocksPerGame = p.blocks || p.blk || 0;
+      turnoversPerGame = p.turnovers || p.tov || 0;
+      foulsPerGame = p.fouls || 0;
+
+      // Compute totals for efficiency (optional)
+      points = pointsPerGame * gamesPlayed;
+      rebounds = reboundsPerGame * gamesPlayed;
+      assists = assistsPerGame * gamesPlayed;
+      steals = stealsPerGame * gamesPlayed;
+      blocks = blocksPerGame * gamesPlayed;
+      turnovers = turnoversPerGame * gamesPlayed;
+      fouls = foulsPerGame * gamesPlayed;
+    }
+
+    // Shooting stats – fallbacks (mostly for NBA)
+    const fgm = p.fgm || points * 0.45;
+    const fga = p.fga || points * 0.95;
+    const fgp = fga ? (fgm / fga) * 100 : 45.0;
+    const tpm = p.three_points_made || p.tpm || 2.4;
+    const tpa = p.three_points_attempted || tpm * 2.5;
+    const tpp = tpa ? (tpm / tpa) * 100 : 36.0;
+    const ftm = p.free_throws_made || p.ftm || 3.8;
+    const fta = p.free_throws_attempted || p.fta || 4.5;
+    const ftp = fta ? (ftm / fta) * 100 : 83.5;
+
+    // Per‑game efficiency
+    const efficiency = pointsPerGame + reboundsPerGame + assistsPerGame + stealsPerGame + blocksPerGame - turnoversPerGame;
+
+    // Fantasy points per game (FanDuel scoring)
+    const fantasyPointsPerGame = pointsPerGame + reboundsPerGame * 1.2 + assistsPerGame * 1.5 + stealsPerGame * 3 + blocksPerGame * 3 - turnoversPerGame;
+
     return {
       id: p.id || `player-${index}`,
       name: p.name || p.playerName || `Player ${index + 1}`,
       team: p.team || p.teamAbbrev || 'FA',
-      teamAbbrev: p.teamAbbrev || p.team?.substring(0, 3).toUpperCase() || 'FA',
+      teamAbbrev: p.teamAbbrev || (p.team ? p.team.substring(0, 3).toUpperCase() : 'FA'),
       position: p.position || p.pos || 'G/F',
-      number: p.number || [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 35, 40, 41, 42, 43, 44, 45][Math.floor(Math.random() * 33)],
+      number: p.number || Math.floor(Math.random() * 45) + 1,
       age: p.age || Math.floor(Math.random() * 14 + 22),
       height: p.height || `${Math.floor(Math.random() * 10 + 70)}"`,
       weight: p.weight || Math.floor(Math.random() * 60 + 185),
       experience: p.experience || Math.floor(Math.random() * 12),
-      
+
       gamesPlayed,
       gamesStarted: p.games_started || Math.floor(gamesPlayed * 0.8),
       minutes,
       minutesPerGame: minutes,
-      
+
       points,
-      pointsPerGame: points,
+      pointsPerGame: parseFloat(pointsPerGame.toFixed(1)),
       fieldGoalsMade: fgm,
       fieldGoalsAttempted: fga,
       fieldGoalPercentage: parseFloat(fgp.toFixed(1)),
       threePointsMade: tpm,
       threePointsAttempted: tpa,
       threePointPercentage: parseFloat(tpp.toFixed(1)),
-      freeThrowsMade: p.ftm || 3.8,
-      freeThrowsAttempted: p.fta || 4.5,
-      freeThrowPercentage: p.ftp || 83.5,
-      
+      freeThrowsMade: ftm,
+      freeThrowsAttempted: fta,
+      freeThrowPercentage: parseFloat(ftp.toFixed(1)),
+
       rebounds,
-      reboundsPerGame: rebounds,
-      offensiveRebounds: p.orb || 1.2,
-      defensiveRebounds: rebounds - (p.orb || 1.2),
-      
+      reboundsPerGame: parseFloat(reboundsPerGame.toFixed(1)),
+      offensiveRebounds: p.offensive_rebounds || p.orb || 1.2,
+      defensiveRebounds: rebounds - (p.offensive_rebounds || p.orb || 1.2),
+
       assists,
-      assistsPerGame: assists,
-      
+      assistsPerGame: parseFloat(assistsPerGame.toFixed(1)),
+
       steals,
-      stealsPerGame: steals,
+      stealsPerGame: parseFloat(stealsPerGame.toFixed(1)),
       blocks,
-      blocksPerGame: blocks,
+      blocksPerGame: parseFloat(blocksPerGame.toFixed(1)),
       turnovers,
-      turnoversPerGame: turnovers,
-      fouls: p.fouls || 2.1,
-      foulsPerGame: 2.1,
-      
+      turnoversPerGame: parseFloat(turnoversPerGame.toFixed(1)),
+      fouls,
+      foulsPerGame: parseFloat(foulsPerGame.toFixed(1)),
+
       efficiency: parseFloat(efficiency.toFixed(1)),
-      trueShootingPercentage: parseFloat(trueShooting.toFixed(1)),
-      effectiveFieldGoalPercentage: parseFloat(((fgm + 0.5 * tpm) / fga * 100).toFixed(1)),
-      usageRate: parseFloat(usageRate.toFixed(1)),
-      winShares: parseFloat(winShares.toFixed(1)),
-      boxPlusMinus: parseFloat((2.1 + Math.random() * 4 - 2).toFixed(1)),
-      valueOverReplacement: parseFloat((1.2 + Math.random() * 2).toFixed(1)),
-      
-      fantasyPoints: parseFloat(fantasyPoints.toFixed(1)),
-      fantasyPointsPerGame: parseFloat(fantasyPoints.toFixed(1)),
-      fanduelSalary: p.fanduel_salary || Math.floor(fantasyPoints * 180),
-      draftkingsSalary: p.draftkings_salary || Math.floor(fantasyPoints * 175),
-      valueScore: p.valueScore || Math.floor(fantasyPoints / ((p.fanduel_salary || fantasyPoints * 180) / 1000)),
-      
-      last5Avg: parseFloat((points * 1.08).toFixed(1)),
-      last10Avg: parseFloat((points * 1.04).toFixed(1)),
-      seasonHigh: parseFloat((points * 1.4).toFixed(1)),
-      seasonLow: parseFloat((points * 0.6).toFixed(1)),
+      trueShootingPercentage: parseFloat(((pointsPerGame / (2 * (fga / gamesPlayed + 0.44 * (fta / gamesPlayed))) * 100) || 0).toFixed(1)),
+      effectiveFieldGoalPercentage: parseFloat((((fgm / gamesPlayed + 0.5 * (tpm / gamesPlayed)) / (fga / gamesPlayed) * 100) || 0).toFixed(1)),
+      usageRate: 24.5 + (Math.random() * 6 - 3), // placeholder
+      winShares: 4.2 + (Math.random() * 3),
+      boxPlusMinus: 2.1 + Math.random() * 4 - 2,
+      valueOverReplacement: 1.2 + Math.random() * 2,
+
+      fantasyPoints: fantasyPointsPerGame * gamesPlayed,
+      fantasyPointsPerGame: parseFloat(fantasyPointsPerGame.toFixed(1)),
+      fanduelSalary: p.fanduel_salary || Math.floor(fantasyPointsPerGame * 180),
+      draftkingsSalary: p.draftkings_salary || Math.floor(fantasyPointsPerGame * 175),
+      valueScore: p.valueScore || Math.floor(fantasyPointsPerGame / ((p.fanduel_salary || fantasyPointsPerGame * 180) / 1000)),
+
+      last5Avg: parseFloat((pointsPerGame * (0.95 + Math.random() * 0.2)).toFixed(1)),
+      last10Avg: parseFloat((pointsPerGame * (0.98 + Math.random() * 0.1)).toFixed(1)),
+      seasonHigh: parseFloat((pointsPerGame * 1.4).toFixed(1)),
+      seasonLow: parseFloat((pointsPerGame * 0.6).toFixed(1)),
       trend: Math.random() > 0.6 ? 'up' : Math.random() > 0.3 ? 'stable' : 'down',
-      
+
       injuryStatus: p.injury_status || 'Active',
-      injuryDetails: p.injury_details
+      injuryDetails: p.injury_details,
+
+      // ===== NHL‑specific fields (per‑game averages) =====
+      goalsPerGame: sport === 'nhl' ? (gamesPlayed > 0 ? goals / gamesPlayed : 0) : undefined,
+      shotsPerGame: sport === 'nhl' ? (gamesPlayed > 0 ? shots / gamesPlayed : 0) : undefined,
+      hitsPerGame: sport === 'nhl' ? (gamesPlayed > 0 ? hits / gamesPlayed : 0) : undefined,
+      plusMinus: sport === 'nhl' ? plusMinus : undefined,
+      penaltyMinutes: sport === 'nhl' ? fouls : undefined,
+
+      // ===== MLB‑specific fields =====
+      homeRuns: sport === 'mlb' ? homeRuns : undefined,
+      avg: sport === 'mlb' ? avg : undefined,
+      obp: sport === 'mlb' ? obp : undefined,
+      slg: sport === 'mlb' ? slg : undefined,
+      ops: sport === 'mlb' ? ops : undefined,
     };
   });
 };
 
-const transformTeamStats = (teams: any[], sport: string): TeamStats[] => {
-  const nbaTeams = [
-    { name: 'Atlanta Hawks', abbrev: 'ATL', conf: 'East', div: 'Southeast' },
-    { name: 'Boston Celtics', abbrev: 'BOS', conf: 'East', div: 'Atlantic' },
-    { name: 'Brooklyn Nets', abbrev: 'BKN', conf: 'East', div: 'Atlantic' },
-    { name: 'Charlotte Hornets', abbrev: 'CHA', conf: 'East', div: 'Southeast' },
-    { name: 'Chicago Bulls', abbrev: 'CHI', conf: 'East', div: 'Central' },
-    { name: 'Cleveland Cavaliers', abbrev: 'CLE', conf: 'East', div: 'Central' },
-    { name: 'Dallas Mavericks', abbrev: 'DAL', conf: 'West', div: 'Southwest' },
-    { name: 'Denver Nuggets', abbrev: 'DEN', conf: 'West', div: 'Northwest' },
-    { name: 'Detroit Pistons', abbrev: 'DET', conf: 'East', div: 'Central' },
-    { name: 'Golden State Warriors', abbrev: 'GSW', conf: 'West', div: 'Pacific' },
-    { name: 'Houston Rockets', abbrev: 'HOU', conf: 'West', div: 'Southwest' },
-    { name: 'Indiana Pacers', abbrev: 'IND', conf: 'East', div: 'Central' },
-    { name: 'LA Clippers', abbrev: 'LAC', conf: 'West', div: 'Pacific' },
-    { name: 'Los Angeles Lakers', abbrev: 'LAL', conf: 'West', div: 'Pacific' },
-    { name: 'Memphis Grizzlies', abbrev: 'MEM', conf: 'West', div: 'Southwest' },
-    { name: 'Miami Heat', abbrev: 'MIA', conf: 'East', div: 'Southeast' },
-    { name: 'Milwaukee Bucks', abbrev: 'MIL', conf: 'East', div: 'Central' },
-    { name: 'Minnesota Timberwolves', abbrev: 'MIN', conf: 'West', div: 'Northwest' },
-    { name: 'New Orleans Pelicans', abbrev: 'NOP', conf: 'West', div: 'Southwest' },
-    { name: 'New York Knicks', abbrev: 'NYK', conf: 'East', div: 'Atlantic' },
-    { name: 'Oklahoma City Thunder', abbrev: 'OKC', conf: 'West', div: 'Northwest' },
-    { name: 'Orlando Magic', abbrev: 'ORL', conf: 'East', div: 'Southeast' },
-    { name: 'Philadelphia 76ers', abbrev: 'PHI', conf: 'East', div: 'Atlantic' },
-    { name: 'Phoenix Suns', abbrev: 'PHX', conf: 'West', div: 'Pacific' },
-    { name: 'Portland Trail Blazers', abbrev: 'POR', conf: 'West', div: 'Northwest' },
-    { name: 'Sacramento Kings', abbrev: 'SAC', conf: 'West', div: 'Pacific' },
-    { name: 'San Antonio Spurs', abbrev: 'SAS', conf: 'West', div: 'Southwest' },
-    { name: 'Toronto Raptors', abbrev: 'TOR', conf: 'East', div: 'Atlantic' },
-    { name: 'Utah Jazz', abbrev: 'UTA', conf: 'West', div: 'Northwest' },
-    { name: 'Washington Wizards', abbrev: 'WAS', conf: 'East', div: 'Southeast' }
-  ];
-  
-  return nbaTeams.map((team, index) => {
-    const wins = Math.floor(Math.random() * 30 + 35);
+const transformTeamStatsFromPlayers = (players: PlayerStats[], sport: string): TeamStats[] => {
+  // Group by team
+  const teamMap = new Map<string, PlayerStats[]>();
+  players.forEach(p => {
+    const team = p.teamAbbrev;
+    if (!teamMap.has(team)) teamMap.set(team, []);
+    teamMap.get(team)!.push(p);
+  });
+
+  const teamList: TeamStats[] = [];
+  const nbaTeamNames: Record<string, string> = {
+    ATL: 'Atlanta Hawks', BOS: 'Boston Celtics', BKN: 'Brooklyn Nets', CHA: 'Charlotte Hornets',
+    CHI: 'Chicago Bulls', CLE: 'Cleveland Cavaliers', DAL: 'Dallas Mavericks', DEN: 'Denver Nuggets',
+    DET: 'Detroit Pistons', GSW: 'Golden State Warriors', HOU: 'Houston Rockets', IND: 'Indiana Pacers',
+    LAC: 'LA Clippers', LAL: 'Los Angeles Lakers', MEM: 'Memphis Grizzlies', MIA: 'Miami Heat',
+    MIL: 'Milwaukee Bucks', MIN: 'Minnesota Timberwolves', NOP: 'New Orleans Pelicans', NYK: 'New York Knicks',
+    OKC: 'Oklahoma City Thunder', ORL: 'Orlando Magic', PHI: 'Philadelphia 76ers', PHX: 'Phoenix Suns',
+    POR: 'Portland Trail Blazers', SAC: 'Sacramento Kings', SAS: 'San Antonio Spurs', TOR: 'Toronto Raptors',
+    UTA: 'Utah Jazz', WAS: 'Washington Wizards'
+  };
+
+  teamMap.forEach((teamPlayers, abbrev) => {
+    const wins = Math.floor(30 + Math.random() * 30);
     const losses = 82 - wins;
-    const winPct = wins / 82 * 100;
-    const ppg = 112 + Math.random() * 8;
-    const oppg = 111 + Math.random() * 8;
+    const ppg = teamPlayers.reduce((sum, p) => sum + p.pointsPerGame, 0) / teamPlayers.length * 5; // rough estimate
+    const oppg = ppg - (Math.random() * 6 - 3);
     const net = ppg - oppg;
-    
-    return {
-      id: `team-${index}`,
-      name: team.name,
-      abbreviation: team.abbrev,
-      conference: team.conf,
-      division: team.div,
-      primaryColor: ['#E03A3E', '#007A33', '#1D428A', '#CE1141', '#0B77BD', '#5A2D81', '#002B5C', '#FDBB30', '#006BB6', '#FFC72C', '#ED174C'][index % 10],
+
+    teamList.push({
+      id: `team-${abbrev}`,
+      name: nbaTeamNames[abbrev] || `${abbrev} Team`,
+      abbreviation: abbrev,
+      conference: Math.random() > 0.5 ? 'East' : 'West',
+      division: 'Unknown',
+      primaryColor: ['#E03A3E', '#007A33', '#1D428A', '#CE1141', '#0B77BD', '#5A2D81', '#002B5C', '#FDBB30', '#006BB6', '#FFC72C', '#ED174C'][Math.floor(Math.random() * 10)],
       
       wins,
       losses,
-      winPercentage: parseFloat(winPct.toFixed(1)),
+      winPercentage: parseFloat((wins / 82 * 100).toFixed(1)),
       homeRecord: `${Math.floor(wins * 0.6)}-${Math.floor(losses * 0.4)}`,
       awayRecord: `${Math.floor(wins * 0.4)}-${Math.floor(losses * 0.6)}`,
       conferenceRecord: `${Math.floor(wins * 0.55)}-${Math.floor(losses * 0.45)}`,
@@ -515,19 +592,21 @@ const transformTeamStats = (teams: any[], sport: string): TeamStats[] => {
       defensiveRank: Math.floor(Math.random() * 15 + 1),
       netRank: Math.floor(Math.random() * 15 + 1),
       powerRanking: Math.floor(Math.random() * 20 + 1)
-    };
-  }).sort((a, b) => b.wins - a.wins);
+    });
+  });
+
+  return teamList.sort((a, b) => b.wins - a.wins);
 };
 
-const transformSeasonLeaders = (players: any[]): SeasonLeaders => {
-  const sortedByPoints = [...players].sort((a, b) => (b.pointsPerGame || 0) - (a.pointsPerGame || 0)).slice(0, 10);
-  const sortedByRebounds = [...players].sort((a, b) => (b.reboundsPerGame || 0) - (a.reboundsPerGame || 0)).slice(0, 10);
-  const sortedByAssists = [...players].sort((a, b) => (b.assistsPerGame || 0) - (a.assistsPerGame || 0)).slice(0, 10);
-  const sortedBySteals = [...players].sort((a, b) => (b.stealsPerGame || 0) - (a.stealsPerGame || 0)).slice(0, 10);
-  const sortedByBlocks = [...players].sort((a, b) => (b.blocksPerGame || 0) - (a.blocksPerGame || 0)).slice(0, 10);
-  const sortedByThreePoints = [...players].sort((a, b) => (b.threePointsMade || 0) - (a.threePointsMade || 0)).slice(0, 10);
-  const sortedByFantasy = [...players].sort((a, b) => (b.fantasyPointsPerGame || 0) - (a.fantasyPointsPerGame || 0)).slice(0, 10);
-  const sortedByEfficiency = [...players].sort((a, b) => (b.efficiency || 0) - (a.efficiency || 0)).slice(0, 10);
+const transformSeasonLeaders = (players: PlayerStats[]): SeasonLeaders => {
+  const sortedByPoints = [...players].sort((a, b) => b.pointsPerGame - a.pointsPerGame).slice(0, 10);
+  const sortedByRebounds = [...players].sort((a, b) => b.reboundsPerGame - a.reboundsPerGame).slice(0, 10);
+  const sortedByAssists = [...players].sort((a, b) => b.assistsPerGame - a.assistsPerGame).slice(0, 10);
+  const sortedBySteals = [...players].sort((a, b) => b.stealsPerGame - a.stealsPerGame).slice(0, 10);
+  const sortedByBlocks = [...players].sort((a, b) => b.blocksPerGame - a.blocksPerGame).slice(0, 10);
+  const sortedByThreePoints = [...players].sort((a, b) => b.threePointsMade - a.threePointsMade).slice(0, 10);
+  const sortedByFantasy = [...players].sort((a, b) => b.fantasyPointsPerGame - a.fantasyPointsPerGame).slice(0, 10);
+  const sortedByEfficiency = [...players].sort((a, b) => b.efficiency - a.efficiency).slice(0, 10);
   
   return {
     points: sortedByPoints,
@@ -542,7 +621,7 @@ const transformSeasonLeaders = (players: any[]): SeasonLeaders => {
 };
 
 // =============================================
-// MOCK DATA - Enhanced with comprehensive stats
+// MOCK DATA – kept as fallback (unchanged)
 // =============================================
 
 const MOCK_PLAYER_STATS: PlayerStats[] = [
@@ -959,7 +1038,7 @@ const MOCK_PLAYER_STATS: PlayerStats[] = [
 ];
 
 // =============================================
-// MAIN COMPONENT
+// MAIN COMPONENT – UI with dynamic columns
 // =============================================
 
 const SeasonStatsScreen: React.FC = () => {
@@ -977,7 +1056,71 @@ const SeasonStatsScreen: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [viewMode, setViewMode] = useState<'table' | 'cards' | 'compact'>('table');
 
-  // Fetch data from your Flask backend
+  // ========== DYNAMIC COLUMN DEFINITIONS ==========
+  const getPlayerColumns = (sport: string) => {
+    if (sport === 'nba') {
+      return [
+        { id: 'name', label: 'Player', align: 'left', sortable: true, field: 'name' },
+        { id: 'team', label: 'Team', align: 'left', sortable: false },
+        { id: 'position', label: 'Pos', align: 'left', sortable: false },
+        { id: 'gamesPlayed', label: 'GP', align: 'right', sortable: true, field: 'gamesPlayed' },
+        { id: 'minutesPerGame', label: 'MIN', align: 'right', sortable: true, field: 'minutesPerGame' },
+        { id: 'pointsPerGame', label: 'PPG', align: 'right', sortable: true, field: 'pointsPerGame' },
+        { id: 'reboundsPerGame', label: 'RPG', align: 'right', sortable: true, field: 'reboundsPerGame' },
+        { id: 'assistsPerGame', label: 'APG', align: 'right', sortable: true, field: 'assistsPerGame' },
+        { id: 'stealsPerGame', label: 'SPG', align: 'right', sortable: true, field: 'stealsPerGame' },
+        { id: 'blocksPerGame', label: 'BPG', align: 'right', sortable: true, field: 'blocksPerGame' },
+        { id: 'fieldGoalPercentage', label: 'FG%', align: 'right', sortable: true, field: 'fieldGoalPercentage' },
+        { id: 'threePointPercentage', label: '3P%', align: 'right', sortable: true, field: 'threePointPercentage' },
+        { id: 'efficiency', label: 'EFF', align: 'right', sortable: true, field: 'efficiency' },
+        { id: 'fantasyPointsPerGame', label: 'FAN', align: 'right', sortable: true, field: 'fantasyPointsPerGame' },
+        { id: 'valueScore', label: 'Value', align: 'right', sortable: true, field: 'valueScore' },
+        { id: 'trend', label: 'Trend', align: 'center', sortable: false },
+        { id: 'injuryStatus', label: 'Status', align: 'center', sortable: false },
+      ];
+    } else if (sport === 'nhl') {
+      return [
+        { id: 'name', label: 'Player', align: 'left', sortable: true, field: 'name' },
+        { id: 'team', label: 'Team', align: 'left', sortable: false },
+        { id: 'position', label: 'Pos', align: 'left', sortable: false },
+        { id: 'gamesPlayed', label: 'GP', align: 'right', sortable: true, field: 'gamesPlayed' },
+        { id: 'minutesPerGame', label: 'TOI', align: 'right', sortable: true, field: 'minutesPerGame' },
+        { id: 'goalsPerGame', label: 'G', align: 'right', sortable: true, field: 'goalsPerGame' },
+        { id: 'assistsPerGame', label: 'A', align: 'right', sortable: true, field: 'assistsPerGame' },
+        { id: 'pointsPerGame', label: 'PTS', align: 'right', sortable: true, field: 'pointsPerGame' },
+        { id: 'plusMinus', label: '+/-', align: 'right', sortable: true, field: 'plusMinus' },
+        { id: 'penaltyMinutes', label: 'PIM', align: 'right', sortable: true, field: 'penaltyMinutes' },
+        { id: 'shotsPerGame', label: 'SOG', align: 'right', sortable: true, field: 'shotsPerGame' },
+        { id: 'hitsPerGame', label: 'Hits', align: 'right', sortable: true, field: 'hitsPerGame' },
+        { id: 'blocksPerGame', label: 'Blk', align: 'right', sortable: true, field: 'blocksPerGame' },
+        { id: 'fantasyPointsPerGame', label: 'FAN', align: 'right', sortable: true, field: 'fantasyPointsPerGame' },
+        { id: 'trend', label: 'Trend', align: 'center', sortable: false },
+        { id: 'injuryStatus', label: 'Status', align: 'center', sortable: false },
+      ];
+    } else if (sport === 'mlb') {
+      return [
+        { id: 'name', label: 'Player', align: 'left', sortable: true, field: 'name' },
+        { id: 'team', label: 'Team', align: 'left', sortable: false },
+        { id: 'position', label: 'Pos', align: 'left', sortable: false },
+        { id: 'gamesPlayed', label: 'GP', align: 'right', sortable: true, field: 'gamesPlayed' },
+        { id: 'pointsPerGame', label: 'R/G', align: 'right', sortable: true, field: 'pointsPerGame' },
+        { id: 'reboundsPerGame', label: 'H/G', align: 'right', sortable: true, field: 'reboundsPerGame' },
+        { id: 'assistsPerGame', label: 'RBI/G', align: 'right', sortable: true, field: 'assistsPerGame' },
+        { id: 'stealsPerGame', label: 'SB/G', align: 'right', sortable: true, field: 'stealsPerGame' },
+        { id: 'homeRuns', label: 'HR', align: 'right', sortable: true, field: 'homeRuns' },
+        { id: 'avg', label: 'AVG', align: 'right', sortable: true, field: 'avg' },
+        { id: 'obp', label: 'OBP', align: 'right', sortable: true, field: 'obp' },
+        { id: 'slg', label: 'SLG', align: 'right', sortable: true, field: 'slg' },
+        { id: 'ops', label: 'OPS', align: 'right', sortable: true, field: 'ops' },
+        { id: 'fantasyPointsPerGame', label: 'FAN', align: 'right', sortable: true, field: 'fantasyPointsPerGame' },
+        { id: 'trend', label: 'Trend', align: 'center', sortable: false },
+        { id: 'injuryStatus', label: 'Status', align: 'center', sortable: false },
+      ];
+    }
+    return [];
+  };
+
+  // ============= DATA FETCHING =============
   const { data: players, isLoading: playersLoading } = useQuery({
     queryKey: ['playerStats', sportTab],
     queryFn: () => fetchPlayerStats(sportTab),
@@ -1002,7 +1145,7 @@ const SeasonStatsScreen: React.FC = () => {
     staleTime: 3 * 60 * 1000
   });
 
-  // Use mock data if real data isn't available yet
+  // Use real data if available, otherwise fallback to mock
   const playerStats = players || MOCK_PLAYER_STATS;
   const teamStats = teams || [];
   const seasonLeaders = leaders || {
@@ -1020,7 +1163,6 @@ const SeasonStatsScreen: React.FC = () => {
   const getFilteredPlayers = () => {
     let filtered = [...playerStats];
     
-    // Search filter
     if (searchQuery) {
       filtered = filtered.filter(p => 
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1028,39 +1170,35 @@ const SeasonStatsScreen: React.FC = () => {
       );
     }
     
-    // Position filter
     if (positionFilter !== 'all') {
       filtered = filtered.filter(p => p.position.includes(positionFilter));
     }
     
-    // Team filter
     if (teamFilter !== 'all') {
       filtered = filtered.filter(p => p.teamAbbrev === teamFilter);
     }
     
-    // Min games filter
     filtered = filtered.filter(p => p.gamesPlayed >= minGames);
     
-    // Sort
     filtered.sort((a, b) => {
       const aVal = a[sortField] as number;
       const bVal = b[sortField] as number;
-      if (sortDirection === 'asc') {
-        return aVal - bVal;
-      } else {
-        return bVal - aVal;
-      }
+      if (sortDirection === 'asc') return aVal - bVal;
+      else return bVal - aVal;
     });
     
     return filtered;
   };
 
   const filteredPlayers = getFilteredPlayers();
-  
-  // Get unique teams for filter
-  const uniqueTeams = Array.from(new Set(playerStats.map(p => p.teamAbbrev))).sort();
 
-  // Handle sort
+  const uniqueTeams = React.useMemo(() => {
+    const teams = playerStats.map(p => p.teamAbbrev).filter(Boolean);
+    const unique = ['All Teams', ...new Set(teams)].sort();
+    console.log(`Unique teams for ${sportTab}:`, unique);
+    return unique;
+  }, [playerStats, sportTab]);
+
   const handleSort = (field: keyof PlayerStats) => {
     if (field === sortField) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -1070,17 +1208,14 @@ const SeasonStatsScreen: React.FC = () => {
     }
   };
 
-  // Format number with commas and decimals
   const formatNumber = (num: number, decimals: number = 1) => {
     return num.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
-  // Format percentage
   const formatPercentage = (num: number) => {
     return `${num.toFixed(1)}%`;
   };
 
-  // Get color based on value
   const getValueColor = (value: number, type: 'positive' | 'negative' | 'neutral' = 'positive') => {
     if (type === 'positive') {
       return value > 0 ? theme.palette.success.main : theme.palette.error.main;
@@ -1088,7 +1223,6 @@ const SeasonStatsScreen: React.FC = () => {
     return theme.palette.text.primary;
   };
 
-  // Get trend icon
   const getTrendIcon = (trend: string) => {
     if (trend === 'up') return <TrendingUp sx={{ fontSize: 16, color: theme.palette.success.main }} />;
     if (trend === 'down') return <TrendingDown sx={{ fontSize: 16, color: theme.palette.error.main }} />;
@@ -1319,6 +1453,7 @@ const SeasonStatsScreen: React.FC = () => {
                     value={teamFilter}
                     label="Team"
                     onChange={(e) => setTeamFilter(e.target.value)}
+                    key={sportTab} // force re-render on sport change
                   >
                     <MenuItem value="all">All Teams</MenuItem>
                     {uniqueTeams.map(team => (
@@ -1447,119 +1582,21 @@ const SeasonStatsScreen: React.FC = () => {
                   <Table stickyHeader size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>
-                          <TableSortLabel
-                            active={sortField === 'name'}
-                            direction={sortField === 'name' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('name')}
-                          >
-                            Player
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell>Team</TableCell>
-                        <TableCell>Pos</TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'gamesPlayed'}
-                            direction={sortField === 'gamesPlayed' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('gamesPlayed')}
-                          >
-                            GP
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'minutesPerGame'}
-                            direction={sortField === 'minutesPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('minutesPerGame')}
-                          >
-                            MIN
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'pointsPerGame'}
-                            direction={sortField === 'pointsPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('pointsPerGame')}
-                          >
-                            PPG
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'reboundsPerGame'}
-                            direction={sortField === 'reboundsPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('reboundsPerGame')}
-                          >
-                            RPG
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'assistsPerGame'}
-                            direction={sortField === 'assistsPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('assistsPerGame')}
-                          >
-                            APG
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'stealsPerGame'}
-                            direction={sortField === 'stealsPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('stealsPerGame')}
-                          >
-                            SPG
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'blocksPerGame'}
-                            direction={sortField === 'blocksPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('blocksPerGame')}
-                          >
-                            BPG
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'fieldGoalPercentage'}
-                            direction={sortField === 'fieldGoalPercentage' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('fieldGoalPercentage')}
-                          >
-                            FG%
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'threePointPercentage'}
-                            direction={sortField === 'threePointPercentage' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('threePointPercentage')}
-                          >
-                            3P%
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'efficiency'}
-                            direction={sortField === 'efficiency' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('efficiency')}
-                          >
-                            EFF
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">
-                          <TableSortLabel
-                            active={sortField === 'fantasyPointsPerGame'}
-                            direction={sortField === 'fantasyPointsPerGame' ? sortDirection : 'asc'}
-                            onClick={() => handleSort('fantasyPointsPerGame')}
-                          >
-                            FAN
-                          </TableSortLabel>
-                        </TableCell>
-                        <TableCell align="right">Value</TableCell>
-                        <TableCell align="center">Trend</TableCell>
-                        <TableCell align="center">Status</TableCell>
+                        {getPlayerColumns(sportTab).map((col) => (
+                          <TableCell key={col.id} align={col.align as any}>
+                            {col.sortable ? (
+                              <TableSortLabel
+                                active={sortField === col.field}
+                                direction={sortField === col.field ? sortDirection : 'asc'}
+                                onClick={() => handleSort(col.field as keyof PlayerStats)}
+                              >
+                                {col.label}
+                              </TableSortLabel>
+                            ) : (
+                              col.label
+                            )}
+                          </TableCell>
+                        ))}
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1577,77 +1614,97 @@ const SeasonStatsScreen: React.FC = () => {
                           }}
                           onClick={() => setSelectedPlayer(player)}
                         >
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Box>
-                                <Typography variant="body2" fontWeight="bold">
-                                  {player.name}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  #{player.number}
-                                </Typography>
-                              </Box>
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Chip 
-                              label={player.teamAbbrev} 
-                              size="small" 
-                              variant="outlined"
-                              sx={{ 
-                                fontWeight: 600,
-                                borderColor: player.teamAbbrev === 'LAL' ? '#552583' : 
-                                           player.teamAbbrev === 'GSW' ? '#FFC72C' : 
-                                           player.teamAbbrev === 'BOS' ? '#007A33' : undefined
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell>{player.position}</TableCell>
-                          <TableCell align="right">{player.gamesPlayed}</TableCell>
-                          <TableCell align="right">{player.minutesPerGame.toFixed(1)}</TableCell>
-                          <TableCell align="right">
-                            <Typography fontWeight="bold">{player.pointsPerGame.toFixed(1)}</Typography>
-                          </TableCell>
-                          <TableCell align="right">{player.reboundsPerGame.toFixed(1)}</TableCell>
-                          <TableCell align="right">{player.assistsPerGame.toFixed(1)}</TableCell>
-                          <TableCell align="right">{player.stealsPerGame.toFixed(1)}</TableCell>
-                          <TableCell align="right">{player.blocksPerGame.toFixed(1)}</TableCell>
-                          <TableCell align="right">{player.fieldGoalPercentage.toFixed(1)}%</TableCell>
-                          <TableCell align="right">{player.threePointPercentage.toFixed(1)}%</TableCell>
-                          <TableCell align="right">
-                            <Typography fontWeight="bold" color="primary.main">
-                              {player.efficiency.toFixed(1)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography fontWeight="bold" color="secondary.main">
-                              {player.fantasyPointsPerGame.toFixed(1)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Chip 
-                              label={player.valueScore?.toFixed(0) || '0'} 
-                              size="small" 
-                              color={(player.valueScore || 0) > 48 ? 'success' : 'default'}
-                              sx={{ fontWeight: 'bold' }}
-                            />
-                          </TableCell>
-                          <TableCell align="center">
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {getTrendIcon(player.trend)}
-                              <Typography variant="caption" sx={{ ml: 0.5 }}>
-                                {player.last5Avg.toFixed(1)}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell align="center">
-                            <Chip 
-                              label={player.injuryStatus} 
-                              size="small" 
-                              color={player.injuryStatus === 'Active' ? 'success' : 'warning'}
-                              sx={{ fontSize: '0.7rem' }}
-                            />
-                          </TableCell>
+                          {getPlayerColumns(sportTab).map((col) => {
+                            const value = player[col.field as keyof PlayerStats];
+                            
+                            // Special rendering for specific columns
+                            if (col.id === 'name') {
+                              return (
+                                <TableCell key={col.id}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Box>
+                                      <Typography variant="body2" fontWeight="bold">
+                                        {player.name}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        #{player.number}
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+                                </TableCell>
+                              );
+                            } else if (col.id === 'team') {
+                              return (
+                                <TableCell key={col.id}>
+                                  <Chip 
+                                    label={player.teamAbbrev} 
+                                    size="small" 
+                                    variant="outlined"
+                                    sx={{ 
+                                      fontWeight: 600,
+                                      borderColor: player.teamAbbrev === 'LAL' ? '#552583' : 
+                                                 player.teamAbbrev === 'GSW' ? '#FFC72C' : 
+                                                 player.teamAbbrev === 'BOS' ? '#007A33' : undefined
+                                    }}
+                                  />
+                                </TableCell>
+                              );
+                            } else if (col.id === 'position') {
+                              return <TableCell key={col.id}>{player.position}</TableCell>;
+                            } else if (col.id === 'trend') {
+                              return (
+                                <TableCell key={col.id} align="center">
+                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    {getTrendIcon(player.trend)}
+                                    <Typography variant="caption" sx={{ ml: 0.5 }}>
+                                      {player.last5Avg.toFixed(1)}
+                                    </Typography>
+                                  </Box>
+                                </TableCell>
+                              );
+                            } else if (col.id === 'injuryStatus') {
+                              return (
+                                <TableCell key={col.id} align="center">
+                                  <Chip 
+                                    label={player.injuryStatus} 
+                                    size="small" 
+                                    color={player.injuryStatus === 'Active' ? 'success' : 'warning'}
+                                    sx={{ fontSize: '0.7rem' }}
+                                  />
+                                </TableCell>
+                              );
+                            } else {
+                              // Numeric value
+                              let formatted = '';
+                              if (typeof value === 'number') {
+                                if (col.id.includes('Percentage') || col.id === 'avg' || col.id === 'obp' || col.id === 'slg' || col.id === 'ops') {
+                                  formatted = value.toFixed(3);
+                                } else if (col.id === 'valueScore') {
+                                  formatted = value.toFixed(0);
+                                } else {
+                                  formatted = value.toFixed(1);
+                                }
+                              } else {
+                                formatted = '-';
+                              }
+                              return (
+                                <TableCell key={col.id} align="right">
+                                  {col.id === 'valueScore' ? (
+                                    <Chip 
+                                      label={formatted} 
+                                      size="small" 
+                                      color={(value as number) > 48 ? 'success' : 'default'}
+                                      sx={{ fontWeight: 'bold' }}
+                                    />
+                                  ) : (
+                                    <Typography fontWeight={col.id.includes('points') || col.id === 'efficiency' ? 'bold' : 'normal'}>
+                                      {formatted}
+                                    </Typography>
+                                  )}
+                                </TableCell>
+                              );
+                            }
+                          })}
                         </TableRow>
                       ))}
                     </TableBody>

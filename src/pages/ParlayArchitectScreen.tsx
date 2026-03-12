@@ -89,8 +89,9 @@ import { format, parseISO, isToday } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 
-// ========== NODE API BASE ==========
-const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+// ========== API BASES ==========
+const PRIZEPICKS_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 // ========== TYPES ==========
 interface ParlayLeg {
@@ -669,7 +670,7 @@ const generateParlaysFromProps = (props: PropMarket[], sport: string): ParlaySug
 const fetchGames = async (): Promise<Game[]> => {
   try {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const response = await axios.get(`${NODE_API_BASE}/api/tank01/games`, {
+    const response = await axios.get(`${PRIZEPICKS_API_BASE}/api/tank01/games`, {
       params: { date: today, sport: 'nba' }
     });
     if (response.data.success && Array.isArray(response.data.data)) {
@@ -689,10 +690,10 @@ const fetchGames = async (): Promise<Game[]> => {
   }
 };
 
-// ========== FETCH REAL PROPS FROM NODE API ==========
-const fetchRealProps = async (): Promise<PropMarket[]> => {
+// ========== FETCH REAL NBA PROPS FROM PRIZEPICKS NODE API ==========
+const fetchRealNBAProps = async (): Promise<PropMarket[]> => {
   try {
-    const response = await axios.get(`${NODE_API_BASE}/api/prizepicks/selections?sport=nba`);
+    const response = await axios.get(`${PRIZEPICKS_API_BASE}/api/prizepicks/selections?sport=nba`);
     console.log('RAW selections:', response.data.selections);
     const selections = response.data.selections || [];
     return selections.map((s: any, index: number) => ({
@@ -712,88 +713,207 @@ const fetchRealProps = async (): Promise<PropMarket[]> => {
       edge: s.edge || (s.projection > s.line ? '+5.2%' : '-2.1%'),
     }));
   } catch (error) {
-    console.warn('Failed to fetch props from Node API', error);
+    console.warn('Failed to fetch NBA props from Node API', error);
     return [];
   }
 };
 
-// ========== FETCH NHL PROPS (MOCK) ==========
+// ========== FETCH REAL NHL PROPS FROM PYTHON BACKEND ==========
 const fetchNHLProps = async (): Promise<NHLPropMarket[]> => {
-  console.log('🏒 Fetching NHL props - API not yet implemented');
-  return [
-    {
-      id: 'nhl-1',
-      player: 'Connor McDavid',
-      team: 'EDM',
-      market: 'points',
-      line: 1.5,
-      projection: 1.8,
-      over_odds: -115,
-      under_odds: -105,
-      confidence: 85,
-      game_id: 'nhl-game-1',
-      game_time: new Date().toISOString(),
-      sport: 'NHL',
-      position: 'C',
-      stat_type: 'points',
-      goalie: false,
-      edge: '+8.3%'
-    },
-    {
-      id: 'nhl-2',
-      player: 'Auston Matthews',
-      team: 'TOR',
-      market: 'goals',
-      line: 0.5,
-      projection: 0.7,
-      over_odds: -110,
-      under_odds: -110,
-      confidence: 78,
-      game_id: 'nhl-game-2',
-      game_time: new Date().toISOString(),
-      sport: 'NHL',
-      position: 'C',
-      stat_type: 'goals',
-      goalie: false,
-      edge: '+6.2%'
-    },
-    {
-      id: 'nhl-3',
-      player: 'Leon Draisaitl',
-      team: 'EDM',
-      market: 'shots',
-      line: 3.5,
-      projection: 4.2,
-      over_odds: -120,
-      under_odds: 100,
-      confidence: 82,
-      game_id: 'nhl-game-1',
-      game_time: new Date().toISOString(),
-      sport: 'NHL',
-      position: 'C',
-      stat_type: 'shots',
-      goalie: false,
-      edge: '+7.5%'
-    },
-    {
-      id: 'nhl-4',
-      player: 'Igor Shesterkin',
-      team: 'NYR',
-      market: 'saves',
-      line: 28.5,
-      projection: 31.2,
-      over_odds: -105,
-      under_odds: -115,
-      confidence: 88,
-      game_id: 'nhl-game-3',
-      game_time: new Date().toISOString(),
-      sport: 'NHL',
-      position: 'G',
-      stat_type: 'saves',
-      goalie: true,
-      edge: '+9.1%'
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
+      params: { sport: 'nhl', realtime: 'true', limit: 100 }
+    });
+
+    const players = response.data?.data?.players || [];
+    if (!players.length) {
+      console.warn('No NHL players returned from Python API');
+      return [];
     }
-  ];
+
+    // Transform players into props
+    const props: NHLPropMarket[] = [];
+
+    players.forEach((player: any) => {
+      const isGoalie = player.position === 'G';
+      const gamesPlayed = player.games_played || 1;
+
+      // Common fields
+      const baseProp = {
+        player: player.name,
+        team: player.team,
+        game_id: `nhl-game-${player.team}`,
+        game_time: new Date().toISOString(),
+        sport: 'NHL',
+        position: player.position,
+        confidence: 75,
+        over_odds: -110,
+        under_odds: -110,
+        edge: '+5%',
+      };
+
+      if (isGoalie) {
+        // Goalie props: saves, possibly wins
+        if (player.saves !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `nhl-${player.id}-saves`,
+            market: 'saves',
+            line: 25.5, // example line; could compute from average
+            projection: player.saves / gamesPlayed,
+            stat_type: 'saves',
+            goalie: true,
+          } as NHLPropMarket);
+        }
+      } else {
+        // Skater props
+        if (player.goals !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `nhl-${player.id}-goals`,
+            market: 'goals',
+            line: 0.5,
+            projection: player.goals / gamesPlayed,
+            stat_type: 'goals',
+            goalie: false,
+          } as NHLPropMarket);
+        }
+        if (player.assists !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `nhl-${player.id}-assists`,
+            market: 'assists',
+            line: 0.5,
+            projection: player.assists / gamesPlayed,
+            stat_type: 'assists',
+            goalie: false,
+          } as NHLPropMarket);
+        }
+        if (player.points !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `nhl-${player.id}-points`,
+            market: 'points',
+            line: 0.5,
+            projection: player.points / gamesPlayed,
+            stat_type: 'points',
+            goalie: false,
+          } as NHLPropMarket);
+        }
+        if (player.shots !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `nhl-${player.id}-shots`,
+            market: 'shots',
+            line: 2.5,
+            projection: player.shots / gamesPlayed,
+            stat_type: 'shots',
+            goalie: false,
+          } as NHLPropMarket);
+        }
+        if (player.hits !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `nhl-${player.id}-hits`,
+            market: 'hits',
+            line: 1.5,
+            projection: player.hits / gamesPlayed,
+            stat_type: 'hits',
+            goalie: false,
+          } as NHLPropMarket);
+        }
+      }
+    });
+
+    return props;
+  } catch (error) {
+    console.warn('Failed to fetch NHL props from Python backend', error);
+    return [];
+  }
+};
+
+// ========== FETCH REAL MLB PROPS FROM PYTHON BACKEND ==========
+const fetchMLBProps = async (): Promise<PropMarket[]> => {
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
+      params: { sport: 'mlb', realtime: 'true', limit: 100 }
+    });
+
+    const players = response.data?.data?.players || [];
+    if (!players.length) {
+      console.warn('No MLB players returned from Python API');
+      return [];
+    }
+
+    const props: PropMarket[] = [];
+
+    players.forEach((player: any) => {
+      const isPitcher = player.position === 'P';
+      const gamesPlayed = player.games_played || 1;
+
+      const baseProp = {
+        player: player.name,
+        team: player.team,
+        game_id: `mlb-game-${player.team}`,
+        game_time: new Date().toISOString(),
+        sport: 'MLB',
+        position: player.position,
+        confidence: 70,
+        over_odds: -110,
+        under_odds: -110,
+        edge: '+4%',
+      };
+
+      if (isPitcher) {
+        // Pitcher props: strikeouts, outs recorded, etc.
+        if (player.strikeouts !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `mlb-${player.id}-strikeouts`,
+            market: 'Strikeouts',
+            line: 5.5,
+            projection: player.strikeouts / gamesPlayed,
+          });
+        }
+        // Could also add wins, quality starts, etc.
+      } else {
+        // Hitter props: hits, home runs, RBI, total bases, etc.
+        if (player.hits !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `mlb-${player.id}-hits`,
+            market: 'Hits',
+            line: 0.5,
+            projection: player.hits / gamesPlayed,
+          });
+        }
+        if (player.home_runs !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `mlb-${player.id}-home_runs`,
+            market: 'Home Runs',
+            line: 0.5,
+            projection: player.home_runs / gamesPlayed,
+          });
+        }
+        if (player.rbi !== undefined) {
+          props.push({
+            ...baseProp,
+            id: `mlb-${player.id}-rbi`,
+            market: 'RBI',
+            line: 0.5,
+            projection: player.rbi / gamesPlayed,
+          });
+        }
+        // stolen bases, etc.
+      }
+    });
+
+    return props;
+  } catch (error) {
+    console.warn('Failed to fetch MLB props from Python backend', error);
+    return [];
+  }
 };
 
 // ========== MOCK GAMES FALLBACK ==========
@@ -846,7 +966,7 @@ const ParlayArchitectScreen: React.FC = () => {
   const [generatorOpen, setGeneratorOpen] = useState(false);
   const [customQuery, setCustomQuery] = useState('');
 
-  // ========== DATA FROM NODE API ==========
+  // ========== DATA FROM APIs ==========
   const {
     data: games = [],
     isLoading: gamesLoading,
@@ -859,31 +979,57 @@ const ParlayArchitectScreen: React.FC = () => {
   });
 
   const {
-    data: props = [],
-    isLoading: propsLoading,
-    error: propsError,
-    refetch: refetchProps,
+    data: nbaProps = [],
+    isLoading: nbaPropsLoading,
+    error: nbaPropsError,
+    refetch: refetchNBAProps,
   } = useQuery({
-    queryKey: ['props', 'nba'],
-    queryFn: fetchRealProps,
+    queryKey: ['nba-props'],
+    queryFn: fetchRealNBAProps,
     staleTime: 2 * 60 * 1000,
   });
 
   const {
     data: nhlProps = [],
     refetch: refetchNHLProps,
+    isLoading: nhlPropsLoading,
   } = useQuery({
     queryKey: ['nhl-props'],
     queryFn: fetchNHLProps,
     staleTime: 10 * 60 * 1000,
-    enabled: false,
+    enabled: selectedSport === 'NHL', // only fetch when NHL is selected
   });
+
+  const {
+    data: mlbProps = [],
+    refetch: refetchMLBProps,
+    isLoading: mlbPropsLoading,
+  } = useQuery({
+    queryKey: ['mlb-props'],
+    queryFn: fetchMLBProps,
+    staleTime: 10 * 60 * 1000,
+    enabled: selectedSport === 'MLB',
+  });
+
+  // Determine which props to use based on selected sport
+  const props = useMemo(() => {
+    switch (selectedSport) {
+      case 'NBA':
+        return nbaProps;
+      case 'NHL':
+        return nhlProps;
+      case 'MLB':
+        return mlbProps;
+      default:
+        return nbaProps; // fallback
+    }
+  }, [selectedSport, nbaProps, nhlProps, mlbProps]);
 
   // Generate suggestions from props
   const suggestions = useMemo(() => {
     if (props.length === 0) return [];
-    return generateParlaysFromProps(props, 'NBA');
-  }, [props]);
+    return generateParlaysFromProps(props, selectedSport);
+  }, [props, selectedSport]);
 
   // Parlay builder state
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
@@ -988,8 +1134,9 @@ const ParlayArchitectScreen: React.FC = () => {
   // ========== HANDLERS ==========
   const handleRefresh = () => {
     refetchGames();
-    refetchProps();
+    refetchNBAProps();
     refetchNHLProps();
+    refetchMLBProps();
     setLastRefresh(new Date());
     setSuccessMessage('Data refreshed successfully!');
     setShowSuccessAlert(true);
@@ -1018,9 +1165,11 @@ const ParlayArchitectScreen: React.FC = () => {
     try {
       let propsToUse: PropMarket[] = [];
       if (sport === 'NBA') {
-        propsToUse = props;
+        propsToUse = nbaProps;
       } else if (sport === 'NHL') {
         propsToUse = nhlProps;
+      } else if (sport === 'MLB') {
+        propsToUse = mlbProps;
       }
 
       if (propsToUse.length >= numLegs) {
@@ -1129,7 +1278,7 @@ const ParlayArchitectScreen: React.FC = () => {
           },
           is_real_data: true,
           has_data: true,
-          source: sport === 'NBA' ? 'prizepicks' : 'nhl-api'
+          source: sport === 'NBA' ? 'prizepicks' : 'python-api'
         };
 
         setSelectedParlay(realParlay);
@@ -1141,7 +1290,7 @@ const ParlayArchitectScreen: React.FC = () => {
         return;
       }
 
-      // Fallback AI generation (simplified)
+      // Fallback AI generation (simplified) – same as before
       const fallbackLegs = sport === 'NBA'
         ? [
             { player: 'LeBron James', market: 'points', line: 25.5, odds: -115, conf: 85 },
@@ -1212,7 +1361,7 @@ const ParlayArchitectScreen: React.FC = () => {
     } finally {
       setGenerating(false);
     }
-  }, [props, nhlProps]);
+  }, [nbaProps, nhlProps, mlbProps]);
 
   // ========== AI GENERATOR HANDLER ==========
   const handleGenerateAI = useCallback(async () => {
@@ -1229,9 +1378,9 @@ const ParlayArchitectScreen: React.FC = () => {
     if (query.includes('4-leg') || query.includes('4 leg')) numLegs = 4;
 
     // Call the existing generator with derived parameters
-    await generateParlayFromGames('NBA', numLegs);
+    await generateParlayFromGames(selectedSport, numLegs);
     setGenerating(false);
-  }, [customQuery, generateParlayFromGames]);
+  }, [customQuery, generateParlayFromGames, selectedSport]);
 
   // ========== DEBUG ==========
   useEffect(() => {
@@ -1239,10 +1388,11 @@ const ParlayArchitectScreen: React.FC = () => {
       suggestions,
       filteredSuggestions,
       games,
-      props: props.length,
+      nbaProps: nbaProps.length,
       nhlProps: nhlProps.length,
+      mlbProps: mlbProps.length,
     };
-  }, [suggestions, filteredSuggestions, games, props, nhlProps]);
+  }, [suggestions, filteredSuggestions, games, nbaProps, nhlProps, mlbProps]);
 
   // ========== RENDER HELPERS ==========
   const getMinLegs = () => PARLAY_TYPES_2026.find(t => t.id === selectedType)?.min_legs || 2;
@@ -1374,8 +1524,22 @@ const ParlayArchitectScreen: React.FC = () => {
   const propSelectorFirstFocusRef = useRef<HTMLElement>(null);
   const buildModalFirstFocusRef = useRef<HTMLElement>(null);
 
+  // Determine loading state based on selected sport
+  const isLoadingProps = useMemo(() => {
+    switch (selectedSport) {
+      case 'NBA':
+        return nbaPropsLoading;
+      case 'NHL':
+        return nhlPropsLoading;
+      case 'MLB':
+        return mlbPropsLoading;
+      default:
+        return nbaPropsLoading;
+    }
+  }, [selectedSport, nbaPropsLoading, nhlPropsLoading, mlbPropsLoading]);
+
   // ========== RENDER ==========
-  if (propsLoading && props.length === 0) {
+  if (isLoadingProps && props.length === 0) {
     return (
       <Container maxWidth="lg">
         <Box display="flex" justifyContent="center" alignItems="center" height="80vh" flexDirection="column">
@@ -1405,14 +1569,14 @@ const ParlayArchitectScreen: React.FC = () => {
           </Box>
           <Box display="flex" alignItems="center" gap={1}>
             {lastRefresh && <Chip label={`Updated: ${format(lastRefresh, 'h:mm a')}`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} />}
-            <Chip label={`${suggestions.length} NBA Parlays`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} icon={<TrophyIcon sx={{ fontSize: 14 }} />} />
+            <Chip label={`${suggestions.length} ${selectedSport} Parlays`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} icon={<TrophyIcon sx={{ fontSize: 14 }} />} />
           </Box>
         </Box>
         <Box display="flex" alignItems="center" gap={3}>
           <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}><BasketballIcon sx={{ fontSize: 32 }} /></Avatar>
           <Box>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>🏀 NBA Parlay Architect '26</Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>Create winning parlays with real PrizePicks data · March 2026</Typography>
+            <Typography variant="h3" fontWeight="bold" gutterBottom>🏀 Parlay Architect '26</Typography>
+            <Typography variant="h6" sx={{ opacity: 0.9 }}>Create winning parlays with real data · March 2026</Typography>
           </Box>
         </Box>
       </Paper>
@@ -1433,18 +1597,21 @@ const ParlayArchitectScreen: React.FC = () => {
                 <Typography variant="body2">• Today's Games: {games.length}</Typography>
                 <Typography variant="body2">• Parlay Legs: {parlayLegs.length}</Typography>
                 <Typography variant="body2">• Data Source: ✅ Real API Data</Typography>
-                <Typography variant="body2">• NBA Props: {props.length}</Typography>
+                <Typography variant="body2">• NBA Props: {nbaProps.length}</Typography>
                 <Typography variant="body2">• NHL Props: {nhlProps.length}</Typography>
+                <Typography variant="body2">• MLB Props: {mlbProps.length}</Typography>
                 <Typography variant="body2">• Last Refresh: {lastRefresh ? format(lastRefresh, 'h:mm:ss a') : 'Never'}</Typography>
               </Box>
             </Grid>
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" color="#94a3b8" gutterBottom>API Status</Typography>
               <Box sx={{ pl: 2 }}>
-                <Typography variant="body2" sx={{ color: '#10b981' }}>• Node API: ✅ Connected</Typography>
+                <Typography variant="body2" sx={{ color: '#10b981' }}>• PrizePicks API: ✅ Connected</Typography>
+                <Typography variant="body2" sx={{ color: '#10b981' }}>• Python API: ✅ Connected</Typography>
                 <Typography variant="body2" sx={{ color: gamesError ? '#ef4444' : '#10b981' }}>• Games API: {gamesError ? '❌ Error' : '✅ Connected'}</Typography>
-                <Typography variant="body2" sx={{ color: props.length > 0 ? '#10b981' : '#f59e0b' }}>• PrizePicks Props: ✅ {props.length} loaded</Typography>
-                <Typography variant="body2" sx={{ color: nhlProps.length > 0 ? '#10b981' : '#f59e0b' }}>• NHL Props: {nhlProps.length > 0 ? `✅ ${nhlProps.length} loaded (mock)` : '⚠️ None'}</Typography>
+                <Typography variant="body2" sx={{ color: nbaProps.length > 0 ? '#10b981' : '#f59e0b' }}>• NBA Props: ✅ {nbaProps.length} loaded</Typography>
+                <Typography variant="body2" sx={{ color: nhlProps.length > 0 ? '#10b981' : '#f59e0b' }}>• NHL Props: {nhlProps.length > 0 ? `✅ ${nhlProps.length} loaded` : '⚠️ None'}</Typography>
+                <Typography variant="body2" sx={{ color: mlbProps.length > 0 ? '#10b981' : '#f59e0b' }}>• MLB Props: {mlbProps.length > 0 ? `✅ ${mlbProps.length} loaded` : '⚠️ None'}</Typography>
               </Box>
               <Box mt={2}>
                 <Button size="small" variant="outlined" sx={{ color: 'white', borderColor: '#64748b', mr: 1 }} onClick={handleRefresh}>Force Refresh</Button>
@@ -1510,7 +1677,7 @@ const ParlayArchitectScreen: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={4}>
             <Box display="flex" justifyContent="flex-end" gap={1}>
-              <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={propsLoading || gamesLoading}>Refresh</Button>
+              <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={isLoadingProps}>Refresh</Button>
               <Button variant="contained" startIcon={<AutoAwesomeIcon />} onClick={() => setGeneratorOpen(true)} sx={{ bgcolor: '#6C5CE7' }}>AI Generate</Button>
               <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowPropSelector(true)} sx={{ bgcolor: '#6C5CE7' }} disabled={props.length === 0}>Add Leg ({props.length})</Button>
             </Box>
@@ -1773,7 +1940,7 @@ const ParlayArchitectScreen: React.FC = () => {
                           <Typography variant="body2" fontWeight="bold" color="primary">{game.home_team}</Typography>
                         </Box>
                         <Button size="small" variant="contained" fullWidth sx={{ mt: 2 }} onClick={() => {
-                          const gameProps = props.filter(p => p.team === game.home_team || p.team === game.away_team);
+                          const gameProps = nbaProps.filter(p => p.team === game.home_team || p.team === game.away_team);
                           if (gameProps.length >= 2) {
                             const quickParlay: ParlaySuggestion = {
                               id: `quick-${Date.now()}`,
@@ -1888,7 +2055,7 @@ const ParlayArchitectScreen: React.FC = () => {
                     <Box><Typography variant="h6">{parlay.name}</Typography><Typography variant="body2" color="text.secondary">{parlay.legs.length} legs • {parlay.type} • {parlay.sport}</Typography></Box>
                     <Box display="flex" flexDirection="column" alignItems="flex-end">
                       {parlay.is_real_data && <Chip label="✅ LIVE" size="small" sx={{ bgcolor: '#10b981', color: 'white', fontSize: '0.6rem', height: 18 }} />}
-                      {parlay.source === 'prizepicks' && <Chip label="PrizePicks" size="small" sx={{ bgcolor: '#6C5CE7', color: 'white', fontSize: '0.6rem', height: 18, mt: 0.5 }} />}
+                      {parlay.source && <Chip label={parlay.source} size="small" sx={{ bgcolor: '#6C5CE7', color: 'white', fontSize: '0.6rem', height: 18, mt: 0.5 }} />}
                     </Box>
                   </Box>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{parlay.analysis}</Typography>
@@ -1934,14 +2101,14 @@ const ParlayArchitectScreen: React.FC = () => {
       <Dialog open={showPropSelector} onClose={() => setShowPropSelector(false)} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">Add Parlay Leg - Real PrizePicks Props</Typography>
+            <Typography variant="h6">Add Parlay Leg - {selectedSport} Props</Typography>
             <IconButton onClick={() => setShowPropSelector(false)}><ClearIcon /></IconButton>
           </Box>
         </DialogTitle>
         <DialogContent>
           <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
             {props.length === 0 ? (
-              <Box textAlign="center" py={4}><Typography color="text.secondary">No props available</Typography></Box>
+              <Box textAlign="center" py={4}><Typography color="text.secondary">No props available for {selectedSport}</Typography></Box>
             ) : (
               props.map(prop => (
                 <Card key={prop.id} sx={{ mb: 2, borderLeft: '4px solid #10b981' }}>
@@ -2060,7 +2227,7 @@ const ParlayArchitectScreen: React.FC = () => {
       {/* Debug Button */}
       <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000 }}>
         <Tooltip title="Debug State">
-          <Button variant="contained" color="warning" onClick={() => console.log('🧪 Current State:', { suggestions: suggestions.length, filteredSuggestions: filteredSuggestions.length, games: games.length, parlayLegs: parlayLegs.length, props: props.length })} sx={{ borderRadius: '50%', minWidth: 'auto', width: 48, height: 48 }}><BugReportIcon /></Button>
+          <Button variant="contained" color="warning" onClick={() => console.log('🧪 Current State:', { suggestions: suggestions.length, filteredSuggestions: filteredSuggestions.length, games: games.length, parlayLegs: parlayLegs.length, nbaProps: nbaProps.length, nhlProps: nhlProps.length, mlbProps: mlbProps.length })} sx={{ borderRadius: '50%', minWidth: 'auto', width: 48, height: 48 }}><BugReportIcon /></Button>
         </Tooltip>
       </Box>
       <style>{pulseAnimation}</style>

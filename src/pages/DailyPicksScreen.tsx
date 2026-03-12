@@ -1,4 +1,4 @@
-// src/pages/DailyPicksScreen.tsx – Fixed edge sign & generator dedup
+// src/pages/DailyPicksScreen.tsx – Final version with edge fix, winner prompts, daily usage limit, Firebase Auth, and visual enhancements
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Box,
@@ -62,7 +62,8 @@ import {
   SmartToy,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { useDailyPicks } from '../hooks/useUnifiedAPI';
+import { useDailyPicks } from '../hooks/useunifiedAPI';
+import { useAuth } from '../context/AuthContext';
 
 // ============================================
 // CUSTOM DEBOUNCE UTILITY
@@ -107,6 +108,8 @@ interface Pick {
   generatedFrom?: string;
   isToday?: boolean;
   type?: 'Over' | 'Under';
+  data_source?: string;
+  is_mock?: boolean;
 }
 
 interface ParlayLeg {
@@ -144,7 +147,10 @@ interface MarketType {
 // ============================================
 // CONSTANTS
 // ============================================
-const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const DAILY_LIMIT = 2;
+
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';      // Node backend (NBA, etc.)
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app'; // Python backend (MLB, NHL, user limits)
 
 const SPORT_ICONS = {
   nba: SportsBasketball,
@@ -204,15 +210,8 @@ const CONFIDENCE_COLORS = {
 };
 
 // ============================================
-// HELPER FUNCTIONS
+// USEFUL_PROMPTS (categorized for quick chips)
 // ============================================
-const getRecommendationColor = (confidence: number): string => {
-  if (confidence >= 80) return CONFIDENCE_COLORS[80];
-  if (confidence >= 70) return CONFIDENCE_COLORS[70];
-  if (confidence >= 60) return CONFIDENCE_COLORS[60];
-  return CONFIDENCE_COLORS.default;
-};
-
 const USEFUL_PROMPTS = [
   {
     category: 'Player Props',
@@ -266,6 +265,63 @@ const USEFUL_PROMPTS = [
   },
 ];
 
+// ============================================
+// UNIVERSAL_PROMPTS (flat list for dropdown)
+// ============================================
+const UNIVERSAL_PROMPTS = [
+  'Top performers tonight',
+  'Best over bets',
+  'Value under props',
+  'Players with highest projections',
+  'Most consistent players',
+  'High upside picks',
+  'Safe plays with high confidence',
+  'Players in favorable matchups',
+  'Players vs weak defenses',
+  'Recent hot streaks',
+  'Players due for regression',
+  'Best value based on odds',
+  'Highest edge percentages',
+  'Low-owned tournament plays',
+  'Correlated props',
+  'Same game parlay ideas',
+  'Players with positive matchup history',
+  'Rookies to watch',
+  'Veterans in bounce-back spots',
+  'Best per-dollar value',
+];
+
+// ============================================
+// WINNER_PROMPTS (15 prompts for game winners)
+// ============================================
+const WINNER_PROMPTS = [
+  'Today’s biggest favorites',
+  'Upset predictions for tonight',
+  'Best moneyline bets',
+  'Teams on winning streaks',
+  'Home underdogs to watch',
+  'Highest implied win probability',
+  'Teams with key injuries – fade',
+  'Best value on the moneyline',
+  'Parlay of the day (winners)',
+  'Teams in bounce‑back spots',
+  'Undervalued road teams',
+  'Teams with rest advantage',
+  'Weather impact (outdoor sports)',
+  'Head‑to‑head dominance',
+  'Lock of the day (winner)',
+];
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+const getRecommendationColor = (confidence: number): string => {
+  if (confidence >= 80) return CONFIDENCE_COLORS[80];
+  if (confidence >= 70) return CONFIDENCE_COLORS[70];
+  if (confidence >= 60) return CONFIDENCE_COLORS[60];
+  return CONFIDENCE_COLORS.default;
+};
+
 // Team name mappings for better keyword matching
 const TEAM_MAPPINGS: Record<string, string[]> = {
   lakers: ['lakers', 'la lakers', 'los angeles lakers', 'lal'],
@@ -312,15 +368,29 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
   else if (sel.confidence === 'low') confidenceValue = 55;
   else if (typeof sel.confidence === 'number') confidenceValue = sel.confidence;
 
-  // Compute signed edge based on type
-  let signedEdgePercent = 0;
-  if (sel.projection != null && sel.line != null && sel.line > 0 && sel.type) {
+  // Safe number parsing
+  const proj = typeof sel.projection === 'number' ? sel.projection : parseFloat(sel.projection);
+  const lineVal = typeof sel.line === 'number' ? sel.line : parseFloat(sel.line);
+  const hasValidNumbers = !isNaN(proj) && !isNaN(lineVal) && lineVal !== 0;
+
+  let signedEdgePercent: number | undefined;
+  if (hasValidNumbers && sel.type) {
     if (sel.type === 'Over') {
-      signedEdgePercent = ((sel.projection - sel.line) / sel.line) * 100;
+      signedEdgePercent = ((proj - lineVal) / lineVal) * 100;
     } else if (sel.type === 'Under') {
-      signedEdgePercent = ((sel.line - sel.projection) / sel.line) * 100;
+      signedEdgePercent = ((lineVal - proj) / lineVal) * 100;
     }
     signedEdgePercent = Math.round(signedEdgePercent * 10) / 10;
+  }
+
+  // Build display edge string
+  let displayEdgeStr = sel.edge; // fallback from API
+  if (signedEdgePercent !== undefined) {
+    displayEdgeStr = signedEdgePercent > 0 ? `+${signedEdgePercent}%` : `${signedEdgePercent}%`;
+  } else if (hasValidNumbers && !sel.type) {
+    // no type but numbers exist – show absolute edge
+    const absEdge = ((Math.abs(proj - lineVal)) / lineVal) * 100;
+    displayEdgeStr = `${Math.round(absEdge * 10) / 10}% (no side)`;
   }
 
   const category =
@@ -332,17 +402,21 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
       ? 'Lock Pick'
       : 'High Upside';
 
+  // Round line and projection to 1 decimal for display
+  const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
+  const roundedProjection = proj ? Math.round(proj * 10) / 10 : undefined;
+
   return {
     id: sel.id || `node-${Date.now()}-${Math.random()}`,
     player: sel.player || 'Unknown',
     team: sel.team || getPlayerTeam(sel.player || ''),
     sport: sport.toUpperCase(),
-    stat: sel.stat ? (sel.type ? `${sel.stat} ${sel.type} ${sel.line}` : sel.stat) : undefined,
-    line: sel.line,
-    projection: sel.projection,
+    stat: sel.stat ? (sel.type ? `${sel.stat} ${sel.type} ${roundedLine}` : sel.stat) : undefined,
+    line: roundedLine,
+    projection: roundedProjection,
     confidence: confidenceValue,
     odds: sel.odds,
-    edge: sel.edge, // keep original string (e.g., "+5%")
+    edge: displayEdgeStr,
     edge_percentage: signedEdgePercent,
     analysis: sel.analysis || 'AI‑generated pick based on matchup data.',
     timestamp: sel.timestamp ? new Date(sel.timestamp).toLocaleString() : 'Just now',
@@ -351,11 +425,154 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
     roi: sel.roi || `+${Math.floor(Math.random() * 20) + 10}%`,
     units: (Math.random() * 2 + 1).toFixed(1),
     requiresPremium: false,
-    value: sel.edge || `${Math.abs(signedEdgePercent)}% edge`,
+    value: displayEdgeStr,
     bookmaker: sel.bookmaker,
     generatedFrom: prompt,
     isToday: true,
     type: sel.type,
+    is_mock: sel.source === 'mock',
+    data_source: sel.source || 'Node API',
+  };
+};
+
+// ============================================
+// MLB/NHL mapping functions (similar edge fixes applied)
+// ============================================
+const mapMLBPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pick => {
+  const odds = side === 'Over' ? prop.over_odds : prop.under_odds;
+  let confidenceValue = prop.confidence || 70;
+  if (typeof confidenceValue === 'string') {
+    if (confidenceValue === 'high') confidenceValue = 85;
+    else if (confidenceValue === 'medium') confidenceValue = 70;
+    else if (confidenceValue === 'low') confidenceValue = 55;
+    else confidenceValue = 70;
+  }
+
+  const proj = typeof prop.projection === 'number' ? prop.projection : parseFloat(prop.projection);
+  const lineVal = typeof prop.line === 'number' ? prop.line : parseFloat(prop.line);
+  const hasValidNumbers = !isNaN(proj) && !isNaN(lineVal) && lineVal !== 0;
+
+  let signedEdgePercent: number | undefined;
+  if (hasValidNumbers) {
+    if (side === 'Over') {
+      signedEdgePercent = ((proj - lineVal) / lineVal) * 100;
+    } else {
+      signedEdgePercent = ((lineVal - proj) / lineVal) * 100;
+    }
+    signedEdgePercent = Math.round(signedEdgePercent * 10) / 10;
+  }
+
+  const displayEdgeStr = signedEdgePercent !== undefined
+    ? (signedEdgePercent > 0 ? `+${signedEdgePercent}%` : `${signedEdgePercent}%`)
+    : prop.edge || 'N/A';
+
+  const category =
+    confidenceValue >= 85
+      ? 'High Confidence'
+      : confidenceValue >= 70
+      ? 'Value Bet'
+      : confidenceValue >= 60
+      ? 'Lock Pick'
+      : 'High Upside';
+
+  const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
+  const roundedProjection = proj ? Math.round(proj * 10) / 10 : undefined;
+
+  return {
+    id: prop.id || `mlb-${Date.now()}-${Math.random()}-${side}`,
+    player: prop.player,
+    team: prop.team,
+    sport: 'MLB',
+    stat: `${prop.stat} ${side} ${roundedLine}`,
+    line: roundedLine,
+    projection: roundedProjection,
+    confidence: confidenceValue,
+    odds: odds,
+    edge: displayEdgeStr,
+    edge_percentage: signedEdgePercent,
+    analysis: prop.analysis || `MLB prop: ${prop.player} ${prop.stat} ${side} ${prop.line}. Projected: ${prop.projection}.`,
+    timestamp: prop.game_date ? new Date(prop.game_date).toLocaleString() : 'Just now',
+    category,
+    probability: `${confidenceValue}%`,
+    roi: `+${Math.floor(Math.random() * 20) + 10}%`,
+    units: (Math.random() * 2 + 1).toFixed(1),
+    requiresPremium: false,
+    value: displayEdgeStr,
+    bookmaker: prop.bookmaker || 'Tank01',
+    generatedFrom: 'MLB API',
+    isToday: true,
+    type: side,
+    is_mock: source === 'mock',
+    data_source: source,
+  };
+};
+
+const mapNHLPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pick => {
+  const odds = side === 'Over' ? prop.over_odds : prop.under_odds;
+  let confidenceValue = prop.confidence || 70;
+  if (typeof confidenceValue === 'string') {
+    if (confidenceValue === 'high') confidenceValue = 85;
+    else if (confidenceValue === 'medium') confidenceValue = 70;
+    else if (confidenceValue === 'low') confidenceValue = 55;
+    else confidenceValue = 70;
+  }
+
+  const proj = typeof prop.projection === 'number' ? prop.projection : parseFloat(prop.projection);
+  const lineVal = typeof prop.line === 'number' ? prop.line : parseFloat(prop.line);
+  const hasValidNumbers = !isNaN(proj) && !isNaN(lineVal) && lineVal !== 0;
+
+  let signedEdgePercent: number | undefined;
+  if (hasValidNumbers) {
+    if (side === 'Over') {
+      signedEdgePercent = ((proj - lineVal) / lineVal) * 100;
+    } else {
+      signedEdgePercent = ((lineVal - proj) / lineVal) * 100;
+    }
+    signedEdgePercent = Math.round(signedEdgePercent * 10) / 10;
+  }
+
+  const displayEdgeStr = signedEdgePercent !== undefined
+    ? (signedEdgePercent > 0 ? `+${signedEdgePercent}%` : `${signedEdgePercent}%`)
+    : prop.edge || 'N/A';
+
+  const category =
+    confidenceValue >= 85
+      ? 'High Confidence'
+      : confidenceValue >= 70
+      ? 'Value Bet'
+      : confidenceValue >= 60
+      ? 'Lock Pick'
+      : 'High Upside';
+
+  const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
+  const roundedProjection = proj ? Math.round(proj * 10) / 10 : undefined;
+
+  return {
+    id: prop.id || `nhl-${Date.now()}-${Math.random()}-${side}`,
+    player: prop.player,
+    team: prop.team,
+    sport: 'NHL',
+    stat: `${prop.stat} ${side} ${roundedLine}`,
+    line: roundedLine,
+    projection: roundedProjection,
+    confidence: confidenceValue,
+    odds: odds,
+    edge: displayEdgeStr,
+    edge_percentage: signedEdgePercent,
+    analysis: prop.analysis || `NHL prop: ${prop.player} ${prop.stat} ${side} ${prop.line}. Projected: ${prop.projection}.`,
+    timestamp: prop.game_date ? new Date(prop.game_date).toLocaleString() : 'Just now',
+    category,
+    probability: `${confidenceValue}%`,
+    roi: `+${Math.floor(Math.random() * 20) + 10}%`,
+    units: (Math.random() * 2 + 1).toFixed(1),
+    requiresPremium: false,
+    value: displayEdgeStr,
+    bookmaker: prop.bookmaker || 'The Odds API',
+    generatedFrom: 'NHL API',
+    isToday: true,
+    type: side,
+    is_mock: source === 'mock',
+    data_source: source,
   };
 };
 
@@ -420,10 +637,13 @@ const PickCard = memo(
           borderColor: CATEGORY_COLORS[pick.category as keyof typeof CATEGORY_COLORS] || confidenceColor,
           cursor: 'pointer',
           opacity: isPremiumLocked ? 0.9 : 1,
+          bgcolor: 'rgba(255,255,255,0.95)',
+          backdropFilter: 'blur(4px)',
           '&:hover': {
             boxShadow: 3,
             transform: 'translateY(-2px)',
             transition: 'all 0.2s',
+            bgcolor: 'white',
           },
         }}
         onClick={() => onTrack(pick)}
@@ -440,7 +660,7 @@ const PickCard = memo(
                   </Typography>
                 )}
               </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
                 <Typography variant="body2" color="text.secondary">
                   {pick.team}
                 </Typography>
@@ -475,6 +695,13 @@ const PickCard = memo(
                     }}
                   />
                 )}
+                {pick.is_mock && (
+                  <Chip
+                    label="Mock"
+                    size="small"
+                    sx={{ bgcolor: '#ff980020', color: '#ff9800', fontWeight: 'bold' }}
+                  />
+                )}
               </Box>
             </Box>
 
@@ -504,7 +731,7 @@ const PickCard = memo(
                       Projection
                     </Typography>
                     <Typography variant="body1" fontWeight="bold">
-                      {pick.projection}
+                      {pick.projection.toFixed(1)}
                     </Typography>
                   </Box>
                 </Grid>
@@ -610,6 +837,7 @@ const ConfidenceBadge = ({ confidence }: { confidence: number }) => {
 // ============================================
 const DailyPicksScreen = () => {
   const navigate = useNavigate();
+  const { user } = useAuth(); // Get current user from Firebase
 
   // Tab state
   const [tabIndex, setTabIndex] = useState(0); // 0 = All Picks, 1 = AI Generator
@@ -646,6 +874,8 @@ const DailyPicksScreen = () => {
   const [showGeneratingModal, setShowGeneratingModal] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
+  const [selectedPrompt, setSelectedPrompt] = useState('');
+  const [selectedWinnerPrompt, setSelectedWinnerPrompt] = useState('');
   const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
@@ -655,7 +885,45 @@ const DailyPicksScreen = () => {
   const [showParlayModal, setShowParlayModal] = useState(false);
   const [selectedPromptCategory, setSelectedPromptCategory] = useState('Player Props');
 
+  // ===== USAGE LIMIT STATE =====
+  const [generationsRemaining, setGenerationsRemaining] = useState(DAILY_LIMIT); // daily limit
+  const [lastGenerationDate, setLastGenerationDate] = useState<string | null>(null);
+
   const { error: apiError } = useDailyPicks();
+
+  // ===== FETCH REMAINING GENERATIONS ON MOUNT =====
+  useEffect(() => {
+    if (user) {
+      fetchRemainingGenerations();
+    }
+  }, [user]);
+
+  const fetchRemainingGenerations = async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${PYTHON_API_BASE}/api/user/generations/${user.uid}`);
+      const data = await res.json();
+      setGenerationsRemaining(data.remaining);
+    } catch (err) {
+      console.error('Failed to fetch generation limit', err);
+    }
+  };
+
+  // Optional: daily reset check locally (if backend doesn't handle it)
+  useEffect(() => {
+    const checkDailyReset = () => {
+      if (lastGenerationDate) {
+        const last = new Date(lastGenerationDate);
+        const now = new Date();
+        const diffHours = (now.getTime() - last.getTime()) / (1000 * 60 * 60);
+        if (diffHours >= 24) {
+          setGenerationsRemaining(DAILY_LIMIT);
+          setLastGenerationDate(null);
+        }
+      }
+    };
+    checkDailyReset();
+  }, [lastGenerationDate]);
 
   // Fetch picks on mount/sport change
   useEffect(() => {
@@ -666,29 +934,116 @@ const DailyPicksScreen = () => {
     setDisplayCount(PAGE_SIZE);
   }, [selectedSport, searchQuery, filterStat, filterConfidence, filterEdge]);
 
+  // ============================================
+  // MLB‑specific fetch and mapping
+  // ============================================
+  const fetchMLBPicks = async (): Promise<Pick[]> => {
+    try {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=100`;
+      console.log('⚾ Fetching MLB props from Python backend:', endpoint);
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`MLB API failed with status ${response.status}`);
+      const data = await response.json();
+      console.log('✅ MLB props response:', data);
+
+      const props = data.props || [];
+      const source = data.source || 'mock';
+      if (props.length === 0) {
+        console.log('⚠️ No MLB props returned');
+        return [];
+      }
+
+      const picks: Pick[] = [];
+      props.forEach((prop: any) => {
+        picks.push(mapMLBPropToPick(prop, 'Over', source));
+        picks.push(mapMLBPropToPick(prop, 'Under', source));
+      });
+
+      setDataFreshness(new Date().toISOString());
+      setDataSources([source === 'mock' ? 'MLB Mock' : 'Tank01 (Python)']);
+      return picks;
+    } catch (err) {
+      console.error('Error fetching MLB props:', err);
+      return [];
+    }
+  };
+
+  // ============================================
+  // NHL‑specific fetch and mapping
+  // ============================================
+  const fetchNHLProps = async (): Promise<Pick[]> => {
+    try {
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=100`;
+      console.log('🏒 Fetching NHL props from Python backend:', endpoint);
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`NHL API failed with status ${response.status}`);
+      const data = await response.json();
+      console.log('✅ NHL props response:', data);
+
+      const props = data.props || [];
+      const source = data.source || 'mock';
+      if (props.length === 0) {
+        console.log('⚠️ No NHL props returned');
+        return [];
+      }
+
+      const picks: Pick[] = [];
+      props.forEach((prop: any) => {
+        picks.push(mapNHLPropToPick(prop, 'Over', source));
+        picks.push(mapNHLPropToPick(prop, 'Under', source));
+      });
+
+      setDataFreshness(new Date().toISOString());
+      setDataSources([source === 'mock' ? 'NHL Mock' : 'The Odds API (Python)']);
+      return picks;
+    } catch (err) {
+      console.error('Error fetching NHL props:', err);
+      return [];
+    }
+  };
+
+  // ============================================
+  // Main fetch function
+  // ============================================
   const fetchPicks = async (refresh = false) => {
     try {
       setLoading(true);
       setError(null);
-      const timestamp = Date.now();
-      const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&_t=${timestamp}`;
-      console.log('📡 Fetching picks from Node API:', endpoint);
-      const response = await fetch(endpoint);
-      if (!response.ok) throw new Error(`API failed with status ${response.status}`);
-      const data = await response.json();
-      console.log('✅ Node API response:', data);
-      const selections = data?.selections || [];
-      console.log(`📊 Received ${selections.length} selections from Node API`);
-      if (selections.length > 0) {
-        const mappedPicks = selections.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport));
-        const deduped = deduplicatePicks(mappedPicks);
+      let picksData: Pick[] = [];
+
+      if (selectedSport === 'mlb') {
+        picksData = await fetchMLBPicks();
+      } else if (selectedSport === 'nhl') {
+        picksData = await fetchNHLProps();
+      } else {
+        const timestamp = Date.now();
+        const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&_t=${timestamp}`;
+        console.log('📡 Fetching picks from Node API:', endpoint);
+        const response = await fetch(endpoint);
+        if (!response.ok) throw new Error(`API failed with status ${response.status}`);
+        const data = await response.json();
+        console.log('✅ Node API response:', data);
+        const selections = data?.selections || [];
+        console.log(`📊 Received ${selections.length} selections from Node API`);
+        if (selections.length > 0) {
+          picksData = selections.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport));
+          setDataFreshness(new Date().toISOString());
+          setDataSources([data.source || 'Node API', 'The Odds API', 'Tank01']);
+        } else {
+          setError('No picks received from API');
+        }
+      }
+
+      if (picksData.length > 0) {
+        const deduped = deduplicatePicks(picksData);
         console.log(`📊 After deduplication: ${deduped.length} unique picks`);
         setPicks(deduped);
-        setDataFreshness(new Date().toISOString());
-        setDataSources([data.source || 'Node API', 'The Odds API', 'Tank01']);
       } else {
-        setError('No picks received from API');
+        setPicks([]);
       }
+
       setParlays(generateSampleParlays());
       setLastRefresh(new Date());
     } catch (err) {
@@ -832,222 +1187,304 @@ const DailyPicksScreen = () => {
     console.log('Added to bet slip:', item);
   };
 
-// ============================================
-// GENERATE CUSTOM PICKS – with side preference boost
-// ============================================
-const handleGenerateCustomPicks = async () => {
-  if (!customPrompt.trim()) return;
+  // ============================================
+  // Helper to fetch raw selections for any sport
+  // ============================================
+  const fetchRawSelections = async (sport: string): Promise<any[]> => {
+    if (sport === 'mlb') {
+      const today = new Date().toISOString().split('T')[0];
+      const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200`;
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error(`MLB API failed with status ${res.status}`);
+      const data = await res.json();
+      return data.props || [];
+    } else if (sport === 'nhl') {
+      const today = new Date().toISOString().split('T')[0];
+      const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200`;
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error(`NHL API failed with status ${res.status}`);
+      const data = await res.json();
+      return data.props || [];
+    } else {
+      const timestamp = Date.now();
+      const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${sport}&_t=${timestamp}`;
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error(`Node API failed with status ${res.status}`);
+      const data = await res.json();
+      return data.selections || [];
+    }
+  };
 
-  setGenerating(true);
-  setShowGeneratingModal(true);
-  console.log('🚀 Generating picks for prompt:', customPrompt);
+  // ===== Sync remaining generations with backend after use =====
+  const syncGenerationCountWithBackend = async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid }),
+      });
+      const data = await res.json();
+      setGenerationsRemaining(data.remaining);
+    } catch (err) {
+      console.error('Failed to sync generation count', err);
+    }
+  };
 
-  // Detect side preference from prompt
-  const lowerPrompt = customPrompt.toLowerCase();
-  const preferOver = lowerPrompt.includes('over') || lowerPrompt.includes('high');
-  const preferUnder = lowerPrompt.includes('under') || lowerPrompt.includes('low');
+  // ===== Handle purchase of extra generations =====
+  const handlePurchaseGenerations = async (quantity: number) => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${PYTHON_API_BASE}/api/user/generations/purchase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid, quantity }),
+      });
+      const data = await res.json();
+      setGenerationsRemaining(data.remaining);
+      setShowUpgradeModal(false);
+    } catch (err) {
+      console.error('Purchase failed', err);
+    }
+  };
 
-  try {
-    const timestamp = Date.now();
-    const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&_t=${timestamp}`;
-    console.log('📡 Calling Node API:', endpoint);
-    const response = await fetch(endpoint);
-    if (!response.ok) throw new Error(`API failed with status ${response.status}`);
+  // ============================================
+  // GENERATE CUSTOM PICKS – with usage limit
+  // ============================================
+  const handleGenerateCustomPicks = async () => {
+    if (!customPrompt.trim()) return;
 
-    const data = await response.json();
-    const selections = data?.selections || [];
-    console.log(`📊 Received ${selections.length} selections from Node API`);
+    // ----- Usage check -----
+    if (generationsRemaining <= 0) {
+      setShowUpgradeModal(true);
+      return;
+    }
 
-    if (selections.length === 0) {
-      // Fallback mock pick
-      const mockPick: Pick = {
-        id: `gen-${Date.now()}-mock`,
-        player: 'Mock Player',
-        team: 'Mock Team',
-        sport: selectedSport.toUpperCase(),
-        stat: 'Points',
-        line: 20.5,
-        projection: 22.3,
-        confidence: 85,
-        odds: '+150',
-        edge: '+12%',
-        edge_percentage: 12,
-        analysis: 'This is a fallback pick generated because the API returned no data.',
-        timestamp: 'Just now',
-        category: 'High Confidence',
-        probability: '85%',
-        roi: '+18%',
-        units: '2.0',
-        requiresPremium: false,
-        value: '12% edge',
-        bookmaker: 'Mock API',
-        generatedFrom: customPrompt,
-        isToday: true,
+    setGenerating(true);
+    setShowGeneratingModal(true);
+    console.log('🚀 Generating picks for prompt:', customPrompt);
+
+    const MAX_RESULTS = 3; // Limit to 3 picks per generation
+
+    // Detect side preference from prompt
+    const lowerPrompt = customPrompt.toLowerCase();
+    const preferOver = lowerPrompt.includes('over') || lowerPrompt.includes('high');
+    const preferUnder = lowerPrompt.includes('under') || lowerPrompt.includes('low');
+
+    try {
+      // Fetch raw data for the current sport
+      const rawItems = await fetchRawSelections(selectedSport);
+      console.log(`📊 Received ${rawItems.length} raw items for ${selectedSport}`);
+
+      if (rawItems.length === 0) {
+        // Fallback mock pick (still returns 1)
+        const mockPick: Pick = {
+          id: `gen-${Date.now()}-mock`,
+          player: 'Mock Player',
+          team: 'Mock Team',
+          sport: selectedSport.toUpperCase(),
+          stat: 'Points',
+          line: 20.5,
+          projection: 22.3,
+          confidence: 85,
+          odds: '+150',
+          edge: '+12%',
+          edge_percentage: 12,
+          analysis: 'This is a fallback pick generated because the API returned no data.',
+          timestamp: 'Just now',
+          category: 'High Confidence',
+          probability: '85%',
+          roi: '+18%',
+          units: '2.0',
+          requiresPremium: false,
+          value: '12% edge',
+          bookmaker: 'Mock API',
+          generatedFrom: customPrompt,
+          isToday: true,
+          is_mock: true,
+          data_source: 'mock',
+        };
+        setGeneratedPicks([mockPick]);
+        setCustomPrompt('');
+        setSelectedPrompt('');
+        setSelectedWinnerPrompt('');
+        // Decrement counter after generation (even if fallback)
+        await syncGenerationCountWithBackend();
+        setLastGenerationDate(new Date().toISOString());
+        setTimeout(() => {
+          setGenerating(false);
+          setShowGeneratingModal(false);
+        }, 1500);
+        return;
+      }
+
+      // ---------- KEYWORD EXTRACTION ----------
+      const stopWords = new Set([
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'with', 'by', 'about', 'as', 'of', 'from', 'top', 'this', 'that',
+        'these', 'those', 'it', 'its', 'my', 'your', 'our', 'their', 'what',
+        'which', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how',
+        'all', 'any', 'both', 'each', 'few', 'more', 'most', 'some', 'such',
+        'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+        's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'month', 'day',
+        'week', 'year', 'today', 'yesterday', 'tomorrow', 'predictions', 'prop',
+        'props', 'player', 'players', 'game', 'games', 'stats', 'stat',
+      ]);
+
+      const SYNONYM_MAP: Record<string, string[]> = {
+        scorers: ['points', 'scoring'],
+        rebounders: ['rebounds', 'rebounding'],
+        assists: ['assists', 'assist'],
+        threes: ['three pointers', '3pt', 'three point'],
+        blocks: ['blocks', 'blocked'],
+        steals: ['steals', 'steal'],
+        stats: ['points', 'rebounds', 'assists', 'steals', 'blocks'],
       };
-      setGeneratedPicks([mockPick]);
+
+      let keywords = customPrompt
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((word) => word.length > 2 && !stopWords.has(word));
+
+      const expandedKeywords = new Set<string>();
+      keywords.forEach((kw) => {
+        expandedKeywords.add(kw);
+        if (TEAM_MAPPINGS[kw]) TEAM_MAPPINGS[kw].forEach((alias) => expandedKeywords.add(alias));
+        if (SYNONYM_MAP[kw]) SYNONYM_MAP[kw].forEach((syn) => expandedKeywords.add(syn));
+      });
+      keywords = Array.from(expandedKeywords);
+      console.log('🔍 Expanded keywords:', keywords);
+      if (keywords.length === 0) keywords.push(selectedSport, 'player');
+
+      // Score each raw item
+      const scoredItems = rawItems.map((item: any) => {
+        const searchable = [
+          item.player,
+          item.stat,
+          item.stat_type,
+          item.team,
+          item.opponent,
+          item.analysis,
+        ]
+          .filter(Boolean)
+          .map((s) => String(s).toLowerCase());
+
+        let score = 0;
+        keywords.forEach((keyword) => {
+          searchable.forEach((field) => {
+            if (field && field.includes(keyword)) score += 1;
+          });
+        });
+
+        if (preferOver && item.type === 'Over') score += 10;
+        if (preferUnder && item.type === 'Under') score += 10;
+
+        return { item, score };
+      });
+
+      scoredItems.sort((a, b) => b.score - a.score);
+      console.log('🔍 Top 5 scores:', scoredItems.slice(0, 5).map((s) => s.score));
+
+      const highestScore = scoredItems[0]?.score || 0;
+      let itemsToShow;
+      let analysisNote;
+
+      if (highestScore === 0) {
+        let sortedByConfidence = [...rawItems];
+        if (preferOver) {
+          sortedByConfidence = sortedByConfidence.filter((s) => s.type === 'Over');
+        } else if (preferUnder) {
+          sortedByConfidence = sortedByConfidence.filter((s) => s.type === 'Under');
+        }
+        sortedByConfidence.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        itemsToShow = sortedByConfidence.slice(0, 20);
+        analysisNote = `⚠️ No picks matched "${customPrompt}". Showing top value ${preferOver ? 'Over' : preferUnder ? 'Under' : ''} picks by confidence.`;
+      } else {
+        itemsToShow = scoredItems.slice(0, 20).map((item) => item.item);
+        analysisNote = `✅ Showing top ${itemsToShow.length} picks most relevant to "${customPrompt}".`;
+      }
+
+      console.log(`🔍 Top selection score: ${highestScore}, showing ${itemsToShow.length} picks`);
+
+      // Convert raw items to Pick objects
+      let newPicks: Pick[] = [];
+      if (selectedSport === 'mlb') {
+        itemsToShow.forEach((prop: any) => {
+          newPicks.push(mapMLBPropToPick(prop, 'Over', prop.source || 'api'));
+          newPicks.push(mapMLBPropToPick(prop, 'Under', prop.source || 'api'));
+        });
+      } else if (selectedSport === 'nhl') {
+        itemsToShow.forEach((prop: any) => {
+          newPicks.push(mapNHLPropToPick(prop, 'Over', prop.source || 'api'));
+          newPicks.push(mapNHLPropToPick(prop, 'Under', prop.source || 'api'));
+        });
+      } else {
+        newPicks = itemsToShow.map((sel: any, index: number) => {
+          const pick = mapNodeSelectionToPick(sel, selectedSport, customPrompt);
+          if (index === 0 && analysisNote) pick.analysis = `${analysisNote}\n\n${pick.analysis}`;
+          return pick;
+        });
+      }
+
+      if ((selectedSport === 'mlb' || selectedSport === 'nhl') && newPicks.length > 0 && analysisNote) {
+        newPicks[0].analysis = `${analysisNote}\n\n${newPicks[0].analysis}`;
+      }
+
+      console.log(`📦 Mapped ${newPicks.length} new picks`);
+
+      const dedupedNewPicks = deduplicatePicks(newPicks);
+      console.log(`📊 After dedup: ${dedupedNewPicks.length} unique picks`);
+
+      const limitedPicks = dedupedNewPicks.slice(0, MAX_RESULTS);
+      setGeneratedPicks(limitedPicks);
       setCustomPrompt('');
+      setSelectedPrompt('');
+      setSelectedWinnerPrompt('');
+
+      // ----- Decrement usage after successful generation -----
+      await syncGenerationCountWithBackend();
+      setLastGenerationDate(new Date().toISOString());
+
       setTimeout(() => {
         setGenerating(false);
         setShowGeneratingModal(false);
       }, 1500);
-      return;
-    }
-
-    // ---------- KEYWORD EXTRACTION ----------
-    const stopWords = new Set([
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-      'with', 'by', 'about', 'as', 'of', 'from', 'top', 'this', 'that',
-      'these', 'those', 'it', 'its', 'my', 'your', 'our', 'their', 'what',
-      'which', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how',
-      'all', 'any', 'both', 'each', 'few', 'more', 'most', 'some', 'such',
-      'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
-      's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'month', 'day',
-      'week', 'year', 'today', 'yesterday', 'tomorrow', 'predictions', 'prop',
-      'props', 'player', 'players', 'game', 'games', 'stats', 'stat',
-    ]);
-
-    const SYNONYM_MAP: Record<string, string[]> = {
-      scorers: ['points', 'scoring'],
-      rebounders: ['rebounds', 'rebounding'],
-      assists: ['assists', 'assist'],
-      threes: ['three pointers', '3pt', 'three point'],
-      blocks: ['blocks', 'blocked'],
-      steals: ['steals', 'steal'],
-      stats: ['points', 'rebounds', 'assists', 'steals', 'blocks'],
-    };
-
-    let keywords = customPrompt
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((word) => word.length > 2 && !stopWords.has(word));
-
-    const expandedKeywords = new Set<string>();
-    keywords.forEach((kw) => {
-      expandedKeywords.add(kw);
-      if (TEAM_MAPPINGS[kw]) TEAM_MAPPINGS[kw].forEach((alias) => expandedKeywords.add(alias));
-      if (SYNONYM_MAP[kw]) SYNONYM_MAP[kw].forEach((syn) => expandedKeywords.add(syn));
-    });
-    keywords = Array.from(expandedKeywords);
-    console.log('🔍 Expanded keywords:', keywords);
-    if (keywords.length === 0) keywords.push('nba', 'player');
-
-    // Score each selection: base score from keyword matches + side preference bonus
-    const scoredSelections = selections.map((sel: any) => {
-      const actualTeam = getPlayerTeam(sel.player || '');
-      const searchable = [
-        sel.player,
-        sel.stat,
-        sel.stat_type,
-        sel.game,
-        sel.analysis,
-        actualTeam,
-      ]
-        .filter(Boolean)
-        .map((s) => String(s).toLowerCase());
-
-      if (sel.game) {
-        const gameWords = sel.game.toLowerCase().split(/\W+/);
-        searchable.push(...gameWords);
-      }
-
-      const fieldMatches = (field: string, keyword: string): boolean => {
-        if (keyword.includes(' ')) return field.includes(keyword);
-        else {
-          const words = field.split(/\W+/);
-          return words.includes(keyword);
-        }
+    } catch (error) {
+      console.error('❌ Error generating picks:', error);
+      const fallbackPick: Pick = {
+        id: `gen-${Date.now()}-fallback`,
+        player: 'Fallback Player',
+        team: 'Fallback Team',
+        sport: selectedSport.toUpperCase(),
+        stat: 'Points',
+        line: 20.5,
+        projection: 22.3,
+        confidence: 80,
+        odds: '+150',
+        edge: '+10%',
+        edge_percentage: 10,
+        analysis: 'This is a fallback pick generated because the API request failed. Please try again later.',
+        timestamp: 'Just now',
+        category: 'Value Bet',
+        probability: '80%',
+        roi: '+15%',
+        units: '1.5',
+        requiresPremium: false,
+        value: '10% edge',
+        bookmaker: 'Fallback',
+        generatedFrom: customPrompt,
+        isToday: true,
+        is_mock: true,
+        data_source: 'mock',
       };
-
-      let score = 0;
-      keywords.forEach((keyword) => {
-        searchable.forEach((field) => {
-          if (field && fieldMatches(field, keyword)) score += 1;
-        });
-      });
-
-      // Side preference boost
-      if (preferOver && sel.type === 'Over') score += 10;
-      if (preferUnder && sel.type === 'Under') score += 10;
-
-      return { sel, score };
-    });
-
-    scoredSelections.sort((a, b) => b.score - a.score);
-    console.log('🔍 Top 5 scores:', scoredSelections.slice(0, 5).map((s) => s.score));
-
-    const highestScore = scoredSelections[0]?.score || 0;
-    let picksToShow;
-    let analysisNote;
-
-    if (highestScore === 0) {
-      // No keyword matches – fallback to confidence, but still respect side preference if any
-      let sortedByConfidence = [...selections];
-      if (preferOver) {
-        sortedByConfidence = sortedByConfidence.filter((s) => s.type === 'Over');
-      } else if (preferUnder) {
-        sortedByConfidence = sortedByConfidence.filter((s) => s.type === 'Under');
-      }
-      sortedByConfidence.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-      picksToShow = sortedByConfidence.slice(0, 20);
-      analysisNote = `⚠️ No picks matched "${customPrompt}". Showing top value ${preferOver ? 'Over' : preferUnder ? 'Under' : ''} picks by confidence.`;
-    } else {
-      picksToShow = scoredSelections.slice(0, 20).map((item) => item.sel);
-      analysisNote = `✅ Showing top ${picksToShow.length} picks most relevant to "${customPrompt}".`;
-    }
-
-    console.log(`🔍 Top selection score: ${highestScore}, showing ${picksToShow.length} picks`);
-
-    const newPicks: Pick[] = picksToShow.map((sel: any, index: number) => {
-      const pick = mapNodeSelectionToPick(sel, selectedSport, customPrompt);
-      if (index === 0 && analysisNote) pick.analysis = `${analysisNote}\n\n${pick.analysis}`;
-      return pick;
-    });
-
-    console.log(`📦 Mapped ${newPicks.length} new picks`);
-
-    // Deduplicate before storing
-    const dedupedNewPicks = deduplicatePicks(newPicks);
-    console.log(`📊 After dedup: ${dedupedNewPicks.length} unique picks`);
-
-    setGeneratedPicks(dedupedNewPicks);
-    setCustomPrompt('');
-
-    setTimeout(() => {
+      setGeneratedPicks([fallbackPick]);
+      setCustomPrompt('');
+      setSelectedPrompt('');
+      setSelectedWinnerPrompt('');
       setGenerating(false);
       setShowGeneratingModal(false);
-    }, 1500);
-  } catch (error) {
-    console.error('❌ Error generating picks:', error);
-    const fallbackPick: Pick = {
-      id: `gen-${Date.now()}-fallback`,
-      player: 'Fallback Player',
-      team: 'Fallback Team',
-      sport: selectedSport.toUpperCase(),
-      stat: 'Points',
-      line: 20.5,
-      projection: 22.3,
-      confidence: 80,
-      odds: '+150',
-      edge: '+10%',
-      edge_percentage: 10,
-      analysis: 'This is a fallback pick generated because the API request failed. Please try again later.',
-      timestamp: 'Just now',
-      category: 'Value Bet',
-      probability: '80%',
-      roi: '+15%',
-      units: '1.5',
-      requiresPremium: false,
-      value: '10% edge',
-      bookmaker: 'Fallback',
-      generatedFrom: customPrompt,
-      isToday: true,
-    };
-    setGeneratedPicks([fallbackPick]);
-    setCustomPrompt('');
-    setGenerating(false);
-    setShowGeneratingModal(false);
-  }
-};
+    }
+  };
 
   // ============================================
   // RENDER HELPERS
@@ -1058,32 +1495,34 @@ const handleGenerateCustomPicks = async () => {
     const now = new Date();
     const diffMinutes = Math.floor((now.getTime() - freshnessDate.getTime()) / 60000);
     return (
-      <Paper sx={{ p: 2, mb: 3, bgcolor: 'grey.50', display: 'flex', alignItems: 'center' }}>
-        {diffMinutes < 5 ? (
-          <CheckCircleOutline sx={{ color: '#10b981', mr: 1 }} />
-        ) : (
-          <Schedule sx={{ color: '#f59e0b', mr: 1 }} />
-        )}
-        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
-          Data updated {diffMinutes} minutes ago
-        </Typography>
-        {dataSources.length > 0 && (
-          <Box sx={{ display: 'flex', gap: 0.5 }}>
-            {dataSources.map((source) => (
-              <Tooltip key={source} title={source}>
-                <Chip
-                  label={source
-                    .split('-')
-                    .map((s) => s[0])
-                    .join('')
-                    .toUpperCase()}
-                  size="small"
-                  sx={{ bgcolor: 'grey.200' }}
-                />
-              </Tooltip>
-            ))}
-          </Box>
-        )}
+      <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {diffMinutes < 5 ? (
+            <CheckCircleOutline sx={{ color: '#10b981', mr: 1 }} />
+          ) : (
+            <Schedule sx={{ color: '#f59e0b', mr: 1 }} />
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+            Data updated {diffMinutes} minutes ago
+          </Typography>
+          {dataSources.length > 0 && (
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              {dataSources.map((source) => (
+                <Tooltip key={source} title={source}>
+                  <Chip
+                    label={source
+                      .split('-')
+                      .map((s) => s[0])
+                      .join('')
+                      .toUpperCase()}
+                    size="small"
+                    sx={{ bgcolor: 'grey.200' }}
+                  />
+                </Tooltip>
+              ))}
+            </Box>
+          )}
+        </Box>
       </Paper>
     );
   };
@@ -1133,6 +1572,7 @@ const handleGenerateCustomPicks = async () => {
               <Typography variant="body2">
                 • Freshness: {dataFreshness ? new Date(dataFreshness).toLocaleTimeString() : 'N/A'}
               </Typography>
+              <Typography variant="body2">• Generations Remaining: {generationsRemaining}</Typography>
             </Box>
             <Box mt={2}>
               <Button
@@ -1157,6 +1597,7 @@ const handleGenerateCustomPicks = async () => {
                     filterStat,
                     filterConfidence,
                     filterEdge,
+                    generationsRemaining,
                   })
                 }
               >
@@ -1176,7 +1617,7 @@ const handleGenerateCustomPicks = async () => {
   );
 
   const renderSportSelector = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
+    <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
       <Typography variant="subtitle2" gutterBottom color="text.secondary">
         Sport
       </Typography>
@@ -1209,7 +1650,7 @@ const handleGenerateCustomPicks = async () => {
   );
 
   const renderMarketSelector = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
+    <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
       <Typography variant="subtitle2" gutterBottom color="text.secondary">
         Market Type
       </Typography>
@@ -1235,7 +1676,7 @@ const handleGenerateCustomPicks = async () => {
   );
 
   const renderFilterBar = () => (
-    <Paper sx={{ p: 2, mb: 3 }}>
+    <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
         <FilterList sx={{ mr: 1, color: 'text.secondary' }} />
         <Typography variant="subtitle2" color="text.secondary">
@@ -1316,7 +1757,9 @@ const handleGenerateCustomPicks = async () => {
           borderLeft: 4,
           borderColor: getRecommendationColor(parlay.confidence),
           cursor: 'pointer',
-          '&:hover': { boxShadow: 3, transform: 'translateY(-2px)', transition: 'all 0.2s' },
+          bgcolor: 'rgba(255,255,255,0.95)',
+          backdropFilter: 'blur(4px)',
+          '&:hover': { boxShadow: 3, transform: 'translateY(-2px)', transition: 'all 0.2s', bgcolor: 'white' },
         }}
         onClick={() => handleParlaySelect(parlay)}
       >
@@ -1615,7 +2058,7 @@ const handleGenerateCustomPicks = async () => {
                           <Typography variant="body2" color="text.secondary">
                             Projection
                           </Typography>
-                          <Typography variant="h6">{selectedPick.projection}</Typography>
+                          <Typography variant="h6">{selectedPick.projection.toFixed(1)}</Typography>
                         </Grid>
                       )}
                       {selectedPick.value && (
@@ -1689,364 +2132,490 @@ const handleGenerateCustomPicks = async () => {
   // ============================================
   if (loading && !refreshing && picks.length === 0) {
     return (
-      <Container maxWidth="lg">
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px" flexDirection="column">
-          <CircularProgress size={40} />
-          <Typography sx={{ mt: 2 }} color="text.secondary">
-            Loading daily picks...
-          </Typography>
-        </Box>
-      </Container>
+      <>
+        {/* Background layer */}
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: -1,
+            background: 'radial-gradient(circle at 20% 30%, rgba(33,150,243,0.15) 0%, transparent 40%), linear-gradient(135deg, #0a1929 0%, #1a2f3f 100%)',
+            '&::after': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E")`,
+              opacity: 0.4,
+              pointerEvents: 'none',
+            },
+          }}
+        />
+        <Container maxWidth="lg">
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px" flexDirection="column">
+            <CircularProgress size={40} />
+            <Typography sx={{ mt: 2 }} color="text.secondary">
+              Loading daily picks...
+            </Typography>
+          </Box>
+        </Container>
+      </>
     );
   }
 
   return (
-    <Container maxWidth="lg">
-      {/* Header */}
-      <Paper
+    <>
+      {/* Background layer */}
+      <Box
         sx={{
-          background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-          mb: 4,
-          p: 3,
-          color: 'white',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: -1,
+          background: 'radial-gradient(circle at 20% 30%, rgba(33,150,243,0.15) 0%, transparent 40%), linear-gradient(135deg, #0a1929 0%, #1a2f3f 100%)',
+          '&::after': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E")`,
+            opacity: 0.4,
+            pointerEvents: 'none',
+          },
         }}
-      >
-        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-          <Box display="flex" gap={1}>
-            <Button
-              startIcon={<ArrowBack />}
-              onClick={() => navigate(-1)}
-              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
-              variant="outlined"
-              size="small"
-            >
-              Back
-            </Button>
-            <Button
-              startIcon={<BugReport />}
-              onClick={() => setShowDebugPanel(!showDebugPanel)}
-              sx={{
-                color: 'white',
-                borderColor: 'rgba(255,255,255,0.3)',
-                bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent',
-              }}
-              variant="outlined"
-              size="small"
-            >
-              {showDebugPanel ? 'Hide Debug' : 'Debug'}
-            </Button>
+      />
+
+      <Container maxWidth="lg">
+        {/* Header with semi‑transparency */}
+        <Paper
+          sx={{
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.9) 0%, rgba(29,78,216,0.9) 100%)',
+            backdropFilter: 'blur(10px)',
+            mb: 4,
+            p: 3,
+            color: 'white',
+          }}
+        >
+          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+            <Box display="flex" gap={1}>
+              <Button
+                startIcon={<ArrowBack />}
+                onClick={() => navigate(-1)}
+                sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
+                variant="outlined"
+                size="small"
+              >
+                Back
+              </Button>
+              <Button
+                startIcon={<BugReport />}
+                onClick={() => setShowDebugPanel(!showDebugPanel)}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.3)',
+                  bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent',
+                }}
+                variant="outlined"
+                size="small"
+              >
+                {showDebugPanel ? 'Hide Debug' : 'Debug'}
+              </Button>
+            </Box>
+            {lastRefresh && (
+              <Chip
+                label={`Last updated: ${lastRefresh.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}`}
+                size="small"
+                sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
+              />
+            )}
           </Box>
-          {lastRefresh && (
-            <Chip
-              label={`Last updated: ${lastRefresh.toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}`}
-              size="small"
-              sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
-            />
-          )}
-        </Box>
 
-        <Box display="flex" alignItems="center" gap={3}>
-          <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}>
-            <CalendarToday sx={{ fontSize: 32 }} />
-          </Avatar>
-          <Box>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>
-              Daily Picks
-            </Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>
-              AI-curated selections with highest probability of success
-            </Typography>
+          <Box display="flex" alignItems="center" gap={3}>
+            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}>
+              <CalendarToday sx={{ fontSize: 32 }} />
+            </Avatar>
+            <Box>
+              <Typography variant="h3" fontWeight="bold" gutterBottom>
+                Daily Picks
+              </Typography>
+              <Typography variant="h6" sx={{ opacity: 0.9 }}>
+                AI-curated selections with highest probability of success
+              </Typography>
+            </Box>
           </Box>
-        </Box>
-      </Paper>
-
-      {/* Debug Panel */}
-      <DebugPanel />
-
-      {/* Sport Selector */}
-      {renderSportSelector()}
-
-      {/* Market Type Selector */}
-      {renderMarketSelector()}
-
-      {/* Freshness Indicator */}
-      {renderFreshnessIndicator()}
-
-      {/* Action Bar (only shown in All Picks tab) */}
-      {tabIndex === 0 && (
-        <Paper sx={{ p: 2, mb: 4 }}>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} sm={6}>
-              <Box display="flex" justifyContent="flex-start">
-                <TextField
-                  placeholder="Search picks..."
-                  size="small"
-                  onChange={handleSearchChange}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Search />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ width: 250 }}
-                />
-                <IconButton onClick={handleRefresh} disabled={loading} sx={{ ml: 1 }}>
-                  <Refresh />
-                </IconButton>
-              </Box>
-            </Grid>
-          </Grid>
         </Paper>
-      )}
 
-      {/* Tabs */}
-      <Paper sx={{ mb: 4 }}>
-        <Tabs value={tabIndex} onChange={(_, newValue) => setTabIndex(newValue)} centered>
-          <Tab label="All Picks" icon={<BarChart />} iconPosition="start" />
-          <Tab label="AI Generator" icon={<SmartToy />} iconPosition="start" />
-        </Tabs>
-      </Paper>
+        {/* Debug Panel */}
+        <DebugPanel />
 
-      {/* Tab 0: All Picks */}
-      {tabIndex === 0 && (
-        <>
-          {renderFilterBar()}
+        {/* Sport Selector */}
+        {renderSportSelector()}
 
-          {/* Parlays Section (if not standard market) */}
-          {selectedMarket !== 'standard' && filteredParlays.length > 0 && (
+        {/* Market Type Selector */}
+        {renderMarketSelector()}
+
+        {/* Freshness Indicator */}
+        {renderFreshnessIndicator()}
+
+        {/* Action Bar (only shown in All Picks tab) */}
+        {tabIndex === 0 && (
+          <Paper sx={{ p: 2, mb: 4, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={6}>
+                <Box display="flex" justifyContent="flex-start">
+                  <TextField
+                    placeholder="Search picks..."
+                    size="small"
+                    onChange={handleSearchChange}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Search />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ width: 250 }}
+                  />
+                  <IconButton onClick={handleRefresh} disabled={loading} sx={{ ml: 1 }}>
+                    <Refresh />
+                  </IconButton>
+                </Box>
+              </Grid>
+            </Grid>
+          </Paper>
+        )}
+
+        {/* Tabs */}
+        <Paper sx={{ mb: 4, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
+          <Tabs value={tabIndex} onChange={(_, newValue) => setTabIndex(newValue)} centered>
+            <Tab label="All Picks" icon={<BarChart />} iconPosition="start" />
+            <Tab label="AI Generator" icon={<SmartToy />} iconPosition="start" />
+          </Tabs>
+        </Paper>
+
+        {/* Tab 0: All Picks */}
+        {tabIndex === 0 && (
+          <>
+            {renderFilterBar()}
+
+            {/* Parlays Section (if not standard market) */}
+            {selectedMarket !== 'standard' && filteredParlays.length > 0 && (
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h5" fontWeight="bold" gutterBottom>
+                  {selectedMarket === 'same_game' && '🎮 Same Game Parlays'}
+                  {selectedMarket === 'teaser' && '📊 Teaser Recommendations'}
+                  {selectedMarket === 'round_robin' && '🔄 Round Robin Combinations'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  {selectedMarket === 'same_game' && 'Correlated plays from the same game maximize value'}
+                  {selectedMarket === 'teaser' && 'Adjusted spreads with increased win probability'}
+                  {selectedMarket === 'round_robin' && 'Multiple parlay combinations for reduced risk'}
+                </Typography>
+                {filteredParlays.map(renderParlayCard)}
+              </Box>
+            )}
+
+            {/* Standard Picks */}
             <Box sx={{ mb: 4 }}>
               <Typography variant="h5" fontWeight="bold" gutterBottom>
-                {selectedMarket === 'same_game' && '🎮 Same Game Parlays'}
-                {selectedMarket === 'teaser' && '📊 Teaser Recommendations'}
-                {selectedMarket === 'round_robin' && '🔄 Round Robin Combinations'}
+                ⭐ Top Value Picks {filteredPicks.length > 0 && `(${filteredPicks.length})`}
               </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                {selectedMarket === 'same_game' && 'Correlated plays from the same game maximize value'}
-                {selectedMarket === 'teaser' && 'Adjusted spreads with increased win probability'}
-                {selectedMarket === 'round_robin' && 'Multiple parlay combinations for reduced risk'}
-              </Typography>
-              {filteredParlays.map(renderParlayCard)}
+              {loading ? (
+                <Box display="flex" justifyContent="center" p={4}>
+                  <CircularProgress />
+                </Box>
+              ) : displayedPicks.length > 0 ? (
+                <>
+                  {displayedPicks.map((pick) => (
+                    <PickCard
+                      key={pick.id}
+                      pick={pick}
+                      onTrack={handleTrackPick}
+                      onAddToBetSlip={addToBetSlip}
+                      hasPremiumAccess={hasPremiumAccess}
+                    />
+                  ))}
+                  {displayedPicks.length < filteredPicks.length && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                      <Button variant="outlined" onClick={handleLoadMore}>
+                        Load More ({filteredPicks.length - displayedPicks.length} remaining)
+                      </Button>
+                    </Box>
+                  )}
+                </>
+              ) : (
+                <Alert severity="info">
+                  <AlertTitle>No Picks Found</AlertTitle>
+                  No picks match the current filters. Try adjusting your filters or sport selection.
+                </Alert>
+              )}
             </Box>
-          )}
+          </>
+        )}
 
-          {/* Standard Picks */}
+        {/* Tab 1: AI Generator */}
+        {tabIndex === 1 && (
           <Box sx={{ mb: 4 }}>
-            <Typography variant="h5" fontWeight="bold" gutterBottom>
-              ⭐ Top Value Picks {filteredPicks.length > 0 && `(${filteredPicks.length})`}
-            </Typography>
-            {loading ? (
-              <Box display="flex" justifyContent="center" p={4}>
-                <CircularProgress />
-              </Box>
-            ) : displayedPicks.length > 0 ? (
-              <>
-                {displayedPicks.map((pick) => (
-                  <PickCard
-                    key={pick.id}
-                    pick={pick}
-                    onTrack={handleTrackPick}
-                    onAddToBetSlip={addToBetSlip}
-                    hasPremiumAccess={hasPremiumAccess}
-                  />
-                ))}
-                {displayedPicks.length < filteredPicks.length && (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                    <Button variant="outlined" onClick={handleLoadMore}>
-                      Load More ({filteredPicks.length - displayedPicks.length} remaining)
-                    </Button>
-                  </Box>
+            {/* Generator Input */}
+            <Paper sx={{ p: 3, mb: 4, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AutoAwesome color="primary" />
+                Generate Custom Picks
+              </Typography>
+
+              {/* Remaining generations indicator */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Generations left today: <strong>{generationsRemaining}</strong>
+                </Typography>
+                {generationsRemaining === 0 && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setShowUpgradeModal(true)}
+                    sx={{ borderColor: '#f59e0b', color: '#f59e0b' }}
+                  >
+                    Buy more
+                  </Button>
                 )}
-              </>
+              </Box>
+
+              {/* Dropdowns + input row */}
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* Props Prompt Dropdown */}
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <Select
+                    value={selectedPrompt}
+                    onChange={(e) => {
+                      setSelectedPrompt(e.target.value);
+                      setCustomPrompt(e.target.value);
+                    }}
+                    displayEmpty
+                  >
+                    <MenuItem value=""><em>Props prompts</em></MenuItem>
+                    {UNIVERSAL_PROMPTS.map(prompt => (
+                      <MenuItem key={prompt} value={prompt}>{prompt}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                {/* Winner Prompts Dropdown */}
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <Select
+                    value={selectedWinnerPrompt}
+                    onChange={(e) => {
+                      setSelectedWinnerPrompt(e.target.value);
+                      setCustomPrompt(e.target.value);
+                    }}
+                    displayEmpty
+                  >
+                    <MenuItem value=""><em>Winner prompts</em></MenuItem>
+                    {WINNER_PROMPTS.map(prompt => (
+                      <MenuItem key={prompt} value={prompt}>{prompt}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  placeholder="Or type your own prompt..."
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  size="small"
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleGenerateCustomPicks}
+                  disabled={!customPrompt.trim() || generating || generationsRemaining <= 0}
+                  sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' } }}
+                >
+                  {generating ? 'Generating...' : 'Generate'}
+                </Button>
+              </Box>
+
+              {/* Quick Prompts */}
+              <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
+                Quick prompts
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {USEFUL_PROMPTS.flatMap((cat) => cat.prompts)
+                  .slice(0, 8)
+                  .map((prompt) => (
+                    <Chip
+                      key={prompt}
+                      label={prompt}
+                      onClick={() => {
+                        setCustomPrompt(prompt);
+                        setTimeout(() => handleGenerateCustomPicks(), 100);
+                      }}
+                      icon={<Search />}
+                      sx={{ cursor: 'pointer' }}
+                    />
+                  ))}
+              </Box>
+            </Paper>
+
+            {/* Generated Picks */}
+            <Typography variant="h6" gutterBottom>
+              Generated Picks {generatedPicks.length > 0 && `(${generatedPicks.length})`}
+            </Typography>
+            {generatedPicks.length > 0 ? (
+              generatedPicks.map((pick) => (
+                <PickCard
+                  key={pick.id}
+                  pick={pick}
+                  onTrack={handleTrackPick}
+                  onAddToBetSlip={addToBetSlip}
+                  hasPremiumAccess={hasPremiumAccess}
+                />
+              ))
             ) : (
               <Alert severity="info">
-                <AlertTitle>No Picks Found</AlertTitle>
-                No picks match the current filters. Try adjusting your filters or sport selection.
+                <AlertTitle>No generated picks yet</AlertTitle>
+                Enter a prompt above and click Generate to create AI-powered picks.
               </Alert>
             )}
           </Box>
-        </>
-      )}
+        )}
 
-      {/* Tab 1: AI Generator */}
-      {tabIndex === 1 && (
-        <Box sx={{ mb: 4 }}>
-          {/* Generator Input */}
-          <Paper sx={{ p: 3, mb: 4 }}>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <AutoAwesome color="primary" />
-              Generate Custom Picks
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-              <TextField
-                fullWidth
-                variant="outlined"
-                placeholder="Enter a prompt (e.g., 'Best over bets tonight', 'top scorers')..."
-                value={customPrompt}
-                onChange={(e) => setCustomPrompt(e.target.value)}
-                size="small"
-              />
-              <Button
-                variant="contained"
-                onClick={handleGenerateCustomPicks}
-                disabled={!customPrompt.trim() || generating}
-                sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' } }}
-              >
-                {generating ? 'Generating...' : 'Generate'}
-              </Button>
+        {/* Modals */}
+        <ParlayDetailsModal />
+        <PickDetailModal />
+
+        {/* Upgrade Modal – with purchase options */}
+        <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Lock sx={{ color: '#f59e0b' }} />
+              <Typography variant="h6">Need More Generations?</Typography>
             </Box>
-
-            {/* Quick Prompts */}
-            <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
-              Quick prompts
+          </DialogTitle>
+          <DialogContent>
+            <Typography paragraph>
+              You've used your {DAILY_LIMIT} daily generations. Upgrade or purchase extra to keep generating.
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              {USEFUL_PROMPTS.flatMap((cat) => cat.prompts)
-                .slice(0, 8)
-                .map((prompt) => (
-                  <Chip
-                    key={prompt}
-                    label={prompt}
-                    onClick={() => {
-                      setCustomPrompt(prompt);
-                      setTimeout(() => handleGenerateCustomPicks(), 100);
-                    }}
-                    icon={<Search />}
-                    sx={{ cursor: 'pointer' }}
-                  />
-                ))}
+            <Box sx={{ my: 3 }}>
+              {[
+                'Unlimited daily generations',
+                'Premium picks & analysis',
+                'Advanced AI models',
+                'No daily limits',
+                'Same game parlay recommendations',
+                'Correlation scores & teaser analysis',
+              ].map((feature) => (
+                <Box key={feature} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircle sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">{feature}</Typography>
+                </Box>
+              ))}
             </Box>
-          </Paper>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="h6" color="#10b981" gutterBottom>
+                      Extra Generations
+                    </Typography>
+                    <Typography variant="h4" fontWeight="bold">
+                      $3.99
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      +5 generations
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ mt: 2, bgcolor: '#10b981' }}
+                      onClick={() => handlePurchaseGenerations(5)}
+                    >
+                      Purchase
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={6}>
+                <Card variant="outlined" sx={{ borderColor: '#f59e0b', borderWidth: 2 }}>
+                  <CardContent>
+                    <Typography variant="h6" color="#f59e0b" gutterBottom>
+                      Full Access
+                    </Typography>
+                    <Typography variant="h4" fontWeight="bold">
+                      $14.99/mo
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Unlimited everything
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ mt: 2, bgcolor: '#f59e0b' }}
+                      onClick={() => {
+                        // Handle subscription (e.g., redirect to subscription page)
+                      }}
+                    >
+                      Subscribe
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
+          </DialogActions>
+        </Dialog>
 
-          {/* Generated Picks */}
-          <Typography variant="h6" gutterBottom>
-            Generated Picks {generatedPicks.length > 0 && `(${generatedPicks.length})`}
+        {/* Generating Modal */}
+        <Dialog open={showGeneratingModal} onClose={() => !generating && setShowGeneratingModal(false)}>
+          <DialogContent sx={{ textAlign: 'center', py: 4, px: 6 }}>
+            {generating ? (
+              <>
+                <CircularProgress size={48} sx={{ color: '#f59e0b', mb: 2 }} />
+                <Typography variant="h6" gutterBottom>
+                  Generating AI Picks...
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Fetching player props and filtering by your prompt
+                </Typography>
+              </>
+            ) : (
+              <>
+                <CheckCircle sx={{ fontSize: 48, color: '#10b981', mb: 2 }} />
+                <Typography variant="h6" gutterBottom>
+                  Picks Generated!
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  Your custom AI picks have been added to the AI Generator tab.
+                </Typography>
+                <Button variant="contained" onClick={() => setShowGeneratingModal(false)} sx={{ bgcolor: '#f59e0b' }}>
+                  View Results
+                </Button>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Footer watermark */}
+        <Box sx={{ mt: 6, textAlign: 'center', opacity: 0.3, fontSize: '0.8rem' }}>
+          <Typography variant="caption" color="text.secondary">
+            AI‑powered daily picks · data updated in real‑time
           </Typography>
-          {generatedPicks.length > 0 ? (
-            generatedPicks.map((pick) => (
-              <PickCard
-                key={pick.id}
-                pick={pick}
-                onTrack={handleTrackPick}
-                onAddToBetSlip={addToBetSlip}
-                hasPremiumAccess={hasPremiumAccess}
-              />
-            ))
-          ) : (
-            <Alert severity="info">
-              <AlertTitle>No generated picks yet</AlertTitle>
-              Enter a prompt above and click Generate to create AI-powered picks.
-            </Alert>
-          )}
         </Box>
-      )}
-
-      {/* Modals */}
-      <ParlayDetailsModal />
-      <PickDetailModal />
-
-      {/* Upgrade Modal */}
-      <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Lock sx={{ color: '#f59e0b' }} />
-            <Typography variant="h6">Premium Pick</Typography>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Typography paragraph>This pick requires a premium subscription. Upgrade to access all premium content.</Typography>
-          <Box sx={{ my: 3 }}>
-            {[
-              'Unlimited daily generations',
-              'Premium picks & analysis',
-              'Advanced AI models',
-              'No daily limits',
-              'Same game parlay recommendations',
-              'Correlation scores & teaser analysis',
-            ].map((feature) => (
-              <Box key={feature} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <CheckCircle sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
-                <Typography variant="body2">{feature}</Typography>
-              </Box>
-            ))}
-          </Box>
-          <Grid container spacing={2}>
-            <Grid item xs={6}>
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography variant="h6" color="#10b981" gutterBottom>
-                    Generation Pack
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold">
-                    $3.99
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    10 extra generations
-                  </Typography>
-                  <Button fullWidth variant="contained" sx={{ mt: 2, bgcolor: '#10b981' }}>
-                    Purchase
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={6}>
-              <Card variant="outlined" sx={{ borderColor: '#f59e0b', borderWidth: 2 }}>
-                <CardContent>
-                  <Typography variant="h6" color="#f59e0b" gutterBottom>
-                    Full Access
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold">
-                    $14.99/mo
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Unlimited everything
-                  </Typography>
-                  <Button fullWidth variant="contained" sx={{ mt: 2, bgcolor: '#f59e0b' }}>
-                    Subscribe
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Generating Modal */}
-      <Dialog open={showGeneratingModal} onClose={() => !generating && setShowGeneratingModal(false)}>
-        <DialogContent sx={{ textAlign: 'center', py: 4, px: 6 }}>
-          {generating ? (
-            <>
-              <CircularProgress size={48} sx={{ color: '#f59e0b', mb: 2 }} />
-              <Typography variant="h6" gutterBottom>
-                Generating AI Picks...
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Fetching player props and filtering by your prompt
-              </Typography>
-            </>
-          ) : (
-            <>
-              <CheckCircle sx={{ fontSize: 48, color: '#10b981', mb: 2 }} />
-              <Typography variant="h6" gutterBottom>
-                Picks Generated!
-              </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                Your custom AI picks have been added to the AI Generator tab.
-              </Typography>
-              <Button variant="contained" onClick={() => setShowGeneratingModal(false)} sx={{ bgcolor: '#f59e0b' }}>
-                View Results
-              </Button>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-    </Container>
+      </Container>
+    </>
   );
 };
 

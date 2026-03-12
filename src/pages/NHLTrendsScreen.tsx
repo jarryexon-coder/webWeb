@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -18,11 +18,6 @@ import {
   CircularProgress,
   Avatar,
   Divider,
-  List,
-  ListItem,
-  ListItemAvatar,
-  ListItemText,
-  ListItemSecondaryAction,
   Table,
   TableBody,
   TableCell,
@@ -50,7 +45,6 @@ import {
   Info as InfoIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
-  CalendarToday as CalendarIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon
 } from '@mui/icons-material';
@@ -222,6 +216,8 @@ const NHLTeams: Record<string, { name: string; color: string }> = {
   COL: { name: 'Avalanche', color: '#6F263D' },
   DAL: { name: 'Stars', color: '#006847' },
   EDM: { name: 'Oilers', color: '#041E42' },
+  VGK: { name: 'Golden Knights', color: '#B4975A' },
+  PIT: { name: 'Penguins', color: '#FCB514' },
   // Add more as needed
 };
 
@@ -229,7 +225,43 @@ const getTeamColor = (teamCode: string): string => {
   return NHLTeams[teamCode]?.color || '#64748b';
 };
 
-// ========== FULL MOCK DATA FOR FEBRUARY 2026 ==========
+// Team strength ratings (approximate, based on 2025-26 performance)
+const teamStrength: Record<string, number> = {
+  BOS: 85,
+  TOR: 82,
+  TB: 80,
+  FLA: 78,
+  DET: 70,
+  COL: 88,
+  DAL: 84,
+  EDM: 86,
+  VGK: 83,
+  PIT: 75,
+  NYR: 82,
+  CAR: 84,
+  NJD: 79,
+  PHI: 68,
+  WSH: 72,
+  OTT: 65,
+  BUF: 67,
+  MTL: 62,
+  CBJ: 60,
+  NYI: 73,
+  MIN: 76,
+  WPG: 77,
+  STL: 71,
+  NSH: 69,
+  CHI: 58,
+  ARI: 55,
+  SEA: 70,
+  LAK: 74,
+  ANA: 59,
+  SJS: 54,
+  VAN: 66,
+  CGY: 64,
+};
+
+// ========== FULL MOCK DATA FOR FEBRUARY 2026 (FALLBACK) ==========
 const mockTradeDeadline: TradeDeadline = {
   date: '2026-03-07',
   days_remaining: 22,
@@ -304,6 +336,7 @@ const mockStandings = {
   }
 };
 
+// Base mock game with full details – used as fallback and for fields not yet provided by API
 const mockGames: NHLGame[] = [
   {
     id: '1',
@@ -500,10 +533,129 @@ const mockPlayers = [
   { id: 6, name: 'Leon Draisaitl', team: 'EDM', goals: 35, assists: 48, points: 83, position: 'C', teamColor: '#041E42' },
 ];
 
+// ===== HELPER: Generate default odds and stats for any game =====
+const generateDefaultGameDetails = (game: NHLGame): Partial<NHLGame> => {
+  // Default odds: home slight favorite, typical spread, total around 6
+  const defaultOdds = {
+    moneyline: {
+      home: -120,
+      away: +100,
+      home_decimal: 1.83,
+      away_decimal: 2.00,
+      home_implied_probability: 0.545,
+      away_implied_probability: 0.5
+    },
+    spread: {
+      home: -1.5,
+      home_odds: +150,
+      away: 1.5,
+      away_odds: -180
+    },
+    total: {
+      line: 6.0,
+      over: -110,
+      under: -110
+    }
+  };
+
+  // Default team stats: .500 records, league average percentages
+  const defaultTeamStats = {
+    record: '20-20-5',
+    win_pct: 0.500,
+    gpg: 3.2,
+    gapg: 3.2,
+    pp_pct: 20.0,
+    pk_pct: 80.0,
+    faceoff_pct: 50.0,
+    corsi_pct: 50.0,
+    pdo: 100.0,
+    home_record: '12-8-2',
+    away_record: '8-12-3',
+    last_10: '5-5-0',
+    streak: 'W1'
+  };
+
+  // Compute confidence score based on team strengths
+  const homeStrength = teamStrength[game.home_team] || 50;
+  const awayStrength = teamStrength[game.away_team] || 50;
+  const strengthDiff = Math.abs(homeStrength - awayStrength);
+  // Map diff (0 to ~40) to confidence (90 down to 40)
+  let confidence = Math.max(40, Math.min(90, 90 - strengthDiff));
+  // Add small randomness (±5)
+  confidence += Math.floor(Math.random() * 10) - 5;
+  confidence = Math.max(40, Math.min(90, confidence));
+
+  // Determine confidence level based on score
+  let confidenceLevel: 'Very High' | 'High' | 'Medium' | 'Low' | 'Very Low' = 'Medium';
+  if (confidence >= 80) confidenceLevel = 'Very High';
+  else if (confidence >= 70) confidenceLevel = 'High';
+  else if (confidence >= 50) confidenceLevel = 'Medium';
+  else if (confidence >= 40) confidenceLevel = 'Low';
+  else confidenceLevel = 'Very Low';
+
+  return {
+    odds: defaultOdds,
+    team_stats: {
+      home: defaultTeamStats,
+      away: defaultTeamStats
+    },
+    player_props: [],
+    fantasy_projections: [],
+    parlay_recommendations: [],
+    confidence_score: Math.round(confidence),
+    confidence_level: confidenceLevel
+  };
+};
+
+// ===== NEW: Enrich a basic game with details (API, mock, or default) =====
+const enrichGameWithDetails = async (basicGame: NHLGame): Promise<NHLGame> => {
+  try {
+    // Try to fetch real details
+    const response = await fetch(`${API_BASE_URL}/api/nhl/game/${basicGame.id}/details`);
+    const data = await response.json();
+    if (data.success && data.game) {
+      return {
+        ...basicGame,
+        team_stats: data.game.team_stats,
+        odds: data.game.odds,
+        player_props: data.game.player_props,
+        fantasy_projections: data.game.fantasy_projections,
+        parlay_recommendations: data.game.parlay_recommendations,
+        confidence_score: data.game.confidence_score,
+        confidence_level: data.game.confidence_level,
+      };
+    }
+  } catch (error) {
+    console.error('Error fetching game details:', error);
+  }
+
+  // Try mock data by ID
+  const mockGame = mockGames.find(g => g.id === basicGame.id);
+  if (mockGame) {
+    return {
+      ...basicGame,
+      team_stats: mockGame.team_stats,
+      odds: mockGame.odds,
+      player_props: mockGame.player_props,
+      fantasy_projections: mockGame.fantasy_projections,
+      parlay_recommendations: mockGame.parlay_recommendations,
+      confidence_score: mockGame.confidence_score,
+      confidence_level: mockGame.confidence_level,
+    };
+  }
+
+  // Fallback to default data
+  const defaultDetails = generateDefaultGameDetails(basicGame);
+  return {
+    ...basicGame,
+    ...defaultDetails,
+  };
+};
+
 const NHLTrendsScreen = () => {
   const navigate = useNavigate();
   const theme = useTheme();
-  
+
   // State from original
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -514,7 +666,7 @@ const NHLTrendsScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  
+
   // NEW STATE from enhanced NHL screen
   const [games, setGames] = useState<NHLGame[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -525,6 +677,31 @@ const NHLTrendsScreen = () => {
   const [tradeDeadline, setTradeDeadline] = useState<TradeDeadline | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [showFourNations, setShowFourNations] = useState(true);
+  const [players, setPlayers] = useState<any[]>([]); // real players for tab 2
+
+  // timestamp ref for back button guard
+  const lastSelectedTime = useRef(0);
+
+  // Add a ref to track if the component is mounted
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      console.log('🔴 NHLTrendsScreen unmounting');
+    };
+  }, []);
+
+  // Monitor selectedGame changes
+  useEffect(() => {
+    console.log('selectedGame changed:', selectedGame?.id);
+  }, [selectedGame]);
+
+  // Monitor viewMode changes
+  useEffect(() => {
+    console.log('viewMode changed:', viewMode);
+  }, [viewMode]);
 
   // Load favorites from localStorage
   useEffect(() => {
@@ -548,42 +725,136 @@ const NHLTrendsScreen = () => {
     setSelectedDate(date.toISOString().split('T')[0]);
   };
 
-  // Fetch NHL data (updated for 2026) – FIXED: always set games to an array
+  // Transform API standings to the format expected by the screen
+  const transformStandings = (apiStandings: any[]) => {
+    const eastern = { atlantic: [] as any[], metropolitan: [] as any[] };
+    const western = { central: [] as any[], pacific: [] as any[] };
+
+    apiStandings.forEach((team) => {
+      const entry = {
+        team: team.abbreviation,
+        wins: team.wins,
+        losses: team.losses,
+        otl: team.ot_losses,
+        points: team.points
+      };
+      if (team.conference === 'Eastern') {
+        if (team.division === 'Atlantic') eastern.atlantic.push(entry);
+        else if (team.division === 'Metropolitan') eastern.metropolitan.push(entry);
+      } else if (team.conference === 'Western') {
+        if (team.division === 'Central') western.central.push(entry);
+        else if (team.division === 'Pacific') western.pacific.push(entry);
+      }
+    });
+
+    // Sort by points descending
+    eastern.atlantic.sort((a, b) => b.points - a.points);
+    eastern.metropolitan.sort((a, b) => b.points - a.points);
+    western.central.sort((a, b) => b.points - a.points);
+    western.pacific.sort((a, b) => b.points - a.points);
+
+    return { eastern, western };
+  };
+
+  // Fetch NHL data (games and standings) from real endpoints
   const fetchNHLGames = async (date: string, showTournament: boolean = true) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const url = `${API_BASE_URL}/api/nhl/games?date=${date}&props=true&parlay_ready=true`;
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (data.success) {
-        // Ensure games is an array before using filter
-        let filteredGames = data.games || [];
-        if (!showTournament) {
-          filteredGames = filteredGames.filter((game: NHLGame) => !game.tournament);
-        }
-        setGames(filteredGames);
-        setLeagueLeaders(data.league_leaders || mockLeagueLeaders);
-        setStandings(data.standings || mockStandings);
-        setTradeDeadline(data.trade_deadline || mockTradeDeadline);
-        setSuccessMessage('NHL data updated');
+
+      // Fetch games
+      const gamesUrl = `${API_BASE_URL}/api/nhl/games?date=${date}`;
+      const gamesRes = await fetch(gamesUrl);
+      const gamesData = await gamesRes.json();
+
+      let basicGames: NHLGame[] = [];
+
+      if (gamesData.games && Array.isArray(gamesData.games)) {
+        // Helper to derive abbreviation from full name if missing
+        const deriveAbbrev = (fullName: string) =>
+          fullName ? fullName.split(' ').map(w => w[0]).join('').toUpperCase() : '???';
+
+        const emptyStats = {
+          record: '', win_pct: 0, gpg: 0, gapg: 0, pp_pct: 0, pk_pct: 0,
+          faceoff_pct: 0, corsi_pct: 0, pdo: 0, home_record: '', away_record: '',
+          last_10: '', streak: ''
+        };
+
+        basicGames = gamesData.games.map((g: any) => {
+          const homeAbbrev = g.home_abbrev || deriveAbbrev(g.home_team);
+          const awayAbbrev = g.away_abbrev || deriveAbbrev(g.away_team);
+          const status = g.status
+            ? g.status.charAt(0).toUpperCase() + g.status.slice(1)
+            : 'Scheduled';
+
+          return {
+            id: g.id,
+            home_team: homeAbbrev,
+            home_full: g.home_team || homeAbbrev,
+            away_team: awayAbbrev,
+            away_full: g.away_team || awayAbbrev,
+            date: g.date,
+            time: g.time || '7:00 PM',
+            venue: g.venue || 'NHL Arena',
+            tv: g.tv || 'NHL Network',
+            note: '',
+            division: '',
+            sport: 'NHL' as const,
+            season: '2025-26' as const,
+            game_type: 'Regular Season' as const,
+            tournament: false,
+            odds: {
+              moneyline: { home: 0, away: 0, home_decimal: 0, away_decimal: 0, home_implied_probability: 0, away_implied_probability: 0 },
+              spread: { home: 0, home_odds: 0, away: 0, away_odds: 0 },
+              total: { line: 0, over: 0, under: 0 }
+            },
+            player_props: [],
+            fantasy_projections: [],
+            parlay_recommendations: [],
+            confidence_score: 0,
+            confidence_level: 'Medium' as const,
+            team_stats: { home: emptyStats, away: emptyStats },
+            status: status as 'Scheduled' | 'Live' | 'Final' | 'Upcoming',
+            trade_deadline_impact: false,
+            playoff_implications: false
+          };
+        });
       } else {
-        // Fallback to mock data
-        setGames(mockGames);
-        setLeagueLeaders(mockLeagueLeaders);
-        setStandings(mockStandings);
-        setTradeDeadline(mockTradeDeadline);
-        setError('Using mock data - live API unavailable');
+        throw new Error('Invalid games response');
       }
-    } catch (err) {
-      console.error('Error fetching NHL games:', err);
-      setError('Failed to load real data. Using mock data.');
-      // Fallback
-      setGames(mockGames);
+
+      // Enrich each game with details (odds, team stats, etc.)
+      const enrichedGames = await Promise.all(basicGames.map(enrichGameWithDetails));
+
+      let filteredGames = enrichedGames;
+      if (!showTournament) {
+        filteredGames = filteredGames.filter((game: NHLGame) => !game.tournament);
+      }
+      setGames(filteredGames);
+
+      // Fetch standings
+      const standingsUrl = `${API_BASE_URL}/api/nhl/standings`;
+      const standingsRes = await fetch(standingsUrl);
+      const standingsData = await standingsRes.json();
+
+      if (standingsData.success && standingsData.standings) {
+        const transformed = transformStandings(standingsData.standings);
+        setStandings(transformed);
+      } else {
+        setStandings(mockStandings);
+      }
+
+      // For now, keep league leaders and trade deadline as mock (could be fetched later)
       setLeagueLeaders(mockLeagueLeaders);
+      setTradeDeadline(mockTradeDeadline);
+
+      setSuccessMessage('NHL data updated');
+    } catch (err) {
+      console.error('Error fetching NHL data:', err);
+      setError('Failed to load real data. Using mock data.');
+      setGames(mockGames);
       setStandings(mockStandings);
+      setLeagueLeaders(mockLeagueLeaders);
       setTradeDeadline(mockTradeDeadline);
     } finally {
       setLoading(false);
@@ -596,6 +867,36 @@ const NHLTrendsScreen = () => {
     fetchNHLGames(selectedDate, showFourNations);
   }, [selectedDate, showFourNations]);
 
+  // Fetch real players when Players tab is active
+  useEffect(() => {
+    if (activeTab === 2) {
+      const fetchPlayers = async () => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/players?sport=nhl&realtime=true&limit=100`);
+          const data = await res.json();
+          if (data.success && data.data?.players) {
+            const transformed = data.data.players.map((p: any, idx: number) => ({
+              id: idx + 1,
+              name: p.name,
+              team: p.team,
+              goals: p.goals || 0,
+              assists: p.assists || 0,
+              points: (p.goals || 0) + (p.assists || 0),
+              position: p.position || 'N/A',
+              teamColor: getTeamColor(p.team)
+            }));
+            setPlayers(transformed);
+          } else {
+            setPlayers(mockPlayers);
+          }
+        } catch {
+          setPlayers(mockPlayers);
+        }
+      };
+      fetchPlayers();
+    }
+  }, [activeTab]);
+
   const handleRefresh = () => {
     setRefreshing(true);
     fetchNHLGames(selectedDate, showFourNations);
@@ -606,11 +907,11 @@ const NHLTrendsScreen = () => {
     if (searchInput.trim()) {
       const query = searchInput.trim();
       setSearchQuery(query);
-      
+
       if (!searchHistory.includes(query)) {
         setSearchHistory([query, ...searchHistory.slice(0, 4)]);
       }
-      
+
       // Perform search - you can expand this later
       // For now, just set query
     }
@@ -625,6 +926,51 @@ const NHLTrendsScreen = () => {
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
   };
+
+  // ========== MEMOIZED HANDLERS FOR BUTTONS ==========
+  const setSelectedGameCallback = useCallback((game: NHLGame | null) => {
+    if (!isMounted.current) return;
+    console.log('setSelectedGame', game?.id);
+    if (game === null) {
+      console.trace('setSelectedGame to undefined');
+      setSelectedGame(null);
+    } else {
+      // Record the selection time (for back‑button guard)
+      lastSelectedTime.current = Date.now();
+      setSelectedGame(game);
+    }
+  }, []);
+
+  const setViewModeCallback = useCallback((mode: typeof viewMode) => {
+    if (!isMounted.current) return;
+    console.log('setViewMode', mode);
+    setViewMode(mode);
+  }, []);
+
+  // Updated handlers with event stopping to prevent navigation
+  const handleDetailsClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
+    e.stopPropagation();
+    e.preventDefault();
+    console.log('Details clicked', game.id);
+    setSelectedGameCallback(game);
+    setViewModeCallback('games');
+  }, [setSelectedGameCallback, setViewModeCallback]);
+
+  const handleParlayClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
+    e.stopPropagation();
+    e.preventDefault();
+    console.log('Parlay clicked', game.id);
+    setSelectedGameCallback(game);
+    setViewModeCallback('parlays');
+  }, [setSelectedGameCallback, setViewModeCallback]);
+
+  const handleFantasyClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
+    e.stopPropagation();
+    e.preventDefault();
+    console.log('Fantasy clicked', game.id);
+    setSelectedGameCallback(game);
+    setViewModeCallback('fantasy');
+  }, [setSelectedGameCallback, setViewModeCallback]);
 
   // ========== RENDER COMPONENTS ==========
 
@@ -699,7 +1045,7 @@ const NHLTrendsScreen = () => {
         <Chip
           key={mode}
           label={mode.charAt(0).toUpperCase() + mode.slice(1)}
-          onClick={() => setViewMode(mode)}
+          onClick={() => setViewModeCallback(mode)}
           color={viewMode === mode ? 'primary' : 'default'}
           variant={viewMode === mode ? 'filled' : 'outlined'}
           icon={
@@ -714,7 +1060,7 @@ const NHLTrendsScreen = () => {
     </Paper>
   );
 
-  // Enhanced Game Card with optional chaining
+  // Enhanced Game Card with memoized handlers
   const renderGameCard = (game: NHLGame) => (
     <Card
       key={game.id}
@@ -834,16 +1180,16 @@ const NHLTrendsScreen = () => {
           </Box>
         </Box>
 
-        {/* Quick Action Buttons */}
+        {/* Quick Action Buttons – using memoized handlers with event */}
         <Divider sx={{ my: 2 }} />
         <Box display="flex" justifyContent="space-around">
-          <Button size="small" startIcon={<InfoIcon />} onClick={() => setSelectedGame(game)}>
+          <Button size="small" startIcon={<InfoIcon />} onClick={(e) => handleDetailsClick(e, game)}>
             Details
           </Button>
-          <Button size="small" startIcon={<TrendingUpIcon />} onClick={() => { setSelectedGame(game); setViewMode('parlays'); }}>
+          <Button size="small" startIcon={<TrendingUpIcon />} onClick={(e) => handleParlayClick(e, game)}>
             Parlay
           </Button>
-          <Button size="small" startIcon={<EmojiEventsIcon />} onClick={() => { setSelectedGame(game); setViewMode('fantasy'); }}>
+          <Button size="small" startIcon={<EmojiEventsIcon />} onClick={(e) => handleFantasyClick(e, game)}>
             Fantasy
           </Button>
         </Box>
@@ -855,43 +1201,47 @@ const NHLTrendsScreen = () => {
   const renderPlayerProps = (game: NHLGame) => (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">🎯 Player Props</Typography>
-      {game.player_props?.map((propGroup, idx) => (
-        <Card key={idx} sx={{ mb: 3 }}>
-          <CardContent>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Box>
-                <Typography variant="h6" fontWeight="bold">{propGroup.player}</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {propGroup.team} • #{propGroup.jersey} • {propGroup.position}
-                </Typography>
-              </Box>
-              {propGroup.confidence && (
-                <Chip label={`${propGroup.confidence}% Conf`} color="primary" size="small" />
-              )}
-            </Box>
-            {propGroup.props.map((prop, i) => (
-              <Box key={i} display="flex" justifyContent="space-between" alignItems="center" py={1} borderBottom={i < propGroup.props.length-1 ? 1 : 0} borderColor="divider">
+      {game.player_props && game.player_props.length > 0 ? (
+        game.player_props.map((propGroup, idx) => (
+          <Card key={idx} sx={{ mb: 3 }}>
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                 <Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    {prop.stat} O/U {prop.line}
+                  <Typography variant="h6" fontWeight="bold">{propGroup.player}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {propGroup.team} • #{propGroup.jersey} • {propGroup.position}
                   </Typography>
-                  <Box display="flex" gap={2}>
-                    {prop.season_avg && <Typography variant="caption">Season: {prop.season_avg.toFixed(1)}</Typography>}
-                    {prop.last_10_avg && <Typography variant="caption" color="success.main">Last 10: {prop.last_10_avg.toFixed(1)}</Typography>}
+                </Box>
+                {propGroup.confidence && (
+                  <Chip label={`${propGroup.confidence}% Conf`} color="primary" size="small" />
+                )}
+              </Box>
+              {propGroup.props.map((prop, i) => (
+                <Box key={i} display="flex" justifyContent="space-between" alignItems="center" py={1} borderBottom={i < propGroup.props.length-1 ? 1 : 0} borderColor="divider">
+                  <Box>
+                    <Typography variant="body2" fontWeight="medium">
+                      {prop.stat} O/U {prop.line}
+                    </Typography>
+                    <Box display="flex" gap={2}>
+                      {prop.season_avg && <Typography variant="caption">Season: {prop.season_avg.toFixed(1)}</Typography>}
+                      {prop.last_10_avg && <Typography variant="caption" color="success.main">Last 10: {prop.last_10_avg.toFixed(1)}</Typography>}
+                    </Box>
+                  </Box>
+                  <Box textAlign="right">
+                    <Typography variant="body2" fontWeight="bold">O {prop.over_odds > 0 ? '+' : ''}{prop.over_odds}</Typography>
+                    <Typography variant="caption">U {prop.under_odds > 0 ? '+' : ''}{prop.under_odds}</Typography>
                   </Box>
                 </Box>
-                <Box textAlign="right">
-                  <Typography variant="body2" fontWeight="bold">O {prop.over_odds > 0 ? '+' : ''}{prop.over_odds}</Typography>
-                  <Typography variant="caption">U {prop.under_odds > 0 ? '+' : ''}{prop.under_odds}</Typography>
-                </Box>
-              </Box>
-            ))}
-            {propGroup.analysis && (
-              <Alert severity="info" sx={{ mt: 2 }}>{propGroup.analysis}</Alert>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+              ))}
+              {propGroup.analysis && (
+                <Alert severity="info" sx={{ mt: 2 }}>{propGroup.analysis}</Alert>
+              )}
+            </CardContent>
+          </Card>
+        ))
+      ) : (
+        <Alert severity="info">No player props available for this game.</Alert>
+      )}
     </Box>
   );
 
@@ -899,30 +1249,34 @@ const NHLTrendsScreen = () => {
   const renderParlayRecommendations = (game: NHLGame) => (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">🎲 Parlay Recommendations</Typography>
-      {game.parlay_recommendations?.map((parlay, idx) => (
-        <Card key={idx} sx={{ mb: 3 }}>
-          <CardContent>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
-              <Chip label={parlay.combined_odds} color="success" />
-            </Box>
-            {parlay.legs.map((leg, i) => (
-              <Box key={i} display="flex" justifyContent="space-between" py={0.5}>
-                <Typography variant="body2">{leg.player || leg.team} • {leg.bet} {leg.stat} {leg.line && ` ${leg.line}+`}</Typography>
-                <Typography variant="body2" fontWeight="medium">{leg.odds > 0 ? '+' : ''}{leg.odds}</Typography>
+      {game.parlay_recommendations && game.parlay_recommendations.length > 0 ? (
+        game.parlay_recommendations.map((parlay, idx) => (
+          <Card key={idx} sx={{ mb: 3 }}>
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
+                <Chip label={parlay.combined_odds} color="success" />
               </Box>
-            ))}
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" color="text.secondary" fontStyle="italic">
-              {parlay.analysis}
-            </Typography>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
-              <Typography variant="caption">Confidence: {parlay.confidence}%</Typography>
-              <Button variant="contained" size="small">Build This Parlay</Button>
-            </Box>
-          </CardContent>
-        </Card>
-      ))}
+              {parlay.legs.map((leg, i) => (
+                <Box key={i} display="flex" justifyContent="space-between" py={0.5}>
+                  <Typography variant="body2">{leg.player || leg.team} • {leg.bet} {leg.stat} {leg.line && ` ${leg.line}+`}</Typography>
+                  <Typography variant="body2" fontWeight="medium">{leg.odds > 0 ? '+' : ''}{leg.odds}</Typography>
+                </Box>
+              ))}
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="body2" color="text.secondary" fontStyle="italic">
+                {parlay.analysis}
+              </Typography>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
+                <Typography variant="caption">Confidence: {parlay.confidence}%</Typography>
+                <Button variant="contained" size="small">Build This Parlay</Button>
+              </Box>
+            </CardContent>
+          </Card>
+        ))
+      ) : (
+        <Alert severity="info">No parlay recommendations available for this game.</Alert>
+      )}
     </Box>
   );
 
@@ -930,37 +1284,41 @@ const NHLTrendsScreen = () => {
   const renderFantasyProjections = (game: NHLGame) => (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">📊 Fantasy Projections</Typography>
-      <TableContainer component={Paper}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Player</TableCell>
-              <TableCell align="right">DK Pts</TableCell>
-              <TableCell align="right">Salary</TableCell>
-              <TableCell align="right">Value</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {game.fantasy_projections?.map((proj, idx) => (
-              <TableRow key={idx}>
-                <TableCell>
-                  <Typography variant="body2" fontWeight="medium">{proj.player}</Typography>
-                  <Typography variant="caption">{proj.team} • {proj.position}</Typography>
-                </TableCell>
-                <TableCell align="right">{proj.fantasy_points_projected}</TableCell>
-                <TableCell align="right">${proj.salary_dk.toLocaleString()}</TableCell>
-                <TableCell align="right">
-                  <Chip
-                    label={proj.value_rating.toFixed(2)}
-                    size="small"
-                    color={proj.value_rating > 2.5 ? 'success' : 'default'}
-                  />
-                </TableCell>
+      {game.fantasy_projections && game.fantasy_projections.length > 0 ? (
+        <TableContainer component={Paper}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Player</TableCell>
+                <TableCell align="right">DK Pts</TableCell>
+                <TableCell align="right">Salary</TableCell>
+                <TableCell align="right">Value</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {game.fantasy_projections.map((proj, idx) => (
+                <TableRow key={idx}>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">{proj.player}</Typography>
+                    <Typography variant="caption">{proj.team} • {proj.position}</Typography>
+                  </TableCell>
+                  <TableCell align="right">{proj.fantasy_points_projected}</TableCell>
+                  <TableCell align="right">${proj.salary_dk.toLocaleString()}</TableCell>
+                  <TableCell align="right">
+                    <Chip
+                      label={proj.value_rating.toFixed(2)}
+                      size="small"
+                      color={proj.value_rating > 2.5 ? 'success' : 'default'}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      ) : (
+        <Alert severity="info">No fantasy projections available for this game.</Alert>
+      )}
     </Box>
   );
 
@@ -1043,9 +1401,8 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Original standings table (from file 2) – FIXED: added guard for games and standings
+  // Original standings table (from file 2) – uses real data if available
   const renderStandingsTable = () => {
-    // Use standings from state, fallback to mock if needed
     const data = standings || mockStandings;
     return (
       <Card sx={{ mb: 3 }}>
@@ -1055,10 +1412,10 @@ const NHLTrendsScreen = () => {
               NHL Standings
             </Typography>
             <Chip 
-              label={games.length > 0 ? "Real Data" : "Mock Data"} 
-              color={games.length > 0 ? "success" : "warning"} 
+              label={games.some(g => g.venue !== 'NHL Arena') ? "Real Data" : "Mock Data"} 
+              color={games.some(g => g.venue !== 'NHL Arena') ? "success" : "warning"} 
               size="small" 
-              icon={games.length > 0 ? <InfoIcon /> : <WarningIcon />}
+              icon={games.some(g => g.venue !== 'NHL Arena') ? <InfoIcon /> : <WarningIcon />}
             />
           </Box>
           
@@ -1098,16 +1455,17 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Original games list (for activeTab=1) – FIXED: guard for games
+  // Original games list (for activeTab=1) – uses real games if available
   const renderGamesList = () => {
-    if (!games || games.length === 0) {
+    const data = games.length > 0 ? games : mockGames;
+    if (data.length === 0) {
       return <Alert severity="info">No games available.</Alert>;
     }
     return (
       <Grid container spacing={2}>
-        {games.map((game) => (
+        {data.map((game) => (
           <Grid item xs={12} key={game.id}>
-            <Card sx={{ transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)', boxShadow: 6, cursor: 'pointer' } }} onClick={() => setSelectedGame(game)}>
+            <Card sx={{ transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)', boxShadow: 6, cursor: 'pointer' } }} onClick={(e) => handleDetailsClick(e, game)}>
               <CardContent>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                   <Typography variant="body2" color="text.secondary">
@@ -1143,59 +1501,101 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Original players list (for activeTab=2) – safe because mockPlayers is static
-  const renderPlayersList = () => (
-    <Card>
-      <CardContent>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h5" fontWeight="bold">Top Scorers - 2025-2026 Season</Typography>
-          <Chip label="Mock Data" color="warning" size="small" icon={<WarningIcon />} />
-        </Box>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow sx={{ backgroundColor: 'action.hover' }}>
-                <TableCell>#</TableCell>
-                <TableCell>Player</TableCell>
-                <TableCell align="center">G</TableCell>
-                <TableCell align="center">A</TableCell>
-                <TableCell align="center">PTS</TableCell>
-                <TableCell align="center">Position</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {mockPlayers.map((player, index) => (
-                <TableRow key={player.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate('/player-stats', { state: { player: player.name, sport: 'nhl' } })}>
-                  <TableCell><Typography fontWeight="bold" color="text.secondary">{index + 1}</Typography></TableCell>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={2}>
-                      <Avatar sx={{ bgcolor: player.teamColor, width: 36, height: 36 }}>{player.name.charAt(0)}</Avatar>
-                      <Box>
-                        <Typography fontWeight="bold">{player.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">{player.team}</Typography>
-                      </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell align="center"><Typography fontWeight="bold">{player.goals}</Typography></TableCell>
-                  <TableCell align="center"><Typography fontWeight="bold">{player.assists}</Typography></TableCell>
-                  <TableCell align="center"><Typography fontWeight="bold" color="error.main">{player.points}</Typography></TableCell>
-                  <TableCell align="center"><Chip label={player.position} size="small" variant="outlined" sx={{ fontWeight: 'medium' }} /></TableCell>
+  // Original players list (for activeTab=2) – uses real players if fetched
+  const renderPlayersList = () => {
+    const data = players.length > 0 ? players : mockPlayers;
+    return (
+      <Card>
+        <CardContent>
+          <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+            <Typography variant="h5" fontWeight="bold">Top Scorers - 2025-2026 Season</Typography>
+            <Chip label={players.length > 0 ? "Real Data" : "Mock Data"} color={players.length > 0 ? "success" : "warning"} size="small" icon={players.length > 0 ? <InfoIcon /> : <WarningIcon />} />
+          </Box>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow sx={{ backgroundColor: 'action.hover' }}>
+                  <TableCell>#</TableCell>
+                  <TableCell>Player</TableCell>
+                  <TableCell align="center">G</TableCell>
+                  <TableCell align="center">A</TableCell>
+                  <TableCell align="center">PTS</TableCell>
+                  <TableCell align="center">Position</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </CardContent>
-    </Card>
-  );
+              </TableHead>
+              <TableBody>
+                {data.map((player, index) => (
+                  <TableRow key={player.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate('/player-stats', { state: { player: player.name, sport: 'nhl' } })}>
+                    <TableCell><Typography fontWeight="bold" color="text.secondary">{index + 1}</Typography></TableCell>
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={2}>
+                        <Avatar sx={{ bgcolor: player.teamColor, width: 36, height: 36 }}>{player.name.charAt(0)}</Avatar>
+                        <Box>
+                          <Typography fontWeight="bold">{player.name}</Typography>
+                          <Typography variant="caption" color="text.secondary">{player.team}</Typography>
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell align="center"><Typography fontWeight="bold">{player.goals}</Typography></TableCell>
+                    <TableCell align="center"><Typography fontWeight="bold">{player.assists}</Typography></TableCell>
+                    <TableCell align="center"><Typography fontWeight="bold" color="error.main">{player.points}</Typography></TableCell>
+                    <TableCell align="center"><Chip label={player.position} size="small" variant="outlined" sx={{ fontWeight: 'medium' }} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
+    );
+  };
 
-  // Detailed Game View
+  // Detailed Game View – now includes a summary for 'games' mode
   const renderDetailedGameView = () => {
     if (!selectedGame) return null;
+
+    const renderGameSummary = () => (
+      <Box>
+        <Typography variant="h5" gutterBottom>Game Summary</Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={6}>
+            <Typography variant="h6">{selectedGame.home_full}</Typography>
+            <Typography>Record: {selectedGame.team_stats?.home?.record || 'N/A'}</Typography>
+            <Typography>Goals/Game: {selectedGame.team_stats?.home?.gpg || 'N/A'}</Typography>
+            <Typography>PP%: {selectedGame.team_stats?.home?.pp_pct || 'N/A'}</Typography>
+            <Typography>PK%: {selectedGame.team_stats?.home?.pk_pct || 'N/A'}</Typography>
+          </Grid>
+          <Grid item xs={6}>
+            <Typography variant="h6">{selectedGame.away_full}</Typography>
+            <Typography>Record: {selectedGame.team_stats?.away?.record || 'N/A'}</Typography>
+            <Typography>Goals/Game: {selectedGame.team_stats?.away?.gpg || 'N/A'}</Typography>
+            <Typography>PP%: {selectedGame.team_stats?.away?.pp_pct || 'N/A'}</Typography>
+            <Typography>PK%: {selectedGame.team_stats?.away?.pk_pct || 'N/A'}</Typography>
+          </Grid>
+        </Grid>
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="subtitle1">Odds</Typography>
+        <Box display="flex" justifyContent="space-around" sx={{ mt: 1 }}>
+          <Box>ML: {selectedGame.home_team} {selectedGame.odds?.moneyline?.home}</Box>
+          <Box>Spread: {selectedGame.home_team} {selectedGame.odds?.spread?.home}</Box>
+          <Box>Total: {selectedGame.odds?.total?.line}</Box>
+        </Box>
+      </Box>
+    );
+
     return (
       <Box>
         <Box display="flex" alignItems="center" mb={3}>
-          <IconButton onClick={() => setSelectedGame(null)}>
+          <IconButton 
+            onClick={() => {
+              const timeSinceLastSelect = Date.now() - lastSelectedTime.current;
+              if (timeSinceLastSelect < 300) {
+                console.log(`Ignoring back button click (${timeSinceLastSelect}ms since last selection)`);
+                return;
+              }
+              setSelectedGameCallback(null);
+            }}
+          >
             <ArrowBackIcon />
           </IconButton>
           <Typography variant="h5" fontWeight="bold" sx={{ ml: 1 }}>
@@ -1203,12 +1603,10 @@ const NHLTrendsScreen = () => {
           </Typography>
         </Box>
         <Paper sx={{ p: 3 }}>
+          {viewMode === 'games' && renderGameSummary()}
           {viewMode === 'props' && renderPlayerProps(selectedGame)}
           {viewMode === 'parlays' && renderParlayRecommendations(selectedGame)}
           {viewMode === 'fantasy' && renderFantasyProjections(selectedGame)}
-          {viewMode === 'games' && (
-            <Typography>Select a view mode above</Typography>
-          )}
         </Paper>
       </Box>
     );
@@ -1321,7 +1719,7 @@ const NHLTrendsScreen = () => {
       {/* Loading Indicator */}
       {loading && <LinearProgress sx={{ mb: 3 }} />}
 
-      {/* Main Content based on viewMode – FIXED: added guard for games */}
+      {/* Main Content based on viewMode */}
       {viewMode === 'games' && (
         <>
           {(!games || games.length === 0) ? (
@@ -1341,7 +1739,7 @@ const NHLTrendsScreen = () => {
         </Alert>
       )}
 
-      {/* Original Tabs – now safe because render functions have internal guards */}
+      {/* Original Tabs */}
       <Paper sx={{ mb: 3, mt: 4 }}>
         <Tabs value={activeTab} onChange={handleTabChange} variant="fullWidth" sx={{ '& .MuiTab-root': { py: 2, fontWeight: 'medium' } }}>
           <Tab icon={<EmojiEventsIcon />} iconPosition="start" label="Standings" />

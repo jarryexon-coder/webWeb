@@ -5,7 +5,8 @@ import {
   Chip, LinearProgress, IconButton, Alert, CircularProgress,
   TextField, Tooltip, Switch, FormControlLabel, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Stack, Snackbar, AlertTitle, Divider, Tabs, Tab
+  Stack, Snackbar, AlertTitle, Divider, Tabs, Tab,
+  Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import {
   FilterList, ExpandMore, ExpandLess, TrendingUp, TrendingDown,
@@ -15,7 +16,7 @@ import {
   AutoAwesome as AutoAwesomeIcon, Psychology as PsychologyIcon, Insights as InsightsIcon
 } from '@mui/icons-material';
 import { useDebounce } from '../utils/useDebounce';
-import { usePhraseCache } from '../utils/usePhraseCache';
+import { usePhraseCache } from '../utils/usePhrasecache';
 import { preprocessQuery, QueryIntent } from '../utils/queryProcessor';
 import { logPromptPerformance } from '../utils/analytics';
 
@@ -60,7 +61,6 @@ interface PlayerProp {
   last_updated?: string;
 }
 
-// Confidence result interface (unchanged)
 interface ConfidenceResult {
   level: string;
   edge: number;
@@ -75,7 +75,6 @@ interface ConfidenceResult {
   totalImplied?: number;
 }
 
-// Projection Value Result Interface (unchanged)
 interface ProjectionValueResult {
   edge: number;
   recommendedSide: 'over' | 'under' | 'none';
@@ -85,7 +84,6 @@ interface ProjectionValueResult {
   projectionDiff: number;
 }
 
-// Helper to conditionally log in development only
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const log = (...args: any[]) => {
   if (IS_DEV) console.log(...args);
@@ -94,7 +92,30 @@ const logDebug = (...args: any[]) => {
   if (IS_DEV) console.debug(...args);
 };
 
+// ===== PLACEHOLDER USER ID HOOK – REPLACE WITH YOUR AUTH LOGIC =====
+const useUserId = () => {
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    // Example: get from localStorage after login
+    const stored = localStorage.getItem('user');
+    if (stored) {
+      try {
+        const user = JSON.parse(stored);
+        setUserId(user.id);
+      } catch {
+        setUserId('guest-user');
+      }
+    } else {
+      // For testing without login
+      setUserId('guest-user');
+    }
+  }, []);
+  return userId;
+};
+
 const PrizePicksScreen = () => {
+  const userId = useUserId();
+
   // ===== STATE =====
   const [picksData, setPicksData] = useState<any>(null);
   const [combinedData, setCombinedData] = useState<PlayerProp[]>([]);
@@ -110,12 +131,10 @@ const PrizePicksScreen = () => {
     severity: 'info' as 'info' | 'success' | 'warning' | 'error' 
   });
 
-  // Debounced search
   const debouncedSearch = useDebounce(searchQuery, 300);
 
-  // Auto‑refresh
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-  const REFRESH_INTERVAL = 120000; // 2 minutes
+  const REFRESH_INTERVAL = 120000;
 
   // ===== VALUE FILTERING STATE =====
   const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
@@ -125,12 +144,10 @@ const PrizePicksScreen = () => {
   const [minEdgeThreshold, setMinEdgeThreshold] = useState(0);
   const [projectionDiffSign, setProjectionDiffSign] = useState<'positive' | 'negative' | 'both'>('both');
 
-  // Kelly Criterion
   const [kellyFraction, setKellyFraction] = useState(0.25);
   const [showKellySizing, setShowKellySizing] = useState(true);
   const [bankrollAmount, setBankrollAmount] = useState(1000);
 
-  // Filters
   const [filters, setFilters] = useState({
     minEdge: 0,
     maxEdge: 100,
@@ -142,13 +159,12 @@ const PrizePicksScreen = () => {
     sortOrder: 'desc'
   });
 
-  // ===== PAGINATION STATE =====
   const [visibleCount, setVisibleCount] = useState(50);
   const INCREMENT = 50;
 
   // ===== GENERATOR STATE =====
   const [genStrategy, setGenStrategy] = useState<'edge' | 'value' | 'projection'>('edge');
-  const [genCount, setGenCount] = useState<number>(10);
+  const [genCount, setGenCount] = useState<number>(3);
   const [ignoreFilters, setIgnoreFilters] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedProps, setGeneratedProps] = useState<PlayerProp[]>([]);
@@ -157,20 +173,42 @@ const PrizePicksScreen = () => {
   const [genCustomQuery, setGenCustomQuery] = useState('');
   const debouncedGenQuery = useDebounce(genCustomQuery, 500);
 
-  // ===== TAB STATE =====
-  const [activeTab, setActiveTab] = useState<'all' | 'top'>('all');
+  // ===== REQUEST LIMITING STATE =====
+  const [remainingRequests, setRemainingRequests] = useState<number | null>(null);
+  const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
+  const [purchaseAmount, setPurchaseAmount] = useState(5);
+  // Flag to indicate if we are using real backend or fallback
+  const [usingBackend, setUsingBackend] = useState(true);
 
-  // Toggle for filter panel
+  // ===== TAB STATE (added "generator") =====
+  const [activeTab, setActiveTab] = useState<'all' | 'top' | 'generator'>('all');
+
   const [showFilters, setShowFilters] = useState(true);
 
-  // NEW: Sorting & Position Filter State
   const [sortCriteria, setSortCriteria] = useState<'projection' | 'edge' | 'position'>('edge');
   const [positionFilter, setPositionFilter] = useState<string>('all');
 
-  // Caching
   const { getCached, setCached } = usePhraseCache();
 
-  // ===== NEW: Predefined Generator Prompts =====
+  // ===== ALL‑SPORTS PROMPTS =====
+  const ALL_SPORTS_PROMPTS = [
+    { label: '🔥 Highest Edge Points', query: 'points high edge' },
+    { label: '🎯 Best Value Assists', query: 'assists best value' },
+    { label: '📊 Top Projection Rebounds', query: 'rebounds top projection' },
+    { label: '⚡ Highest Edge Goals', query: 'goals high edge' },
+    { label: '💪 Best Value Strikeouts', query: 'strikeouts best value' },
+    { label: '🏈 Top Projection Passing Yards', query: 'passing yards top projection' },
+    { label: '🥅 Highest Edge Shots on Goal', query: 'shots on goal high edge' },
+    { label: '⚾ Best Value Home Runs', query: 'home runs best value' },
+    { label: '🏃 Top Projection Rushing Yards', query: 'rushing yards top projection' },
+    { label: '🧤 Highest Edge Saves', query: 'saves high edge' },
+    { label: '🔢 Best Value Total Bases', query: 'total bases best value' },
+    { label: '✨ Top Projection Points + Assists', query: 'points+assists top projection' },
+    { label: '🔄 Highest Edge Rebounds + Assists', query: 'rebounds+assists high edge' },
+    { label: '⬆️ Best Value Over Bets', query: 'over best value' },
+    { label: '⬇️ Best Value Under Bets', query: 'under best value' },
+  ];
+
   const generatorPrompts = [
     { label: '🔥 Highest Projection Points', query: 'points high projection' },
     { label: '⚡ Highest Edge Points', query: 'points best edge' },
@@ -184,13 +222,65 @@ const PrizePicksScreen = () => {
     { label: '🏋️ Centers High Rebounds', query: 'c rebounds' },
   ];
 
-  // ===== FETCH FUNCTION (unchanged) =====
+  // ===== FETCH REMAINING REQUESTS ON MOUNT =====
+  useEffect(() => {
+    if (!userId) return;
+    const fetchRemaining = async () => {
+      try {
+        const res = await fetch(`/api/user/generations/${userId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setRemainingRequests(data.remaining);
+          setUsingBackend(true);
+        } else {
+          // Backend returned an error – fallback to local default
+          console.warn('Failed to fetch remaining requests, using default (2). Ensure backend endpoints are implemented.');
+          setRemainingRequests(2); // fallback
+          setUsingBackend(false);
+        }
+      } catch (error) {
+        console.warn('Error fetching remaining requests, using default (2). Ensure backend endpoints are implemented.', error);
+        setRemainingRequests(2); // fallback
+        setUsingBackend(false);
+      }
+    };
+    fetchRemaining();
+  }, [userId]);
+
+  // ===== PURCHASE HANDLER =====
+  const handlePurchase = async () => {
+    if (!userId) return;
+    if (!usingBackend) {
+      alert('Purchase is not available in local‑only mode. Please implement the backend.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/user/generations/purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, quantity: purchaseAmount })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRemainingRequests(data.remaining);
+        setShowPurchaseDialog(false);
+        setSnackbar({ open: true, message: `Added ${purchaseAmount} requests!`, severity: 'success' });
+      } else {
+        alert('Purchase failed');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Purchase error');
+    }
+  };
+
+  // ===== FETCH FUNCTION =====
   const fetchPrizepicksSelections = async (skipCache = false) => {
     try {
       setPicksLoading(true);
       setRefreshing(true);
       log(`📡 Fetching ${selectedSport.toUpperCase()} data...`);
-      
+
       const cacheKey = `prizepicks-${selectedSport}`;
       if (!skipCache) {
         const cached = getCached(cacheKey);
@@ -206,17 +296,28 @@ const PrizePicksScreen = () => {
         }
       }
 
-const response = await fetch(
-  `https://prizepicks-production.up.railway.app/api/prizepicks/selections?sport=${selectedSport}&nocache=${Date.now()}`
-);
-      
+      let apiUrl: string;
+      const baseNBA = 'https://prizepicks-production.up.railway.app';
+      const basePython = 'https://python-api-fresh-production.up.railway.app';
+
+      if (selectedSport === 'nba') {
+        apiUrl = `${baseNBA}/api/prizepicks/selections?sport=${selectedSport}&nocache=${Date.now()}`;
+      } else if (selectedSport === 'mlb') {
+        apiUrl = `${basePython}/api/mlb/props?nocache=${Date.now()}`;
+      } else if (selectedSport === 'nhl') {
+        apiUrl = `${basePython}/api/nhl/props?nocache=${Date.now()}`;
+      } else {
+        apiUrl = `${baseNBA}/api/prizepicks/selections?sport=${selectedSport}&nocache=${Date.now()}`;
+      }
+
+      const response = await fetch(apiUrl);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
-      
+
       const data = await response.json();
-      
+
       log('📊 API Response:', {
         success: data.success,
         count: data.count,
@@ -225,11 +326,11 @@ const response = await fetch(
         selections: data.selections?.length,
         props: data.props?.length
       });
-      
+
       setPicksData(data);
       setCached(cacheKey, data);
       setError(null);
-      
+
       const propsArray = data.selections || data.props || [];
       if (propsArray.length > 0) {
         const processed = processPrizePicksData({ ...data, selections: propsArray });
@@ -239,18 +340,18 @@ const response = await fetch(
         log('⚠️ No selections/props in response');
         setCombinedData([]);
       }
-      
+
       setSnackbar({
         open: true,
         message: `Loaded ${propsArray.length} ${selectedSport.toUpperCase()} props`,
         severity: 'success'
       });
-      
+
     } catch (error: any) {
       console.error('❌ Error fetching data:', error);
       setError(error.message);
       setCombinedData([]);
-      
+
       setSnackbar({
         open: true,
         message: 'Failed to load data: ' + error.message,
@@ -274,7 +375,7 @@ const response = await fetch(
     return () => clearInterval(intervalId);
   }, [autoRefreshEnabled, selectedSport]);
 
-  // ===== HELPER FUNCTIONS =====
+  // ===== HELPER FUNCTIONS (unchanged) =====
   const calculateImpliedProbability = (americanOdds: number): number => {
     if (americanOdds > 0) return 100 / (americanOdds + 100);
     else return Math.abs(americanOdds) / (Math.abs(americanOdds) + 100);
@@ -282,7 +383,6 @@ const response = await fetch(
 
   const calculateKellyBetSize = (edge: number, odds: number, bankroll: number) => {
     if (edge <= 0 || odds === null || bankroll <= 0) {
-      log('❌ Kelly calc invalid:', { edge, odds, bankroll });
       return { fraction: 0, amount: 0, percentOfBankroll: 0 };
     }
     let decimalOdds;
@@ -294,7 +394,6 @@ const response = await fetch(
     const kellyFractionFull = (b * p - q) / b;
     const kellyFractionApplied = Math.max(0, Math.min(kellyFractionFull * kellyFraction, 0.2));
     const betAmount = bankroll * kellyFractionApplied;
-    log('✅ Kelly calculated:', { edge, odds, decimalOdds, kellyFull: kellyFractionFull, kellyApplied: kellyFractionApplied, betAmount });
     return {
       fraction: kellyFractionApplied,
       amount: betAmount,
@@ -302,7 +401,6 @@ const response = await fetch(
     };
   };
 
-  // FIXED: Single proper implementation
   const calculateProjectionValue = (projection?: number, line?: number, overPrice?: number | null, underPrice?: number | null): ProjectionValueResult => {
     if (projection === undefined || line === undefined) {
       return { 
@@ -316,13 +414,9 @@ const response = await fetch(
     }
     
     const projectionDiff = projection - line;
-    // Determine recommended side based on projection vs line
     const recommendedSide = projectionDiff > 0 ? 'over' : projectionDiff < 0 ? 'under' : 'none';
-    
-    // Get relevant odds for the recommended side
     const relevantOdds = recommendedSide === 'over' ? overPrice : (recommendedSide === 'under' ? underPrice : null);
     
-    // If no odds for that side, return edge 0 and side 'none'
     if (relevantOdds === null || relevantOdds === undefined) {
       return { 
         edge: 0, 
@@ -334,13 +428,11 @@ const response = await fetch(
       };
     }
     
-    // Calculate market implied probability from odds
     const marketImplied = relevantOdds > 0 
       ? 100 / (relevantOdds + 100) 
       : -relevantOdds / (-relevantOdds + 100);
     
     const absDiff = Math.abs(projectionDiff);
-    // Estimate true probability based on difference magnitude
     let estimatedTrueProb;
     if (absDiff > 2.0) estimatedTrueProb = recommendedSide === 'over' ? 0.65 : 0.35;
     else if (absDiff > 1.0) estimatedTrueProb = recommendedSide === 'over' ? 0.60 : 0.40;
@@ -520,16 +612,11 @@ const response = await fetch(
     });
   };
 
-  // ===== NEW: Apply Sorting & Position Filter to Data =====
   const applySortAndFilter = (props: PlayerProp[]): PlayerProp[] => {
     let filtered = props;
-
-    // Position filter
     if (positionFilter !== 'all') {
       filtered = filtered.filter(p => p.position === positionFilter);
     }
-
-    // Sorting
     return filtered.sort((a, b) => {
       if (sortCriteria === 'projection') {
         return (b.projection || 0) - (a.projection || 0);
@@ -575,14 +662,12 @@ const response = await fetch(
     minEdgeThreshold
   ]);
 
-  // Modified to incorporate the new sort/filter
   const filteredData = useMemo(() => {
     log('📊 useMemo: filteredData');
     if (!sortedProps.length) return [];
 
     let result = [...sortedProps];
 
-    // Existing numeric filters
     result = result.filter(item => {
       const edge = item.edge || (item.projectionEdge ? item.projectionEdge * 100 : 0) || 0;
       return edge >= filters.minEdge && edge <= filters.maxEdge;
@@ -602,13 +687,10 @@ const response = await fetch(
       );
     }
 
-    // NEW: Apply position filter and sorting
     result = applySortAndFilter(result);
-
     return result;
   }, [sortedProps, filters, sortCriteria, positionFilter]);
 
-  // Top value picks (for the tab) – also use new sort/filter
   const topValueProps = useMemo(() => {
     if (!sortedProps.length) return [];
     return applySortAndFilter(sortedProps)
@@ -616,7 +698,7 @@ const response = await fetch(
       .slice(0, 10);
   }, [sortedProps, sortCriteria, positionFilter]);
 
-  // ===== GENERATOR =====
+  // ===== GENERATOR (WITH REQUEST CHECK & FALLBACK) =====
   const scorePropRelevance = (prop: PlayerProp, intent: QueryIntent): number => {
     let score = 0;
     const player = (prop.player_name || prop.player || '').toLowerCase();
@@ -636,105 +718,147 @@ const response = await fetch(
     return score;
   };
 
-  const generateProps = useCallback(() => {
+  const generateProps = useCallback(async () => {
+    if (!userId) {
+      alert('User not identified');
+      return;
+    }
+
+    // Check remaining requests (fallback works even if backend missing)
+    if (remainingRequests === null) return; // still loading
+    if (remainingRequests <= 0) {
+      setSnackbar({ open: true, message: 'No requests left. Please purchase more.', severity: 'warning' });
+      setShowPurchaseDialog(true);
+      return;
+    }
+
     setIsGenerating(true);
-    setTimeout(() => {
+
+    // Try to decrement on backend if available, otherwise just decrement locally
+    let newRemaining = remainingRequests - 1;
+    if (usingBackend) {
       try {
-        log('[Generator] Starting generation...');
-        const source = ignoreFilters ? combinedData : sortedProps;
-        if (!source.length) {
-          alert('No props available to generate from.');
-          setIsGenerating(false);
-          return;
-        }
-
-        let workingSet = [...source];
-
-        if (debouncedGenQuery.trim()) {
-          log('[Generator] Custom query:', debouncedGenQuery);
-          const intent = preprocessQuery(debouncedGenQuery);
-          log('[Generator] Query intent:', intent);
-
-          const statMapping: Record<string, string[]> = {
-            points: ['points', 'point', 'pts', 'scoring'],
-            rebounds: ['rebounds', 'rebound', 'rebs', 'boards'],
-            assists: ['assists', 'assist', 'asts', 'dimes'],
-            steals: ['steals', 'steal', 'stls'],
-            blocks: ['blocks', 'block', 'blks'],
-            threes: ['threes', 'three', '3pt', '3-pointers', '3pm'],
-          };
-
-          const detectedStats: string[] = [];
-          const queryLower = debouncedGenQuery.toLowerCase();
-          Object.entries(statMapping).forEach(([stat, aliases]) => {
-            if (aliases.some(alias => queryLower.includes(alias))) {
-              detectedStats.push(stat);
-              detectedStats.push(stat.replace(/s$/, ''));
-            }
-          });
-
-          const keywords = [
-            intent.player,
-            intent.team,
-            ...intent.keywords,
-            intent.statType,
-            ...detectedStats,
-          ].filter(Boolean).map(k => k.toLowerCase());
-
-          log('[Generator] Keywords for filtering:', keywords);
-
-          if (keywords.length > 0) {
-            workingSet = workingSet.filter(p => {
-              const player = (p.player_name || p.player || '').toLowerCase();
-              const team = (p.team || '').toLowerCase();
-              const stat = (p.stat_type || '').toLowerCase();
-              const game = (p.game || '').toLowerCase();
-              return keywords.some(k =>
-                player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
-              );
-            });
-            console.log('[Generator] After keyword filter:', workingSet.length);
-          }
-
-          workingSet = workingSet
-            .map(p => ({ ...p, relevanceScore: scorePropRelevance(p, intent) }))
-            .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
-          log('[Generator] After relevance scoring, top score:', workingSet[0]?.relevanceScore);
+        const decrementRes = await fetch('/api/user/generations/decrement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId }),
+        });
+        if (decrementRes.ok) {
+          const { remaining } = await decrementRes.json();
+          newRemaining = remaining;
         } else {
-          switch (genStrategy) {
-            case 'edge':
-              workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
-              break;
-            case 'value':
-              workingSet.sort((a, b) => (b.value_score || 0) - (a.value_score || 0));
-              break;
-            case 'projection':
-              workingSet.sort((a, b) => (b.projection || 0) - (a.projection || 0));
-              break;
+          // Backend returned an error – fallback to local decrement
+          console.warn('Decrement failed, using local decrement. Check backend.');
+          // keep newRemaining as remainingRequests - 1
+        }
+      } catch (error) {
+        console.warn('Decrement error, using local decrement. Check backend.', error);
+        // keep newRemaining as remainingRequests - 1
+      }
+    } else {
+      // No backend – just use local decrement
+      console.log('Using local request counter (backend not available).');
+    }
+
+    setRemainingRequests(newRemaining);
+
+    // Proceed with generation
+    try {
+      log('[Generator] Starting generation...');
+      const source = ignoreFilters ? combinedData : sortedProps;
+      if (!source.length) {
+        alert('No props available to generate from.');
+        setIsGenerating(false);
+        return;
+      }
+
+      let workingSet = [...source];
+
+      if (debouncedGenQuery.trim()) {
+        log('[Generator] Custom query:', debouncedGenQuery);
+        const intent = preprocessQuery(debouncedGenQuery);
+        log('[Generator] Query intent:', intent);
+
+        const statMapping: Record<string, string[]> = {
+          points: ['points', 'point', 'pts', 'scoring'],
+          rebounds: ['rebounds', 'rebound', 'rebs', 'boards'],
+          assists: ['assists', 'assist', 'asts', 'dimes'],
+          steals: ['steals', 'steal', 'stls'],
+          blocks: ['blocks', 'block', 'blks'],
+          threes: ['threes', 'three', '3pt', '3-pointers', '3pm'],
+        };
+
+        const detectedStats: string[] = [];
+        const queryLower = debouncedGenQuery.toLowerCase();
+        Object.entries(statMapping).forEach(([stat, aliases]) => {
+          if (aliases.some(alias => queryLower.includes(alias))) {
+            detectedStats.push(stat);
+            detectedStats.push(stat.replace(/s$/, ''));
           }
+        });
+
+        const keywords = [
+          intent.player,
+          intent.team,
+          ...intent.keywords,
+          intent.statType,
+          ...detectedStats,
+        ].filter(Boolean).map(k => k.toLowerCase());
+
+        log('[Generator] Keywords for filtering:', keywords);
+
+        if (keywords.length > 0) {
+          workingSet = workingSet.filter(p => {
+            const player = (p.player_name || p.player || '').toLowerCase();
+            const team = (p.team || '').toLowerCase();
+            const stat = (p.stat_type || '').toLowerCase();
+            const game = (p.game || '').toLowerCase();
+            return keywords.some(k =>
+              player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
+            );
+          });
+          console.log('[Generator] After keyword filter:', workingSet.length);
         }
 
-        const newSet = workingSet.slice(0, genCount);
-        log('[Generator] New set length:', newSet.length);
-
-        setGeneratedProps(newSet);
-        setGeneratedSets(prev => [...prev, newSet]);
-        setCurrentSetIndex(prev => prev + 1);
-
-        logPromptPerformance(
-          debouncedGenQuery || genStrategy,
-          newSet.length,
-          newSet.reduce((sum, p) => sum + (p.projectionEdge || 0) * 100, 0) / newSet.length,
-          'generator'
-        );
-      } catch (error) {
-        console.error('[Generator] Error:', error);
-        alert('Generator error: ' + error.message);
-      } finally {
-        setIsGenerating(false);
+        workingSet = workingSet
+          .map(p => ({ ...p, relevanceScore: scorePropRelevance(p, intent) }))
+          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+        log('[Generator] After relevance scoring, top score:', workingSet[0]?.relevanceScore);
+      } else {
+        switch (genStrategy) {
+          case 'edge':
+            workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
+            break;
+          case 'value':
+            workingSet.sort((a, b) => (b.value_score || 0) - (a.value_score || 0));
+            break;
+          case 'projection':
+            workingSet.sort((a, b) => (b.projection || 0) - (a.projection || 0));
+            break;
+        }
       }
-    }, 50);
-  }, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps, debouncedGenQuery]);
+
+      // Limit to at most 3 props per request
+      const newSet = workingSet.slice(0, Math.min(genCount, 3));
+      log('[Generator] New set length:', newSet.length);
+
+      setGeneratedProps(newSet);
+      setGeneratedSets(prev => [...prev, newSet]);
+      setCurrentSetIndex(prev => prev + 1);
+
+      logPromptPerformance(
+        debouncedGenQuery || genStrategy,
+        newSet.length,
+        newSet.reduce((sum, p) => sum + (p.projectionEdge || 0) * 100, 0) / newSet.length,
+        'generator'
+      );
+    } catch (error: any) {
+      console.error('[Generator] Error:', error);
+      alert('Generator error: ' + error.message);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps, debouncedGenQuery, remainingRequests, userId, usingBackend]);
 
   const handlePrevSet = () => {
     setCurrentSetIndex(prev => prev - 1);
@@ -750,10 +874,8 @@ const response = await fetch(
     setCurrentSetIndex(0);
   };
 
-  // ===== NEW: Handler for prompt clicks =====
   const handlePromptClick = (query: string) => {
     setGenCustomQuery(query);
-    // Small delay to let state update, then trigger generation
     setTimeout(() => generateProps(), 100);
   };
 
@@ -974,11 +1096,10 @@ const response = await fetch(
     </Paper>
   );
 
-  // PlayerCard with React.memo (FIXED: added isOver based on projection vs line)
   const PlayerCard = React.memo(({ item }: { item: PlayerProp }) => {
     const edge = typeof item.edge === 'number' ? item.edge : Number(item.edge) || 0;
     const projectionEdge = typeof item.projectionEdge === 'number' ? item.projectionEdge : Number(item.projectionEdge) || 0;
-    const isOver = (item.projection || 0) > (item.line || 0);  // ✅ FIX: Arrow direction based on projection
+    const isOver = (item.projection || 0) > (item.line || 0);
 
     return (
       <Card sx={{
@@ -988,7 +1109,6 @@ const response = await fetch(
         border: projectionEdge > 0.03 ? '2px solid #059669' : projectionEdge > 0 ? '1px solid #10b981' : '1px solid #e5e7eb'
       }}>
         <CardContent sx={{ flexGrow: 1, p: 2 }}>
-          {/* Header */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Box>
               <Typography variant="h6" component="div" noWrap sx={{ fontWeight: 'bold' }}>
@@ -1010,7 +1130,6 @@ const response = await fetch(
             </Box>
           </Box>
 
-          {/* Line vs Projection */}
           <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
             <Grid container spacing={1}>
               <Grid item xs={6}>
@@ -1033,7 +1152,6 @@ const response = await fetch(
             </Typography>
           </Box>
 
-          {/* Edge Bar */}
           <Box sx={{ mb: 2 }}>
             <Typography variant="body2" gutterBottom sx={{ display: 'flex', justifyContent: 'space-between' }}>
               <span>Edge</span>
@@ -1044,7 +1162,6 @@ const response = await fetch(
             <LinearProgress variant="determinate" value={Math.min(edge, 100)} sx={{ height: 8, borderRadius: 4, '& .MuiLinearProgress-bar': { backgroundColor: edge > 15 ? '#4caf50' : edge > 8 ? '#ff9800' : '#f44336' } }} />
           </Box>
 
-          {/* Kelly Bet Sizing */}
           {showKellySizing && item.kellyBetSize && item.kellyBetSize > 0 && (
             <Box sx={{ mb: 2, p: 1, bgcolor: '#ecfdf5', borderRadius: 1, border: '1px solid #bbf7d0' }}>
               <Typography variant="body2" fontWeight="bold" color="#059669">
@@ -1053,7 +1170,6 @@ const response = await fetch(
             </Box>
           )}
 
-          {/* Odds Display */}
           <Box sx={{ display: 'flex', borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider', mb: 2 }}>
             <Box sx={{ flex: 1, textAlign: 'center', p: 1, bgcolor: item.over_price !== null ? '#10b981' : '#64748b', color: 'white', opacity: item.over_price !== null ? 1 : 0.7 }}>
               <Typography variant="caption">Over</Typography>
@@ -1065,7 +1181,6 @@ const response = await fetch(
             </Box>
           </Box>
 
-          {/* Additional Details */}
           <Grid container spacing={1} sx={{ mt: 2 }}>
             <Grid item xs={6}>
               <Typography variant="body2" color="text.secondary">Bookmaker</Typography>
@@ -1085,7 +1200,6 @@ const response = await fetch(
             )}
           </Grid>
 
-          {/* Value Bet Indicator */}
           {projectionEdge > 0 && (
             <Box sx={{ mt: 2, p: 1, bgcolor: projectionEdge > 0.05 ? '#f0fdf4' : '#f0f9ff', borderRadius: 1, border: `1px solid ${projectionEdge > 0.05 ? '#bbf7d0' : '#bae6fd'}` }}>
               <Typography variant="caption" fontWeight="bold" color={projectionEdge > 0.05 ? '#059669' : '#0369a1'}>
@@ -1106,313 +1220,402 @@ const response = await fetch(
     );
   });
 
+  const PurchaseDialog = () => (
+    <Dialog open={showPurchaseDialog} onClose={() => setShowPurchaseDialog(false)}>
+      <DialogTitle>Buy Generator Requests</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ mb: 2 }}>
+          Each generator run costs 1 request. You currently have {remainingRequests} requests.
+        </Typography>
+        <TextField
+          autoFocus
+          margin="dense"
+          label="Number of requests"
+          type="number"
+          fullWidth
+          variant="standard"
+          value={purchaseAmount}
+          onChange={(e) => setPurchaseAmount(parseInt(e.target.value) || 1)}
+          inputProps={{ min: 1, step: 1 }}
+        />
+        <Typography variant="caption" color="text.secondary">
+          (Payment integration placeholder – in production you would be redirected to Stripe.)
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setShowPurchaseDialog(false)}>Cancel</Button>
+        <Button onClick={handlePurchase} variant="contained">Buy</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
   return (
-    <Container maxWidth="xl" sx={{ py: 3, minHeight: '100vh' }}>
-      {/* Header */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-          🏀 Advanced Player Props Dashboard
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Real-time odds, projections & Kelly criterion betting
-        </Typography>
-      </Box>
-
-      {/* Live Data Dashboard */}
-      <Box sx={{ mb: 2, p: 2, bgcolor: '#f0f9ff', borderRadius: 2, border: '1px solid #bae6fd' }}>
-        <Typography variant="subtitle1" fontWeight="bold" color="#0369a1" gutterBottom>
-          🎯 Live Data Dashboard
-        </Typography>
-        <Grid container spacing={2}>
-          <Grid item xs={6} sm={3}>
-            <Typography variant="caption" color="text.secondary">Data Source</Typography>
-            <Typography variant="body2" fontWeight="bold" color="success.main">
-              {picksData?.source === 'static-generator' ? 'STATIC (2026 NBA)' : picksData?.data_source === 'live_sports_api' ? 'LIVE API' : picksData?.source || picksData?.data_source || 'Loading...'}
-            </Typography>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Typography variant="caption" color="text.secondary">Last Update</Typography>
-            <Typography variant="body2" fontWeight="bold">
-              {picksData?.timestamp ? new Date(picksData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-            </Typography>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Typography variant="caption" color="text.secondary">Selections</Typography>
-            <Typography variant="body2" fontWeight="bold">{picksData?.count || 0}</Typography>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Typography variant="caption" color="text.secondary">Processed</Typography>
-            <Typography variant="body2" fontWeight="bold">{combinedData?.length || 0}</Typography>
-          </Grid>
-        </Grid>
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-          <FormControlLabel control={<Switch checked={autoRefreshEnabled} onChange={() => setAutoRefreshEnabled(!autoRefreshEnabled)} color="primary" />} label="Auto-refresh (2 min)" />
+    // ===== BACKGROUND STYLING =====
+    <Box sx={{
+      minHeight: '100vh',
+      background: 'linear-gradient(145deg, #f8fafc 0%, #eef2f6 100%), url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%239C92AC\' fill-opacity=\'0.08\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
+      backgroundAttachment: 'fixed',
+      backgroundSize: 'cover',
+      position: 'relative',
+    }}>
+      <Container maxWidth="xl" sx={{ py: 3, position: 'relative', zIndex: 1 }}>
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
+            🏀 Advanced Player Props Dashboard
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Real-time odds, projections & Kelly criterion betting
+          </Typography>
         </Box>
-      </Box>
 
-      {/* Sport Selector */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">Select Sport</Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TextField placeholder="Search players..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} size="small" sx={{ minWidth: 200 }} />
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <InputLabel>League</InputLabel>
-              <Select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} label="League">
-                <MenuItem value="All">All Leagues</MenuItem>
-                <MenuItem value="NBA">NBA</MenuItem>
-                <MenuItem value="NFL">NFL</MenuItem>
-                <MenuItem value="MLB">MLB</MenuItem>
-                <MenuItem value="NHL">NHL</MenuItem>
-              </Select>
-            </FormControl>
+        {/* Live Data Dashboard (always visible) */}
+        <Box sx={{ mb: 2, p: 2, bgcolor: '#f0f9ff', borderRadius: 2, border: '1px solid #bae6fd' }}>
+          <Typography variant="subtitle1" fontWeight="bold" color="#0369a1" gutterBottom>
+            🎯 Live Data Dashboard
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={6} sm={3}>
+              <Typography variant="caption" color="text.secondary">Data Source</Typography>
+              <Typography variant="body2" fontWeight="bold" color="success.main">
+                {picksData?.source === 'static-generator' ? 'STATIC (2026 NBA)' : picksData?.data_source === 'live_sports_api' ? 'LIVE API' : picksData?.source || picksData?.data_source || 'Loading...'}
+              </Typography>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Typography variant="caption" color="text.secondary">Last Update</Typography>
+              <Typography variant="body2" fontWeight="bold">
+                {picksData?.timestamp ? new Date(picksData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+              </Typography>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Typography variant="caption" color="text.secondary">Selections</Typography>
+              <Typography variant="body2" fontWeight="bold">{picksData?.count || 0}</Typography>
+            </Grid>
+            <Grid item xs={6} sm={3}>
+              <Typography variant="caption" color="text.secondary">Processed</Typography>
+              <Typography variant="body2" fontWeight="bold">{combinedData?.length || 0}</Typography>
+            </Grid>
+          </Grid>
+          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2 }}>
+            <FormControlLabel
+              control={<Switch checked={autoRefreshEnabled} onChange={() => setAutoRefreshEnabled(!autoRefreshEnabled)} color="primary" />}
+              label="Auto-refresh (2 min)"
+            />
+            <Chip
+              icon={<AttachMoney />}
+              label={`Requests: ${remainingRequests !== null ? remainingRequests : '...'}`}
+              color={remainingRequests && remainingRequests > 0 ? 'success' : 'error'}
+              variant="outlined"
+              onClick={() => setShowPurchaseDialog(true)}
+              sx={{ cursor: 'pointer' }}
+            />
+            {!usingBackend && (
+              <Chip label="Local mode" size="small" color="warning" variant="outlined" />
+            )}
           </Box>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {['nba', 'nfl', 'mlb', 'nhl'].map((sport) => (
-            <Button
-              key={sport}
-              variant={selectedSport === sport ? 'contained' : 'outlined'}
-              onClick={() => setSelectedSport(sport)}
-              disabled={picksLoading}
-              startIcon={sport === 'nba' ? <SportsBasketball /> : sport === 'nfl' ? <SportsFootball /> : sport === 'mlb' ? <SportsBaseball /> : <SportsHockey />}
-              sx={{ bgcolor: selectedSport === sport ? getSportColor(sport) : 'transparent', borderColor: getSportColor(sport) }}
-            >
-              {sport.toUpperCase()}
-            </Button>
-          ))}
-        </Box>
-      </Paper>
 
-      {/* Generator Toolbar */}
-      <Paper elevation={1} sx={{ p: 2, mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center' }}>
-          <AutoAwesomeIcon sx={{ mr: 0.5, fontSize: 20 }} /> Prop Generator
-        </Typography>
-        <TextField size="small" placeholder="Custom query (e.g., 'Jokic points')" value={genCustomQuery} onChange={(e) => setGenCustomQuery(e.target.value)} sx={{ minWidth: 250 }} />
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <InputLabel>Strategy</InputLabel>
-          <Select value={genStrategy} label="Strategy" onChange={(e) => setGenStrategy(e.target.value as any)}>
-            <MenuItem value="edge">Highest Edge</MenuItem>
-            <MenuItem value="value">Best Value</MenuItem>
-            <MenuItem value="projection">Top Projection</MenuItem>
-          </Select>
-        </FormControl>
-        <TextField size="small" type="number" label="Count" value={genCount} onChange={(e) => setGenCount(Number(e.target.value))} inputProps={{ min: 1, max: 50 }} sx={{ width: 100 }} />
-        <FormControlLabel control={<Switch size="small" checked={ignoreFilters} onChange={(e) => setIgnoreFilters(e.target.checked)} />} label="Ignore filters" />
-        <Button variant="contained" size="small" startIcon={<AutoAwesomeIcon />} onClick={generateProps} disabled={isGenerating || (ignoreFilters ? !combinedData.length : !sortedProps.length)}>
-          {isGenerating ? 'Generating...' : 'Generate'}
-        </Button>
-        {generatedSets.length > 1 && (
-          <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
-            <IconButton size="small" onClick={handlePrevSet} disabled={currentSetIndex === 0}><ExpandMore sx={{ transform: 'rotate(90deg)' }} /></IconButton>
-            <Typography variant="caption" sx={{ mx: 1 }}>{currentSetIndex + 1}/{generatedSets.length}</Typography>
-            <IconButton size="small" onClick={handleNextSet} disabled={currentSetIndex === generatedSets.length - 1}><ExpandMore sx={{ transform: 'rotate(-90deg)' }} /></IconButton>
+        {/* Sport Selector */}
+        <Paper sx={{ p: 2, mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">Select Sport</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <TextField placeholder="Search players..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} size="small" sx={{ minWidth: 200 }} />
+              <FormControl size="small" sx={{ minWidth: 150 }}>
+                <InputLabel>League</InputLabel>
+                <Select value={selectedLeague} onChange={(e) => setSelectedLeague(e.target.value)} label="League">
+                  <MenuItem value="All">All Leagues</MenuItem>
+                  <MenuItem value="NBA">NBA</MenuItem>
+                  <MenuItem value="NFL">NFL</MenuItem>
+                  <MenuItem value="MLB">MLB</MenuItem>
+                  <MenuItem value="NHL">NHL</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {['nba', 'nfl', 'mlb', 'nhl'].map((sport) => (
+              <Button
+                key={sport}
+                variant={selectedSport === sport ? 'contained' : 'outlined'}
+                onClick={() => setSelectedSport(sport)}
+                disabled={picksLoading}
+                startIcon={sport === 'nba' ? <SportsBasketball /> : sport === 'nfl' ? <SportsFootball /> : sport === 'mlb' ? <SportsBaseball /> : <SportsHockey />}
+                sx={{ bgcolor: selectedSport === sport ? getSportColor(sport) : 'transparent', borderColor: getSportColor(sport) }}
+              >
+                {sport.toUpperCase()}
+              </Button>
+            ))}
+          </Box>
+        </Paper>
+
+        {/* Tabs */}
+        <Paper sx={{ mb: 2 }}>
+          <Tabs value={activeTab} onChange={(_, val) => setActiveTab(val)}>
+            <Tab label="All Props" value="all" />
+            <Tab label="Top Value Picks" value="top" />
+            <Tab label="Generator" value="generator" />
+          </Tabs>
+        </Paper>
+
+        {/* Generator Tab */}
+        {activeTab === 'generator' && (
+          <>
+            <Paper elevation={1} sx={{ p: 2, mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                <AutoAwesomeIcon sx={{ mr: 0.5, fontSize: 20 }} /> Prop Generator
+              </Typography>
+
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                <InputLabel>Quick Prompts (All Sports)</InputLabel>
+                <Select
+                  label="Quick Prompts (All Sports)"
+                  value=""
+                  onChange={(e) => {
+                    const query = e.target.value;
+                    if (query) {
+                      setGenCustomQuery(query);
+                      setTimeout(() => generateProps(), 100);
+                    }
+                  }}
+                >
+                  <MenuItem value="" disabled>Select a prompt</MenuItem>
+                  {ALL_SPORTS_PROMPTS.map((p, idx) => (
+                    <MenuItem key={idx} value={p.query}>{p.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <TextField
+                size="small"
+                placeholder="Custom query (e.g., 'Jokic points')"
+                value={genCustomQuery}
+                onChange={(e) => setGenCustomQuery(e.target.value)}
+                sx={{ minWidth: 250 }}
+              />
+
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Strategy</InputLabel>
+                <Select
+                  value={genStrategy}
+                  label="Strategy"
+                  onChange={(e) => setGenStrategy(e.target.value as any)}
+                >
+                  <MenuItem value="edge">Highest Edge</MenuItem>
+                  <MenuItem value="value">Best Value</MenuItem>
+                  <MenuItem value="projection">Top Projection</MenuItem>
+                </Select>
+              </FormControl>
+
+              <TextField
+                size="small"
+                type="number"
+                label="Count"
+                value={genCount}
+                onChange={(e) => setGenCount(Math.min(3, Number(e.target.value)))}
+                inputProps={{ min: 1, max: 3 }}
+                sx={{ width: 100 }}
+              />
+
+              <FormControlLabel
+                control={<Switch size="small" checked={ignoreFilters} onChange={(e) => setIgnoreFilters(e.target.checked)} />}
+                label="Ignore filters"
+              />
+
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AutoAwesomeIcon />}
+                onClick={generateProps}
+                disabled={isGenerating || (ignoreFilters ? !combinedData.length : !sortedProps.length)}
+              >
+                {isGenerating ? 'Generating...' : 'Generate'}
+              </Button>
+
+              {generatedSets.length > 1 && (
+                <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
+                  <IconButton size="small" onClick={handlePrevSet} disabled={currentSetIndex === 0}>
+                    <ExpandMore sx={{ transform: 'rotate(90deg)' }} />
+                  </IconButton>
+                  <Typography variant="caption" sx={{ mx: 1 }}>
+                    {currentSetIndex + 1}/{generatedSets.length}
+                  </Typography>
+                  <IconButton size="small" onClick={handleNextSet} disabled={currentSetIndex === generatedSets.length - 1}>
+                    <ExpandMore sx={{ transform: 'rotate(-90deg)' }} />
+                  </IconButton>
+                </Box>
+              )}
+            </Paper>
+
+            <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>⚡ Quick Prompts</Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {generatorPrompts.map((prompt, idx) => (
+                  <Button
+                    key={idx}
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handlePromptClick(prompt.query)}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    {prompt.label}
+                  </Button>
+                ))}
+              </Box>
+            </Paper>
+
+            {generatedProps.length > 0 && (
+              <Box sx={{ mb: 3, minHeight: generatedProps.length ? 'auto' : 0 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="h6">✨ Generated Props ({generatedProps.length})</Typography>
+                  <Button size="small" onClick={clearGenerated}>Clear</Button>
+                </Box>
+                <Grid container spacing={2}>
+                  {generatedProps.map((prop, idx) => (
+                    <Grid item xs={12} sm={6} md={4} lg={3} key={prop.id || idx}>
+                      <PlayerCard item={prop} />
+                    </Grid>
+                  ))}
+                </Grid>
+                <Divider sx={{ my: 2 }} />
+              </Box>
+            )}
+          </>
+        )}
+
+        {/* Top Value Picks Tab */}
+        {activeTab === 'top' && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" gutterBottom>🏆 Top 10 Value Picks</Typography>
+            <TableContainer component={Paper}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Player</TableCell>
+                    <TableCell>Prop</TableCell>
+                    <TableCell>Line</TableCell>
+                    <TableCell>Projection</TableCell>
+                    <TableCell>Diff</TableCell>
+                    <TableCell>Edge</TableCell>
+                    <TableCell>Side</TableCell>
+                    <TableCell>Kelly</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {topValueProps.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell>{p.player_name || p.player}</TableCell>
+                      <TableCell>{p.stat_type}</TableCell>
+                      <TableCell>{p.line}</TableCell>
+                      <TableCell>{p.projection?.toFixed(1)}</TableCell>
+                      <TableCell>{(p.projection_diff || 0).toFixed(1)}</TableCell>
+                      <TableCell>{(p.projectionEdge * 100).toFixed(1)}%</TableCell>
+                      <TableCell>{p.recommendedSide?.toUpperCase()}</TableCell>
+                      <TableCell>{showKellySizing && p.kellyBetSize ? `${p.kellyBetSize.toFixed(1)}%` : '-'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Box>
         )}
-      </Paper>
 
-      {/* NEW: Generator Prompts */}
-      <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
-        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>⚡ Quick Prompts</Typography>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {generatorPrompts.map((prompt, idx) => (
-            <Button
-              key={idx}
-              size="small"
-              variant="outlined"
-              onClick={() => handlePromptClick(prompt.query)}
-              sx={{ textTransform: 'none' }}
-            >
-              {prompt.label}
-            </Button>
-          ))}
-        </Box>
-      </Paper>
+        {/* Debug Info (always visible) */}
+        <DebugInfo />
 
-      {/* Tabs for All Props / Top Value */}
-      <Paper sx={{ mb: 2 }}>
-        <Tabs value={activeTab} onChange={(_, val) => setActiveTab(val)}>
-          <Tab label="All Props" value="all" />
-          <Tab label="Top Value Picks" value="top" />
-        </Tabs>
-      </Paper>
+        {/* Filter Panel (always visible) */}
+        <FilterPanel />
 
-      {/* NEW: Sorting & Filter Controls */}
-      <Paper sx={{ p: 2, mb: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Typography variant="body2" fontWeight="bold">Sort by:</Typography>
-        <FormControl size="small" sx={{ minWidth: 120 }}>
-          <Select value={sortCriteria} onChange={(e) => setSortCriteria(e.target.value as any)}>
-            <MenuItem value="edge">Edge</MenuItem>
-            <MenuItem value="projection">Projection</MenuItem>
-            <MenuItem value="position">Position</MenuItem>
-          </Select>
-        </FormControl>
-
-        <Typography variant="body2" fontWeight="bold" sx={{ ml: 2 }}>Position:</Typography>
-        <FormControl size="small" sx={{ minWidth: 100 }}>
-          <Select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)}>
-            <MenuItem value="all">All</MenuItem>
-            <MenuItem value="G">Guard (G)</MenuItem>
-            <MenuItem value="F">Forward (F)</MenuItem>
-            <MenuItem value="C">Center (C)</MenuItem>
-          </Select>
-        </FormControl>
-      </Paper>
-
-      {/* Generated Props Section */}
-      {generatedProps.length > 0 && (
-        <Box sx={{ mb: 3, minHeight: generatedProps.length ? 'auto' : 0 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            <Typography variant="h6">✨ Generated Props ({generatedProps.length})</Typography>
-            <Button size="small" onClick={clearGenerated}>Clear</Button>
-          </Box>
-          <Grid container spacing={2}>
-            {generatedProps.map((prop, idx) => (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={prop.id || idx}>
-                <PlayerCard item={prop} />
-              </Grid>
-            ))}
-          </Grid>
-          <Divider sx={{ my: 2 }} />
-        </Box>
-      )}
-
-      {/* Conditional Rendering Based on Tab */}
-      {activeTab === 'top' && (
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" gutterBottom>🏆 Top 10 Value Picks</Typography>
-          <TableContainer component={Paper}>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Player</TableCell>
-                  <TableCell>Prop</TableCell>
-                  <TableCell>Line</TableCell>
-                  <TableCell>Projection</TableCell>
-                  <TableCell>Diff</TableCell>
-                  <TableCell>Edge</TableCell>
-                  <TableCell>Side</TableCell>
-                  <TableCell>Kelly</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {topValueProps.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell>{p.player_name || p.player}</TableCell>
-                    <TableCell>{p.stat_type}</TableCell>
-                    <TableCell>{p.line}</TableCell>
-                    <TableCell>{p.projection?.toFixed(1)}</TableCell>
-                    <TableCell>{(p.projection_diff || 0).toFixed(1)}</TableCell>
-                    <TableCell>{(p.projectionEdge * 100).toFixed(1)}%</TableCell>
-                    <TableCell>{p.recommendedSide?.toUpperCase()}</TableCell>
-                    <TableCell>{showKellySizing && p.kellyBetSize ? `${p.kellyBetSize.toFixed(1)}%` : '-'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-      )}
-
-      {/* Debug Info */}
-      <DebugInfo />
-
-      {/* Filter Panel */}
-      <FilterPanel />
-
-      {/* Value Stats Summary */}
-      {sortedProps.length > 0 && (
-        <Paper sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 'bold' }}>📊 Value Distribution</Typography>
-            <Typography variant="body2" color="text.secondary">{sortedProps.length} total props</Typography>
-          </Box>
-          <Grid container spacing={2}>
-            {(() => {
-              const positiveCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0).length;
-              const strongCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0.03).length;
-              const veryStrongCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0.05).length;
-              const positiveRate = ((positiveCount / sortedProps.length) * 100).toFixed(1);
-              return (
-                <>
-                  <Grid item xs={3}><Typography variant="h4" color="#059669">{positiveCount}</Typography><Typography variant="body2">+EV Props</Typography></Grid>
-                  <Grid item xs={3}><Typography variant="h4" color="#10b981">{strongCount}</Typography><Typography variant="body2">Strong Edge (&gt;3%)</Typography></Grid>
-                  <Grid item xs={3}><Typography variant="h4" color="#8b5cf6">{veryStrongCount}</Typography><Typography variant="body2">Very Strong (&gt;5%)</Typography></Grid>
-                  <Grid item xs={3}><Typography variant="h4">{positiveRate}%</Typography><Typography variant="body2">+EV Rate</Typography></Grid>
-                </>
-              );
-            })()}
-          </Grid>
-        </Paper>
-      )}
-
-      {/* Stats Bar */}
-      <Paper sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{filteredData.length} Player Props</Typography>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Chip label={`Avg Edge: ${filteredData.length ? (filteredData.reduce((sum, i) => sum + (i.edge || 0), 0) / filteredData.length).toFixed(1) : 0}%`} color="primary" variant="outlined" />
-          <Chip label={`Over: ${filteredData.filter(i => i.value_side === 'over').length}`} color="success" variant="outlined" />
-          <Chip label={`Under: ${filteredData.filter(i => i.value_side === 'under').length}`} color="error" variant="outlined" />
-          {showKellySizing && <Chip icon={<AttachMoney />} label={`Bankroll: $${bankrollAmount}`} color="info" variant="outlined" />}
-          <Chip label={`Loading: ${picksLoading ? 'Yes' : 'No'}`} color={picksLoading ? 'warning' : 'default'} variant="outlined" />
-        </Box>
-      </Paper>
-
-      {/* Error Alert */}
-      {error && <Alert severity="error" sx={{ mb: 3 }}><AlertTitle>Error</AlertTitle>{error}</Alert>}
-
-      {/* Loading State */}
-      {picksLoading && <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}><CircularProgress size={60} /></Box>}
-
-      {/* Player Cards Grid with Pagination (only show if tab is 'all') */}
-      {activeTab === 'all' && !picksLoading && filteredData.length > 0 ? (
-        <>
-          <Grid container spacing={3}>
-            {filteredData.slice(0, visibleCount).map((item) => (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={item.id || `${item.player}-${item.stat_type}`}>
-                <PlayerCard item={item} />
-              </Grid>
-            ))}
-          </Grid>
-          {visibleCount < filteredData.length && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Button variant="outlined" onClick={() => setVisibleCount(prev => prev + INCREMENT)}>
-                Load More ({filteredData.length - visibleCount} remaining)
-              </Button>
+        {/* Value Distribution Summary (always visible) */}
+        {sortedProps.length > 0 && (
+          <Paper sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="h6" sx={{ color: '#3b82f6', fontWeight: 'bold' }}>📊 Value Distribution</Typography>
+              <Typography variant="body2" color="text.secondary">{sortedProps.length} total props</Typography>
             </Box>
-          )}
-        </>
-      ) : activeTab === 'all' && !picksLoading && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            {combinedData.length > 0 ? 'No props match your filters' : 'No data available'}
-          </Typography>
-          <Button variant="outlined" sx={{ mt: 2 }} onClick={() => setFilters({ minEdge: 0, maxEdge: 100, minProjection: 0, maxProjection: 50, statType: 'all', valueSide: 'all', sortBy: 'edge', sortOrder: 'desc' })}>
-            Reset All Filters
-          </Button>
+            <Grid container spacing={2}>
+              {(() => {
+                const positiveCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0).length;
+                const strongCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0.03).length;
+                const veryStrongCount = sortedProps.filter(p => (p.projectionEdge || 0) > 0.05).length;
+                const positiveRate = ((positiveCount / sortedProps.length) * 100).toFixed(1);
+                return (
+                  <>
+                    <Grid item xs={3}><Typography variant="h4" color="#059669">{positiveCount}</Typography><Typography variant="body2">+EV Props</Typography></Grid>
+                    <Grid item xs={3}><Typography variant="h4" color="#10b981">{strongCount}</Typography><Typography variant="body2">Strong Edge (&gt;3%)</Typography></Grid>
+                    <Grid item xs={3}><Typography variant="h4" color="#8b5cf6">{veryStrongCount}</Typography><Typography variant="body2">Very Strong (&gt;5%)</Typography></Grid>
+                    <Grid item xs={3}><Typography variant="h4">{positiveRate}%</Typography><Typography variant="body2">+EV Rate</Typography></Grid>
+                  </>
+                );
+              })()}
+            </Grid>
+          </Paper>
+        )}
+
+        {/* Stats Header */}
+        <Paper sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{filteredData.length} Player Props</Typography>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Chip label={`Avg Edge: ${filteredData.length ? (filteredData.reduce((sum, i) => sum + (i.edge || 0), 0) / filteredData.length).toFixed(1) : 0}%`} color="primary" variant="outlined" />
+            <Chip label={`Over: ${filteredData.filter(i => i.value_side === 'over').length}`} color="success" variant="outlined" />
+            <Chip label={`Under: ${filteredData.filter(i => i.value_side === 'under').length}`} color="error" variant="outlined" />
+            {showKellySizing && <Chip icon={<AttachMoney />} label={`Bankroll: $${bankrollAmount}`} color="info" variant="outlined" />}
+            <Chip label={`Loading: ${picksLoading ? 'Yes' : 'No'}`} color={picksLoading ? 'warning' : 'default'} variant="outlined" />
+          </Box>
         </Paper>
-      )}
 
-      {/* Refresh Button */}
-      <Box sx={{ mt: 4, textAlign: 'center' }}>
-        <Button variant="contained" onClick={fetchPrizepicksSelections} disabled={picksLoading} startIcon={picksLoading ? <CircularProgress size={20} /> : <Refresh />} sx={{ minWidth: 200, py: 1.5 }}>
-          {picksLoading ? 'Refreshing...' : 'Refresh Data'}
-        </Button>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Last updated: {picksData?.timestamp ? new Date(picksData.timestamp).toLocaleTimeString() : 'Never'}
-        </Typography>
-      </Box>
+        {error && <Alert severity="error" sx={{ mb: 3 }}><AlertTitle>Error</AlertTitle>{error}</Alert>}
 
-      {/* Snackbar */}
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
-        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>{snackbar.message}</Alert>
-      </Snackbar>
-    </Container>
+        {picksLoading && <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}><CircularProgress size={60} /></Box>}
+
+        {/* All Props Tab */}
+        {activeTab === 'all' && !picksLoading && filteredData.length > 0 ? (
+          <>
+            <Grid container spacing={3}>
+              {filteredData.slice(0, visibleCount).map((item) => (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={item.id || `${item.player}-${item.stat_type}`}>
+                  <PlayerCard item={item} />
+                </Grid>
+              ))}
+            </Grid>
+            {visibleCount < filteredData.length && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                <Button variant="outlined" onClick={() => setVisibleCount(prev => prev + INCREMENT)}>
+                  Load More ({filteredData.length - visibleCount} remaining)
+                </Button>
+              </Box>
+            )}
+          </>
+        ) : activeTab === 'all' && !picksLoading && (
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              {combinedData.length > 0 ? 'No props match your filters' : 'No data available'}
+            </Typography>
+            <Button variant="outlined" sx={{ mt: 2 }} onClick={() => setFilters({ minEdge: 0, maxEdge: 100, minProjection: 0, maxProjection: 50, statType: 'all', valueSide: 'all', sortBy: 'edge', sortOrder: 'desc' })}>
+              Reset All Filters
+            </Button>
+          </Paper>
+        )}
+
+        {/* Refresh Button */}
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          <Button variant="contained" onClick={fetchPrizepicksSelections} disabled={picksLoading} startIcon={picksLoading ? <CircularProgress size={20} /> : <Refresh />} sx={{ minWidth: 200, py: 1.5 }}>
+            {picksLoading ? 'Refreshing...' : 'Refresh Data'}
+          </Button>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Last updated: {picksData?.timestamp ? new Date(picksData.timestamp).toLocaleTimeString() : 'Never'}
+          </Typography>
+        </Box>
+
+        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
+          <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>{snackbar.message}</Alert>
+        </Snackbar>
+
+        <PurchaseDialog />
+      </Container>
+    </Box>
   );
 };
 
-// Helper for sport color
 const getSportColor = (sport: string) => {
   switch(sport) {
     case 'nba': return '#ef4444';

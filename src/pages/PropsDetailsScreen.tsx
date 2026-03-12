@@ -382,7 +382,7 @@ const PropsDetailsScreen: React.FC = () => {
   }, []);
 
   // =============================================
-  // FETCH PROP DATA (from API, fallback)
+  // FETCH PROP DATA (from API, fallback) – FIXED SEARCH
   // =============================================
 
   const fetchPropData = useCallback(async () => {
@@ -406,20 +406,16 @@ const PropsDetailsScreen: React.FC = () => {
         return;
       }
 
-      let prop = props.find(p => p.id === propId);
-      if (!prop && /^\d+$/.test(propId)) {
-        const num = parseInt(propId, 10);
-        prop = props.find(p => {
-          const match = p.id.match(/_(\d+)$/);
-          return match && parseInt(match[1], 10) === num;
-        });
-      }
-      if (!prop && /^\d+$/.test(propId)) {
-        const index = parseInt(propId, 10) - 1;
-        if (index >= 0 && index < props.length) {
-          prop = props[index];
+      // --- FIXED: safe equality checks, no .match() ---
+      let prop = props.find(p => String(p.id) === propId);
+      if (!prop) {
+        // fallback: try numeric comparison if propId looks like a number
+        const numericId = Number(propId);
+        if (!isNaN(numericId)) {
+          prop = props.find(p => p.id === numericId);
         }
       }
+      // ------------------------------------------------
 
       if (!prop) {
         console.error('❌ Prop not found with ID:', propId);
@@ -478,11 +474,11 @@ const PropsDetailsScreen: React.FC = () => {
   }, [propId, fetchGameLogs, fetchBookmakerComparisons, fetchSimilarPlayers, fetchVenueStats, fetchWeather, fetchAIAnalysis]);
 
   // =============================================
-  // EFFECT – use passed prop if available, else fetch
+  // EFFECT – use passed prop if available, else fetch – FIXED CONDITION
   // =============================================
 
   useEffect(() => {
-    if (passedProp && passedProp.id === propId) {
+    if (passedProp && String(passedProp.id) === propId) {
       console.log('✅ Using passed prop data for', passedProp.player);
       const mapped: PlayerPropData = {
         id: passedProp.id,

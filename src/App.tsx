@@ -1,10 +1,10 @@
-// src/App.tsx – Complete Integrated Version with All Screens & react-error-boundary
+// src/App.tsx – Complete Integrated Version with Authentication Flow
 // February 2026
 
-import React, { useState, useEffect, Suspense, lazy, useRef } from 'react';   // <-- added useRef
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, BrowserRouter as Router } from 'react-router-dom';
-import { initializeApp } from 'firebase/app';
 import { getAnalytics } from 'firebase/analytics';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 
 // React Query
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -29,7 +29,7 @@ import { BookmarkProvider } from './context/BookmarkContext';
 // Material-UI components for fallback UI
 import { Container, Paper, Typography, Button, Box } from '@mui/material';
 
-// Temporary/Mock Providers (replace when ready)
+// Temporary/Mock Providers
 const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   const [theme] = useState('dark');
   return <div data-theme={theme}>{children}</div>;
@@ -42,51 +42,41 @@ import LiveGamesScreen from './pages/LiveGamesScreen';
 import NewsDeskScreen from './pages/NewsDeskScreen';
 import DailyPicksScreen from './pages/DailyPicksScreen';
 import LoginScreenEnhanced from './pages/LoginScreenEnhanced';
-import NFLAnalyticsScreen from './pages/NFLAnalyticsScreen';
-import DiagnosticScreen from './pages/DiagnosticScreen';
-import Health from './pages/Health';
+import IntroPage from './pages/IntroPage';
+import TeamRostersPage from './pages/TeamRostersPage';
+
+// ---------- NHL SCREENS ----------
+import NHLTrendsScreen from './pages/NHLTrendsScreen';
+
+// ---------- NCAAB SCREENS (FIXED with correct filenames) ----------
+import NCAABGamesPage from './pages/ncaab/NCAABGamesPage';
+import NCAABGameDetailPage from './pages/ncaab/NCAABGameDetailPage';
+import NCAABStandingsPage from './pages/ncaab/NCAABStandingsPage';
+import NCAABPlayersPage from './pages/ncaab/NCAABPlayersPage';
+import NCAABPlayerDetailPage from './pages/ncaab/NCAABPlayerDetailPage';
+import NCAABTeamsPage from './pages/ncaab/NCAABTeamsPage';
+import NCAABRankingsPage from './pages/ncaab/NCAABRankingsPage';
+import NCAABBracketPage from './pages/ncaab/NCAABBracketPage';
 
 // ---------- 2026 SEASON SCREENS ----------
 import WorldCup2026Screen from './pages/WorldCup2026Screen';
-import AllStar2026Screen from './pages/AllStar2026Screen';
-import Futures2026Screen from './pages/Futures2026Screen';
-import AltLinesScreen from './pages/AltLinesScreen';
-import SeasonStatsScreen from './pages/SeasonStatsScreen';
-import RookieWatchScreen from './pages/RookieWatchScreen';
 
 // ---------- ANALYTICS SCREENS ----------
-import TrendAnalysisScreen from './pages/TrendAnalysisScreen';
-import SportsSpecificAnalyticsScreen from './pages/SportsSpecificAnalyticsScreen';
-import HistoricalAnalyticsScreen from './pages/HistoricalAnalyticsScreen';
 import AnalyticsDashboardScreen from './pages/AnalyticsDashboardScreen';
 
 // ---------- PARLAY & BETTING SCREENS ----------
-import ParlayBuilderScreen from './pages/ParlayBuilderScreen';
 import SameGameParlayScreen from './pages/SameGameParlayScreen';
-import TeaserCalculatorScreen from './pages/TeaserCalculatorScreen';
-import RoundRobinScreen from './pages/RoundRobinScreen';
-import ParlayBoostsScreen from './pages/ParlayBoostsScreen';
-import ParlayHistoryScreen from './pages/ParlayHistoryScreen';
-import ParlayDetailScreen from './pages/ParlayDetailScreen';
 
 // ---------- AI & CORRELATION SCREENS ----------
 import AIParlaySuggestionsScreen from './pages/AIParlaySuggestionsScreen';
 import ParlayAnalyticsScreen from './pages/ParlayAnalyticsScreen';
-import CorrelationExplorerScreen from './pages/CorrelationExplorerScreen';
-import CorrelatedParlayDetailsScreen from './pages/CorrelatedParlayDetailsScreen';
 
 // ---------- PROPS SCREENS ----------
 import PlayerPropsScreen from './pages/PlayerPropsScreen';
-import PropsDetailsScreen from './pages/PropsDetailsScreen';
-
-// ---------- PREDICTION SCREENS ----------
-import PredictionMarketsScreen from './pages/PredictionMarketsScreen';
-import PredictionDetailScreen from './pages/PredictionDetailScreen';
 
 // ---------- SPORTS DASHBOARDS ----------
 import NBADashboard from './pages/NBADashboard';
 import NHLDashboard from './pages/NHLDashboard';
-import NFLDashboard from './pages/NFLDashboard';
 import MLBSpringTraining from './pages/MLBSpringTraining';
 
 // ---------- TENNIS & GOLF ----------
@@ -108,23 +98,7 @@ const MatchAnalyticsScreen = lazy(() => import('./pages/MatchAnalyticsScreen'));
 const ParlayArchitectScreen = lazy(() => import('./pages/ParlayArchitectScreen'));
 const SportsWireScreen = lazy(() => import('./pages/SportsWireScreen'));
 const SecretPhraseScreen = lazy(() => import('./pages/SecretPhraseScreen'));
-const SubscriptionScreen = lazy(() => import('./pages/SubscriptionScreen'));
-const BackendTestScreen = lazy(() => import('./pages/BackendTestScreen'));
-
-// ---------- PLACEHOLDERS (now actual screens) ----------
-import AllStarWeekendScreen from './pages/AllStarWeekendScreen';
-import SeasonStatusScreen from './pages/SeasonStatusScreen';
-import TradeDeadlineScreen from './pages/TradeDeadlineScreen';
-
-// ---------- 2026 Season Hub Page ----------
-const TwentyTwentySixHomePage = () => {
-  return (
-    <div>
-      <h1>2026 Season Hub</h1>
-      <p>Welcome to the 2026 season hub – central access to all 2026‑related screens.</p>
-    </div>
-  );
-};
+const SeasonStatsScreen = lazy(() => import('./pages/SeasonStatsScreen'));
 
 // ---------- React Query Setup ----------
 const queryClient = new QueryClient({
@@ -141,13 +115,13 @@ const queryClient = new QueryClient({
 // ---------- Fixed Infinite Loop Detector ----------
 const InfiniteLoopDetector = () => {
   if (import.meta.env.DEV) {
-    const renderCount = useRef(0);
-    useEffect(() => {
+    const renderCount = React.useRef(0);
+    React.useEffect(() => {
       renderCount.current += 1;
       if (renderCount.current > 50) {
         console.error('Potential infinite loop detected!');
       }
-    }); // no deps – runs after every render but does NOT cause re‑renders
+    });
   }
   return null;
 };
@@ -172,6 +146,9 @@ const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error; resetError
   </Container>
 );
 
+// ---------- Private Route Component ----------
+import PrivateRoute from './components/PrivateRoute';
+
 // ---------- Main App Component ----------
 function App() {
   // Firebase init
@@ -186,8 +163,11 @@ function App() {
         appId: import.meta.env.VITE_FIREBASE_APP_ID,
         measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
       };
-      if (firebaseConfig.apiKey) {
+      if (!getApps().length) {
         const app = initializeApp(firebaseConfig);
+        if (import.meta.env.PROD) getAnalytics(app);
+      } else {
+        const app = getApp();
         if (import.meta.env.PROD) getAnalytics(app);
       }
     } catch (error) {
@@ -214,97 +194,73 @@ function App() {
                                 onReset={() => window.location.reload()}
                               >
                                 <Router>
-                                  <InfiniteLoopDetector />   {/* Now safe */}
+                                  <InfiniteLoopDetector />
                                   <Routes>
-                                    <Route path="/" element={<Layout />}>
-                                      {/* Core */}
-                                      <Route index element={<HomeScreen />} />
-                                      <Route path="live-games" element={<LiveGamesScreen />} />
-                                      <Route path="nfl-analytics" element={<NFLAnalyticsScreen />} />
-                                      <Route path="news-desk" element={<NewsDeskScreen />} />
-                                      <Route path="daily-picks" element={<DailyPicksScreen />} />
-                                      <Route path="login" element={<LoginScreenEnhanced />} />
-                                      <Route path="diagnostic" element={<DiagnosticScreen />} />
-                                      <Route path="health" element={<Health />} />
+                                    {/* Public routes */}
+                                    <Route path="/" element={<IntroPage />} />
+                                    <Route path="/login" element={<LoginScreenEnhanced />} />
 
-                                      {/* 2026 Hub */}
-                                      <Route path="2026" element={<TwentyTwentySixHomePage />} />
+                                    {/* Private routes (require authentication) */}
+                                    <Route element={<PrivateRoute />}>
+                                      <Route element={<Layout />}>
+                                        {/* ALL-ACCESS Section */}
+                                        <Route path="/home" element={<HomeScreen />} />
+                                        <Route path="live-games" element={<LiveGamesScreen />} />
+                                        <Route path="newsdesk" element={<NewsDeskScreen />} />
+                                        <Route path="team-rosters" element={<TeamRostersPage />} />
 
-                                      {/* 2026 Season Screens */}
-                                      <Route path="world-cup-2026" element={<WorldCup2026Screen />} />
-                                      <Route path="all-star-2026" element={<AllStar2026Screen />} />
-                                      <Route path="futures-2026" element={<Futures2026Screen />} />
-                                      <Route path="alt-lines" element={<AltLinesScreen />} />
-                                      <Route path="season-stats" element={<SeasonStatsScreen />} />
-                                      <Route path="rookie-watch" element={<RookieWatchScreen />} />
+                                        {/* STATS Section */}
+                                        <Route path="player-props" element={<PlayerPropsScreen />} />
+                                        <Route path="player-stats" element={<Suspense fallback={<div>Loading...</div>}><PlayerStatsScreen /></Suspense>} />
+                                        <Route path="match-analytics" element={<Suspense fallback={<div>Loading...</div>}><MatchAnalyticsScreen /></Suspense>} />
+                                        <Route path="season-stats" element={<Suspense fallback={<div>Loading...</div>}><SeasonStatsScreen /></Suspense>} />
+                                        <Route path="nhl-trends" element={<NHLTrendsScreen />} />
 
-                                      {/* Analytics */}
-                                      <Route path="trend-analysis" element={<TrendAnalysisScreen />} />
-                                      <Route path="sports-analytics/:sport" element={<SportsSpecificAnalyticsScreen />} />
-                                      <Route path="historical-analytics" element={<HistoricalAnalyticsScreen />} />
-                                      <Route path="analytics-dashboard" element={<AnalyticsDashboardScreen />} />
+                                        {/* GENERATOR$ Section */}
+                                        <Route path="daily-picks" element={<DailyPicksScreen />} />
+                                        <Route path="secret-phrases" element={<Suspense fallback={<div>Loading...</div>}><SecretPhraseScreen /></Suspense>} />
+                                        <Route path="sports-wire" element={<Suspense fallback={<div>Loading...</div>}><SportsWireScreen /></Suspense>} />
+                                        <Route path="prize-picks" element={<Suspense fallback={<div>Loading...</div>}><PrizePicksScreen /></Suspense>} />
+                                        <Route path="fantasy-hub" element={<Suspense fallback={<div>Loading...</div>}><FantasyHubScreen /></Suspense>} />
+                                        <Route path="advanced-analytics" element={<Suspense fallback={<div>Loading...</div>}><AdvancedAnalyticsScreen /></Suspense>} />
+                                        <Route path="kalshi-predictions" element={<Suspense fallback={<div>Loading...</div>}><KalshiPredictionsScreen /></Suspense>} />
+                                        <Route path="predictions-outcome" element={<Suspense fallback={<div>Loading...</div>}><PredictionsOutcomeScreen /></Suspense>} />
 
-                                      {/* Parlay & Betting */}
-                                      <Route path="parlay-builder" element={<ParlayBuilderScreen />} />
-                                      <Route path="same-game-parlay" element={<SameGameParlayScreen />} />
-                                      <Route path="teaser-calculator" element={<TeaserCalculatorScreen />} />
-                                      <Route path="round-robin" element={<RoundRobinScreen />} />
-                                      <Route path="parlay-boosts" element={<ParlayBoostsScreen />} />
-                                      <Route path="parlay-history" element={<ParlayHistoryScreen />} />
-                                      <Route path="parlay-details/:id" element={<ParlayDetailScreen />} />
+                                        {/* PARLAYPLUSPACKAGE-PPP Section */}
+                                        <Route path="parlay-architect" element={<Suspense fallback={<div>Loading...</div>}><ParlayArchitectScreen /></Suspense>} />
+                                        <Route path="same-game-parlay" element={<SameGameParlayScreen />} />
+                                        <Route path="parlay-analytics" element={<ParlayAnalyticsScreen />} />
+                                        <Route path="ai-suggestions" element={<AIParlaySuggestionsScreen />} />
 
-                                      {/* AI & Correlation */}
-                                      <Route path="ai-suggestions" element={<AIParlaySuggestionsScreen />} />
-                                      <Route path="parlay-analytics" element={<ParlayAnalyticsScreen />} />
-                                      <Route path="correlation-explorer" element={<CorrelationExplorerScreen />} />
-                                      <Route path="correlated-parlay/:id" element={<CorrelatedParlayDetailsScreen />} />
+                                        {/* DASHBOARDS Section */}
+                                        <Route path="analytics-dashboard" element={<AnalyticsDashboardScreen />} />
+                                        <Route path="nba-dashboard" element={<NBADashboard />} />
+                                        <Route path="nhl-dashboard" element={<NHLDashboard />} />
+                                        <Route path="mlb-spring-training" element={<MLBSpringTraining />} />
 
-                                      {/* Props */}
-                                      <Route path="player-props" element={<PlayerPropsScreen />} />
-                                      <Route path="props-details/:propId" element={<PropsDetailsScreen />} />
+                                        {/* NCAAB Section - with correct paths */}
+                                        <Route path="ncaab/games" element={<NCAABGamesPage />} />
+                                        <Route path="ncaab/games/:id" element={<NCAABGameDetailPage />} />
+                                        <Route path="ncaab/standings" element={<NCAABStandingsPage />} />
+                                        <Route path="ncaab/players" element={<NCAABPlayersPage />} />
+                                        <Route path="ncaab/players/:id" element={<NCAABPlayerDetailPage />} />
+                                        <Route path="ncaab/teams" element={<NCAABTeamsPage />} />
+                                        <Route path="ncaab/rankings" element={<NCAABRankingsPage />} />
+                                        <Route path="ncaab/bracket" element={<NCAABBracketPage />} />
 
-                                      {/* Prediction Markets */}
-                                      <Route path="prediction-markets" element={<PredictionMarketsScreen />} />
-                                      <Route path="prediction/:id" element={<PredictionDetailScreen />} />
-
-                                      {/* Sports Dashboards */}
-                                      <Route path="nba-dashboard" element={<NBADashboard />} />
-                                      <Route path="nhl-dashboard" element={<NHLDashboard />} />
-                                      <Route path="nfl-dashboard" element={<NFLDashboard />} />
-                                      <Route path="mlb-spring-training" element={<MLBSpringTraining />} />
-
-                                      {/* Tennis */}
-                                      <Route path="tennis/players" element={<TennisPlayers />} />
-                                      <Route path="tennis/tournaments" element={<TennisTournaments />} />
-                                      <Route path="tennis/matches" element={<TennisMatches />} />
-
-                                      {/* Golf */}
-                                      <Route path="golf/players" element={<GolfPlayers />} />
-                                      <Route path="golf/tournaments" element={<GolfTournaments />} />
-                                      <Route path="golf/leaderboard" element={<GolfLeaderboard />} />
-
-                                      {/* New Placeholder Screens */}
-                                      <Route path="all-star-weekend" element={<AllStarWeekendScreen />} />
-                                      <Route path="season-status" element={<SeasonStatusScreen />} />
-                                      <Route path="trade-deadline" element={<TradeDeadlineScreen />} />
-
-                                      {/* Lazy loaded */}
-                                      <Route path="parlay-architect" element={<Suspense fallback={<div>Loading...</div>}><ParlayArchitectScreen /></Suspense>} />
-                                      <Route path="fantasy-hub" element={<Suspense fallback={<div>Loading...</div>}><FantasyHubScreen /></Suspense>} />
-                                      <Route path="player-stats" element={<Suspense fallback={<div>Loading...</div>}><PlayerStatsScreen /></Suspense>} />
-                                      <Route path="sports-wire" element={<Suspense fallback={<div>Loading...</div>}><SportsWireScreen /></Suspense>} />
-                                      <Route path="match-analytics" element={<Suspense fallback={<div>Loading...</div>}><MatchAnalyticsScreen /></Suspense>} />
-                                      <Route path="advanced-analytics" element={<Suspense fallback={<div>Loading...</div>}><AdvancedAnalyticsScreen /></Suspense>} />
-                                      <Route path="predictions-outcome" element={<Suspense fallback={<div>Loading...</div>}><PredictionsOutcomeScreen /></Suspense>} />
-                                      <Route path="kalshi-predictions" element={<Suspense fallback={<div>Loading...</div>}><KalshiPredictionsScreen /></Suspense>} />
-                                      <Route path="prize-picks" element={<Suspense fallback={<div>Loading...</div>}><PrizePicksScreen /></Suspense>} />
-                                      <Route path="secret-phrases" element={<Suspense fallback={<div>Loading...</div>}><SecretPhraseScreen /></Suspense>} />
-                                      <Route path="subscription" element={<Suspense fallback={<div>Loading...</div>}><SubscriptionScreen /></Suspense>} />
-                                      <Route path="backend-test" element={<Suspense fallback={<div>Loading...</div>}><BackendTestScreen /></Suspense>} />
-
-                                      {/* Catch-all */}
-                                      <Route path="*" element={<Navigate to="/" replace />} />
+                                        {/* Misc. Sports Section */}
+                                        <Route path="world-cup-2026" element={<WorldCup2026Screen />} />
+                                        <Route path="tennis/players" element={<TennisPlayers />} />
+                                        <Route path="tennis/tournaments" element={<TennisTournaments />} />
+                                        <Route path="tennis/matches" element={<TennisMatches />} />
+                                        <Route path="golf/players" element={<GolfPlayers />} />
+                                        <Route path="golf/tournaments" element={<GolfTournaments />} />
+                                        <Route path="golf/leaderboard" element={<GolfLeaderboard />} />
+                                      </Route>
                                     </Route>
+
+                                    {/* Catch-all */}
+                                    <Route path="*" element={<Navigate to="/" replace />} />
                                   </Routes>
                                 </Router>
                               </ErrorBoundary>

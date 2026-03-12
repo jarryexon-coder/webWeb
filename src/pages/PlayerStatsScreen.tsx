@@ -88,8 +88,9 @@ import {
 import { alpha } from '@mui/material/styles';
 import { useQuery } from '@tanstack/react-query';
 
-// Import React Query hook – now always using fantasy/players endpoint
-import { useFantasyPlayers } from '../hooks/useUnifiedAPI';
+// ============= CONSTANTS =============
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 // Mock data for players (fallback)
 const mockPlayers = {
@@ -357,7 +358,6 @@ const AnalyticsBox = () => {
   const [analyticsEvents, setAnalyticsEvents] = useState<any[]>([]);
 
   const loadAnalyticsEvents = () => {
-    // Mock analytics events
     const events = [
       { event: 'player_stats_view', params: { sport: 'NFL', player: 'Mahomes' }, timestamp: new Date().toISOString() },
       { event: 'player_stats_search', params: { query: 'quarterbacks' }, timestamp: new Date(Date.now() - 300000).toISOString() },
@@ -396,11 +396,7 @@ const AnalyticsBox = () => {
   }
 
   return (
-    <Modal
-      open={showAnalytics}
-      onClose={() => setShowAnalytics(false)}
-      closeAfterTransition
-    >
+    <Modal open={showAnalytics} onClose={() => setShowAnalytics(false)} closeAfterTransition>
       <Fade in={showAnalytics}>
         <Paper sx={{
           position: 'absolute',
@@ -414,118 +410,35 @@ const AnalyticsBox = () => {
           bgcolor: 'background.paper'
         }}>
           <CardContent>
-            {/* Header */}
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
               <Box display="flex" alignItems="center" gap={2}>
                 <AnalyticsIcon color="primary" />
-                <Typography variant="h5" fontWeight="bold">
-                  Player Stats Analytics
-                </Typography>
+                <Typography variant="h5" fontWeight="bold">Player Stats Analytics</Typography>
               </Box>
               <Box display="flex" gap={1}>
-                <IconButton onClick={() => {
-                  setAnalyticsEvents([]);
-                  alert('Analytics cleared');
-                }} color="error" size="small">
-                  <CloseIcon />
-                </IconButton>
-                <IconButton onClick={() => setShowAnalytics(false)} size="small">
-                  <CloseIcon />
-                </IconButton>
+                <IconButton onClick={() => { setAnalyticsEvents([]); alert('Analytics cleared'); }} color="error" size="small"><CloseIcon /></IconButton>
+                <IconButton onClick={() => setShowAnalytics(false)} size="small"><CloseIcon /></IconButton>
               </Box>
             </Box>
-
-            {/* Stats Overview */}
             <Grid container spacing={2} mb={3}>
-              <Grid item xs={4}>
-                <Box textAlign="center" p={1}>
-                  <Typography variant="h4" fontWeight="bold">
-                    {analyticsEvents.length}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Total Events
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
-                <Box textAlign="center" p={1}>
-                  <Typography variant="h4" fontWeight="bold">
-                    {analyticsEvents.filter(e => e.event.includes('view')).length}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Views
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={4}>
-                <Box textAlign="center" p={1}>
-                  <Typography variant="h4" fontWeight="bold">
-                    {analyticsEvents.filter(e => e.event.includes('select')).length}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Selections
-                  </Typography>
-                </Box>
-              </Grid>
+              <Grid item xs={4}><Box textAlign="center" p={1}><Typography variant="h4" fontWeight="bold">{analyticsEvents.length}</Typography><Typography variant="caption" color="text.secondary">Total Events</Typography></Box></Grid>
+              <Grid item xs={4}><Box textAlign="center" p={1}><Typography variant="h4" fontWeight="bold">{analyticsEvents.filter(e => e.event.includes('view')).length}</Typography><Typography variant="caption" color="text.secondary">Views</Typography></Box></Grid>
+              <Grid item xs={4}><Box textAlign="center" p={1}><Typography variant="h4" fontWeight="bold">{analyticsEvents.filter(e => e.event.includes('select')).length}</Typography><Typography variant="caption" color="text.secondary">Selections</Typography></Box></Grid>
             </Grid>
-
-            {/* Recent Events */}
-            <Typography variant="subtitle1" fontWeight="bold" mb={2}>
-              Recent Player Stats Events
-            </Typography>
-            
+            <Typography variant="subtitle1" fontWeight="bold" mb={2}>Recent Player Stats Events</Typography>
             {analyticsEvents.length === 0 ? (
-              <Box textAlign="center" py={4}>
-                <BarChartIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography color="text.secondary">
-                  No player stats analytics recorded
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Interact with players to see events
-                </Typography>
-              </Box>
+              <Box textAlign="center" py={4}><BarChartIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} /><Typography color="text.secondary">No player stats analytics recorded</Typography><Typography variant="caption" color="text.secondary">Interact with players to see events</Typography></Box>
             ) : (
               <List sx={{ maxHeight: 200, overflow: 'auto' }}>
                 {analyticsEvents.map((event, index) => (
-                  <ListItem key={index} sx={{ 
-                    mb: 1, 
-                    bgcolor: 'action.hover',
-                    borderRadius: 1
-                  }}>
-                    <ListItemAvatar>
-                      <Avatar sx={{ 
-                        bgcolor: event.event.includes('error') ? 'error.main' : 'info.main',
-                        width: 32,
-                        height: 32
-                      }}>
-                        {event.event.includes('error') ? '!' : '📊'}
-                      </Avatar>
-                    </ListItemAvatar>
-                    <ListItemText
-                      primary={event.event.split('_').slice(1).join(' ')}
-                      secondary={
-                        Object.keys(event.params).length > 0 
-                          ? JSON.stringify(event.params)
-                          : new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      }
-                      primaryTypographyProps={{ variant: 'body2', fontWeight: 'medium' }}
-                      secondaryTypographyProps={{ variant: 'caption' }}
-                    />
+                  <ListItem key={index} sx={{ mb: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                    <ListItemAvatar><Avatar sx={{ bgcolor: event.event.includes('error') ? 'error.main' : 'info.main', width: 32, height: 32 }}>{event.event.includes('error') ? '!' : '📊'}</Avatar></ListItemAvatar>
+                    <ListItemText primary={event.event.split('_').slice(1).join(' ')} secondary={Object.keys(event.params).length > 0 ? JSON.stringify(event.params) : new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} primaryTypographyProps={{ variant: 'body2', fontWeight: 'medium' }} secondaryTypographyProps={{ variant: 'caption' }} />
                   </ListItem>
                 ))}
               </List>
             )}
-
-            {/* Refresh Button */}
-            <Button
-              fullWidth
-              variant="contained"
-              startIcon={<RefreshIcon />}
-              onClick={loadAnalyticsEvents}
-              sx={{ mt: 2 }}
-            >
-              Refresh Analytics
-            </Button>
+            <Button fullWidth variant="contained" startIcon={<RefreshIcon />} onClick={loadAnalyticsEvents} sx={{ mt: 2 }}>Refresh Analytics</Button>
           </CardContent>
         </Paper>
       </Fade>
@@ -548,39 +461,24 @@ const AdvancedMetricsGuide = ({ open, onClose }: { open: boolean, onClose: () =>
     <Dialog open={open} onClose={onClose} maxWidth="md">
       <DialogTitle>Advanced Metrics Guide</DialogTitle>
       <DialogContent>
-        <DialogContentText sx={{ mb: 3 }}>
-          These advanced metrics provide deeper insights into player performance beyond traditional statistics.
-        </DialogContentText>
-        
+        <DialogContentText sx={{ mb: 3 }}>These advanced metrics provide deeper insights into player performance beyond traditional statistics.</DialogContentText>
         <Grid container spacing={2}>
           {metrics.map((metric, index) => (
             <Grid item xs={12} key={index}>
               <Card sx={{ borderLeft: `4px solid ${metric.color}` }}>
                 <CardContent>
                   <Box display="flex" alignItems="center" mb={1}>
-                    <Box sx={{ 
-                      width: 12, 
-                      height: 12, 
-                      bgcolor: metric.color,
-                      borderRadius: '50%',
-                      mr: 2 
-                    }} />
-                    <Typography variant="h6" fontWeight="medium">
-                      {metric.name}
-                    </Typography>
+                    <Box sx={{ width: 12, height: 12, bgcolor: metric.color, borderRadius: '50%', mr: 2 }} />
+                    <Typography variant="h6" fontWeight="medium">{metric.name}</Typography>
                   </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    {metric.description}
-                  </Typography>
+                  <Typography variant="body2" color="text.secondary">{metric.description}</Typography>
                 </CardContent>
               </Card>
             </Grid>
           ))}
         </Grid>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
+      <DialogActions><Button onClick={onClose}>Close</Button></DialogActions>
     </Dialog>
   );
 };
@@ -590,41 +488,8 @@ const PlayerStatsScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
-  // Use React Query hook – always fetch from fantasy/players endpoint
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   const [showApiDebug, setShowApiDebug] = useState(false);
-
-  const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
-
-  const {
-    data: playersData,
-    isLoading,
-    error,
-    refetch,
-    isRefetching,
-  } = useQuery({
-    queryKey: ['fantasyhubPlayers', selectedSport],
-    queryFn: async () => {
-      const url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${selectedSport}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      // The endpoint returns { success: true, data: [...] }
-      if (json.success && Array.isArray(json.data)) {
-        return {
-          players: json.data,
-          is_real_data: true,
-        };
-      }
-      throw new Error('Invalid response from fantasyhub API');
-    },
-    staleTime: 1000 * 60 * 2,
-    refetchOnWindowFocus: false,
-    retry: 1,
-  });
-    
-  // Extract players from hook response
-  const playersFromApi = playersData?.players || [];
   
   const [selectedPosition, setSelectedPosition] = useState('All Positions');
   const [selectedTeam, setSelectedTeam] = useState('All Teams');
@@ -635,6 +500,57 @@ const PlayerStatsScreen = () => {
   const [advancedMetrics, setAdvancedMetrics] = useState<any>({});
   
   const [searchHistory, setSearchHistory] = useState<string[]>(['Patrick Mahomes', 'Quarterbacks', 'Top receivers']);
+
+  // ============= REACT QUERY =============
+  const {
+    data: playersData,
+    isLoading,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery({
+    queryKey: ['players', selectedSport],
+    queryFn: async () => {
+      let url: string;
+      let response;
+      
+      if (selectedSport === 'mlb' || selectedSport === 'nhl') {
+        // Use Python API for MLB and NHL (real data endpoints exist)
+        url = `${PYTHON_API_BASE}/api/players?sport=${selectedSport}&realtime=true&limit=500`;
+        response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const json = await response.json();
+        console.log(`🔍 RAW ${selectedSport} response (Python):`, json);
+
+        // Python API returns { success: true, data: { players, is_real_data } }
+        if (json.success && json.data?.players) {
+          const players = json.data.players;
+          const isReal = json.data.is_real_data === true;
+          return { players, is_real_data: isReal };
+        }
+        return { players: [], is_real_data: false };
+      } else {
+        // For NBA and NFL, use Node API
+        url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${selectedSport}`;
+        response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const json = await response.json();
+        console.log(`🔍 RAW ${selectedSport} response (Node):`, json);
+
+        if (json.success && Array.isArray(json.data)) {
+          // Only mark as real if array is non-empty
+          const isReal = json.data.length > 0;
+          return { players: json.data, is_real_data: isReal };
+        }
+        return { players: [], is_real_data: false };
+      }
+    },
+    staleTime: 1000 * 60 * 2,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+
+  const playersFromApi = playersData?.players || [];
 
   // Debug logging
   useEffect(() => {
@@ -648,87 +564,88 @@ const PlayerStatsScreen = () => {
     
     if (playersFromApi.length > 0) {
       console.log('✅ First player from API:', playersFromApi[0]);
-      // We'll log after transformation in the memo
     }
   }, [playersFromApi, playersData, selectedSport, isLoading, error]);
 
-  // Helper to build stats object based on sport and raw API fields
+  // ============= BUILD STATS PER SPORT =============
   const buildStats = (player: any, sport: string) => {
     const stats: any = {};
-    const games = player.games_played || 1; // avoid division by zero
-
     if (sport === 'nba') {
-      // Convert API totals (stored as 1/10 of actual totals) to per-game averages
-      stats.points = ((player.points || 0) * 10) / games;
-      stats.rebounds = ((player.rebounds || 0) * 10) / games;
-      stats.assists = ((player.assists || 0) * 10) / games;
-      stats.steals = ((player.steals || 0) * 10) / games;
-      stats.blocks = ((player.blocks || 0) * 10) / games;
-      stats.fgPct = player.fgPct || 0;
-      stats.threePtPct = player.threePtPct || 0;
-      stats.turnovers = ((player.turnovers || 0) * 10) / games;
-      // Keep fantasy_points as total (or adjust as needed)
+      stats.points = player.points || player.pts_per_game || 0;
+      stats.rebounds = player.rebounds || player.reb_per_game || 0;
+      stats.assists = player.assists || player.ast_per_game || 0;
+      stats.steals = player.steals || player.stl_per_game || 0;
+      stats.blocks = player.blocks || player.blk_per_game || 0;
+      stats.fgPct = player.fg_pct || 0;
+      stats.threePtPct = player.three_pct || 0;
+      stats.turnovers = player.turnovers || player.to_per_game || 0;
+      stats.fantasy_points = player.projection || player.fantasy_points || 0;
+    } else if (sport === 'nhl') {
+      stats.goals = player.goals || 0;
+      stats.assists = player.assists || 0;
+      stats.points = player.points || 0;
+      stats.shots = player.shots || 0;
+      stats.plusMinus = player.plus_minus || 0;
+      stats.pim = player.pim || 0;
+      stats.fantasy_points = player.fantasy_points || 0;
+    } else if (sport === 'mlb') {
+      stats.battingAvg = player.avg || player.batting_avg || 0;
+      stats.homeRuns = player.hr || player.home_runs || 0;
+      stats.rbi = player.rbi || 0;
+      stats.runs = player.runs || 0;
+      stats.steals = player.steals || 0;
       stats.fantasy_points = player.fantasy_points || 0;
     } else if (sport === 'nfl') {
-      // Similar logic for NFL if needed
-      // ...
-    } else if (sport === 'nhl') {
-      // ...
-    } else if (sport === 'mlb') {
-      // ...
+      stats.passingYards = player.passingYards || player.passing_yds || 0;
+      stats.passingTDs = player.passingTDs || player.passing_tds || 0;
+      stats.interceptions = player.interceptions || player.ints || 0;
+      stats.rushingYards = player.rushingYards || player.rushing_yds || 0;
+      stats.rushingTDs = player.rushingTDs || player.rushing_tds || 0;
+      stats.receptions = player.receptions || 0;
+      stats.receivingYards = player.receivingYards || player.receiving_yds || 0;
+      stats.receivingTDs = player.receivingTDs || player.receiving_tds || 0;
+      stats.sacks = player.sacks || 0;
+      stats.fantasy_points = player.projection || player.fantasy_points || 0;
+    } else {
+      Object.assign(stats, player.stats || {});
     }
-
     return stats;
-  };  
+  };
 
-  // Transform API data to match expected format or use fallback
+  // ============= TRANSFORM API DATA =============
   const players = React.useMemo(() => {
     console.log('🔍 Processing player data:', {
-      fromAPI: playersFromApi?.length || 0,
+      fromAPI: playersFromApi.length,
       sport: selectedSport,
       hasRealData: playersData?.is_real_data || false,
-      isRealData: playersData?.is_real_data || false
     });
 
-    // Use API data if available and valid
-    if (playersFromApi && playersFromApi.length > 0 && playersData?.is_real_data) {
-      console.log(`✅ Using REAL player data: ${playersFromApi.length} players from fantasy/players`);
-      
+    if (playersFromApi.length > 0 && playersData?.is_real_data) {
+      console.log(`✅ Using REAL player data: ${playersFromApi.length} players`);
+
       return playersFromApi.map((player: any, index: number) => {
-        // Build stats from top-level fields
         const stats = buildStats(player, selectedSport);
 
-        // Fallback mock data for missing fields (salary, contract, etc.)
+        // Use mock data to fill missing fields (age, height, etc.)
         const sportUpper = selectedSport.toUpperCase();
         const mockSportData = mockPlayers[sportUpper as keyof typeof mockPlayers] || [];
         const mockPlayer = mockSportData[index % mockSportData.length] || mockSportData[0] || mockPlayers.NBA[0];
 
-        // Log the first few players for debugging
-        if (index < 3) {
-          console.log(`Player ${index} after mapping:`, {
-            name: player.name || player.playerName,
-            team: player.team,
-            position: player.position,
-            statsKeys: Object.keys(stats),
-            statsSample: stats
-          });
-        }
-
         return {
           id: player.id || player.player_id || `player-${index}`,
-          name: player.name || player.playerName || `Player ${index + 1}`,
-          team: player.team || player.team_name || mockPlayer.team,
+          name: player.name || `Player ${index + 1}`,
+          team: player.team || mockPlayer.team,
           position: player.position || mockPlayer.position,
           number: player.number || mockPlayer.number || (index + 1),
           age: player.age || mockPlayer.age || 25 + index,
           height: player.height || mockPlayer.height || "6'0\"",
           weight: player.weight || mockPlayer.weight || "200 lbs",
-          salary: player.salary || mockPlayer.salary || "$1M/yr",
+          salary: player.salary ? `$${player.salary.toLocaleString()}/yr` : mockPlayer.salary,
           contract: player.contract || mockPlayer.contract || "1 year",
           trend: player.trend || mockPlayer.trend || 'neutral',
           isPremium: player.isPremium || player.is_premium || mockPlayer.isPremium || false,
           stats: stats,
-          highlights: player.highlights || mockPlayer.highlights || []
+          highlights: player.highlights || mockPlayer.highlights || [],
         };
       });
     } else {
@@ -747,17 +664,8 @@ const PlayerStatsScreen = () => {
   // Filter players based on filters and search
   const filteredPlayers = React.useMemo(() => {
     return players.filter(player => {
-      // Filter by position
-      if (selectedPosition !== 'All Positions' && player.position !== selectedPosition) {
-        return false;
-      }
-      
-      // Filter by team – now using dynamic list
-      if (selectedTeam !== 'All Teams' && player.team !== selectedTeam) {
-        return false;
-      }
-      
-      // Filter by search
+      if (selectedPosition !== 'All Positions' && player.position !== selectedPosition) return false;
+      if (selectedTeam !== 'All Teams' && player.team !== selectedTeam) return false;
       if (searchInput) {
         const searchLower = searchInput.toLowerCase();
         return (
@@ -766,7 +674,6 @@ const PlayerStatsScreen = () => {
           player.position.toLowerCase().includes(searchLower)
         );
       }
-      
       return true;
     });
   }, [players, selectedPosition, selectedTeam, searchInput]);
@@ -776,7 +683,6 @@ const PlayerStatsScreen = () => {
     
     const stats = player.stats;
     
-    // Calculate metrics based on sport
     let per = 0;
     let tsPercentage = 0;
     let usageRate = 0;
@@ -787,7 +693,6 @@ const PlayerStatsScreen = () => {
     const sportUpper = selectedSport.toUpperCase();
     
     if (sportUpper === 'NBA') {
-      // Player Efficiency Rating (PER) – simplified
       per = ((stats.points || 0) * 1.0 +
              (stats.rebounds || 0) * 0.8 +
              (stats.assists || 0) * 1.2 +
@@ -796,7 +701,6 @@ const PlayerStatsScreen = () => {
              (stats.turnovers || 0) * 1.0) / 10;
       per = Math.max(0, Math.min(per, 40));
       
-      // Efficiency
       efficiency = ((stats.points || 0) + (stats.rebounds || 0) + (stats.assists || 0) +
                     (stats.steals || 0) + (stats.blocks || 0) -
                     (stats.turnovers || 0));
@@ -804,7 +708,6 @@ const PlayerStatsScreen = () => {
       vorp = (per - 15) * 0.5;
       usageRate = 25 + (per - 15) * 2;
     } else if (sportUpper === 'NFL') {
-      // NFL metrics
       if (player.position === 'QB') {
         per = ((stats.passingYards || 0) * 0.04 +
                (stats.passingTDs || 0) * 4 -
@@ -831,7 +734,6 @@ const PlayerStatsScreen = () => {
         usageRate = ((stats.targets || stats.receptions || 0) / 5) * 100;
       }
     } else {
-      // Fallback for NHL/MLB: just use a simple efficiency sum
       efficiency = Object.values(stats).reduce((sum: number, val: any) => sum + (Number(val) || 0), 0);
       per = efficiency / 10;
       winShares = per * 0.1;
@@ -871,59 +773,24 @@ const PlayerStatsScreen = () => {
 
   const handleSportChange = (sportId: string) => {
     setSelectedSport(sportId as 'nba' | 'nfl' | 'mlb' | 'nhl');
-    // Reset filters when sport changes
     setSelectedPosition('All Positions');
     setSelectedTeam('All Teams');
   };
 
+  // ----- renderPlayerCard -----
   const renderPlayerCard = (player: any) => {
     const metrics = calculateAdvancedMetrics(player);
-    const TrendIcon = player.trend === 'up' ? TrendingUpIcon : 
-                     player.trend === 'down' ? TrendingDownIcon : RemoveIcon;
-    const trendColor = player.trend === 'up' ? 'success.main' : 
-                      player.trend === 'down' ? 'error.main' : 'text.secondary';
 
     return (
       <Card key={player.id} sx={{ mb: 2 }}>
         <CardContent>
-          {/* Player Header */}
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-            <Box display="flex" alignItems="center" gap={2}>
-              <Avatar sx={{ bgcolor: 'primary.main' }}>
-                {player.name.charAt(0)}
-              </Avatar>
-              <Box>
-                <Box display="flex" alignItems="center" gap={1}>
-                  {/* FIXED: Replaced 'value' with player.name */}
-                  <Typography variant="h6" fontWeight="bold">
-                    {player.name}
-                  </Typography>
-                  {player.isPremium && (
-                    <DiamondIcon sx={{ fontSize: 16, color: 'warning.main' }} />
-                  )}
-                  {playersData?.is_real_data && (
-                    <Chip 
-                      label="LIVE" 
-                      size="small" 
-                      color="success" 
-                      sx={{ height: 20, fontSize: '0.6rem' }}
-                    />
-                  )}
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  {player.team} • {player.position} #{player.number}
-                </Typography>
-              </Box>
-            </Box>
-            <Box display="flex" alignItems="center" gap={1}>
-              <TrendIcon sx={{ color: trendColor }} />
-              <Typography variant="caption" color={trendColor} fontWeight="medium">
-                {player.trend === 'up' ? '+2.3' : player.trend === 'down' ? '-1.5' : '0.0'}
-              </Typography>
+          <Box display="flex" alignItems="center" gap={2} mb={2}>
+            <Avatar sx={{ bgcolor: 'primary.main' }}>{player.name.charAt(0)}</Avatar>
+            <Box>
+              <Typography variant="h6" fontWeight="bold">{player.name}</Typography>
+              <Typography variant="body2" color="text.secondary">{player.team} • {player.position} #{player.number}</Typography>
             </Box>
           </Box>
-
-          {/* Stats Grid - FIXED: formatted to one decimal place */}
           <Grid container spacing={1} mb={2}>
             {Object.entries(player.stats).slice(0, 4).map(([key, value], index) => {
               const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
@@ -931,64 +798,16 @@ const PlayerStatsScreen = () => {
               return (
                 <Grid item xs={6} sm={3} key={index}>
                   <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
-                    <Typography variant="h6" fontWeight="bold">
-                      {formatted}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                    </Typography>
+                    <Typography variant="h6" fontWeight="bold">{formatted}</Typography>
+                    <Typography variant="caption" color="text.secondary">{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Typography>
                   </Box>
                 </Grid>
               );
             })}
           </Grid>
-
-          {/* Advanced Metrics */}
-          <Box display="flex" gap={1} mb={2}>
-            <Chip
-              icon={<SpeedIcon />}
-              label={`PER: ${metrics.per}`}
-              size="small"
-              sx={{ bgcolor: alpha('#7c3aed', 0.1), color: '#7c3aed' }}
-            />
-            <Chip
-              icon={<PulseIcon />}
-              label={`EFF: ${metrics.efficiency}`}
-              size="small"
-              sx={{ bgcolor: alpha('#ec4899', 0.1), color: '#ec4899' }}
-            />
-          </Box>
-
-          {/* Footer */}
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Box>
-              <Typography variant="body2" color="success.main" fontWeight="medium">
-                {player.salary}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {player.contract}
-              </Typography>
-            </Box>
-            <Box display="flex" gap={1}>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={<BarChartIcon />}
-                onClick={() => handlePlayerSelect(player)}
-                sx={{ bgcolor: '#2563eb' }}
-              >
-                Stats
-              </Button>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={<PersonIcon />}
-                onClick={() => navigate('/player-profile')}
-                sx={{ bgcolor: '#059669' }}
-              >
-                Profile
-              </Button>
-            </Box>
+          <Box display="flex" gap={1}>
+            <Chip icon={<SpeedIcon />} label={`PER: ${metrics.per}`} size="small" sx={{ bgcolor: alpha('#7c3aed', 0.1), color: '#7c3aed' }} />
+            <Chip icon={<PulseIcon />} label={`EFF: ${metrics.efficiency}`} size="small" sx={{ bgcolor: alpha('#ec4899', 0.1), color: '#ec4899' }} />
           </Box>
         </CardContent>
       </Card>
@@ -1001,79 +820,27 @@ const PlayerStatsScreen = () => {
     return (
       <Card sx={{ mt: 3 }}>
         <CardContent>
-          {/* Detail Header */}
           <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
             <Box display="flex" alignItems="center" gap={2}>
-              <Avatar sx={{ width: 60, height: 60, bgcolor: 'primary.main' }}>
-                {selectedPlayer.name.charAt(0)}
-              </Avatar>
+              <Avatar sx={{ width: 60, height: 60, bgcolor: 'primary.main' }}>{selectedPlayer.name.charAt(0)}</Avatar>
               <Box>
                 <Box display="flex" alignItems="center" gap={1}>
-                  <Typography variant="h5" fontWeight="bold">
-                    {selectedPlayer.name}
-                  </Typography>
-                  {selectedPlayer.isPremium && (
-                    <Badge badgeContent="PREMIUM" color="warning" sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem' } }} />
-                  )}
-                  {playersData?.is_real_data && (
-                    <Chip 
-                      label="LIVE DATA" 
-                      size="small" 
-                      color="success" 
-                      sx={{ height: 20, fontSize: '0.6rem' }}
-                    />
-                  )}
+                  <Typography variant="h5" fontWeight="bold">{selectedPlayer.name}</Typography>
+                  {selectedPlayer.isPremium && <Badge badgeContent="PREMIUM" color="warning" sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem' } }} />}
+                  {playersData?.is_real_data && <Chip label="LIVE DATA" size="small" color="success" sx={{ height: 20, fontSize: '0.6rem' }} />}
                 </Box>
-                <Typography variant="body2" color="text.secondary">
-                  {selectedPlayer.team} • {selectedPlayer.position} #{selectedPlayer.number}
-                </Typography>
+                <Typography variant="body2" color="text.secondary">{selectedPlayer.team} • {selectedPlayer.position} #{selectedPlayer.number}</Typography>
               </Box>
             </Box>
-            <IconButton onClick={() => setSelectedPlayer(null)}>
-              <CloseIcon />
-            </IconButton>
+            <IconButton onClick={() => setSelectedPlayer(null)}><CloseIcon /></IconButton>
           </Box>
-
-          {/* Basic Info */}
           <Grid container spacing={2} mb={3}>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">
-                Age
-              </Typography>
-              <Typography variant="body1" fontWeight="medium">
-                {selectedPlayer.age}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">
-                Height / Weight
-              </Typography>
-              <Typography variant="body1" fontWeight="medium">
-                {selectedPlayer.height} • {selectedPlayer.weight}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">
-                Salary
-              </Typography>
-              <Typography variant="body1" fontWeight="medium" color="success.main">
-                {selectedPlayer.salary}
-              </Typography>
-            </Grid>
-            <Grid item xs={6}>
-              <Typography variant="body2" color="text.secondary">
-                Contract
-              </Typography>
-              <Typography variant="body1" fontWeight="medium">
-                {selectedPlayer.contract}
-              </Typography>
-            </Grid>
+            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Age</Typography><Typography variant="body1" fontWeight="medium">{selectedPlayer.age}</Typography></Grid>
+            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Height / Weight</Typography><Typography variant="body1" fontWeight="medium">{selectedPlayer.height} • {selectedPlayer.weight}</Typography></Grid>
+            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Salary</Typography><Typography variant="body1" fontWeight="medium" color="success.main">{selectedPlayer.salary}</Typography></Grid>
+            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Contract</Typography><Typography variant="body1" fontWeight="medium">{selectedPlayer.contract}</Typography></Grid>
           </Grid>
-
-          {/* Season Stats - FIXED: formatted to one decimal place */}
-          <Typography variant="h6" fontWeight="bold">
-            Season Stats
-          </Typography>
+          <Typography variant="h6" fontWeight="bold">Season Stats</Typography>
           <Grid container spacing={1} mb={3}>
             {Object.entries(selectedPlayer.stats).map(([key, value], index) => {
               const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
@@ -1081,135 +848,33 @@ const PlayerStatsScreen = () => {
               return (
                 <Grid item xs={6} sm={4} md={3} key={index}>
                   <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
-                    <Typography variant="h6" fontWeight="bold">
-                      {formatted}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                    </Typography>
+                    <Typography variant="h6" fontWeight="bold">{formatted}</Typography>
+                    <Typography variant="caption" color="text.secondary">{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Typography>
                   </Box>
                 </Grid>
               );
             })}
           </Grid>
-
-          {/* Advanced Metrics */}
           <Box mb={3}>
             <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-              <Typography variant="h6" fontWeight="bold">
-                Advanced Metrics
-              </Typography>
-              <IconButton size="small" onClick={() => setShowAdvancedMetricsGuide(true)}>
-                <InfoIcon />
-              </IconButton>
+              <Typography variant="h6" fontWeight="bold">Advanced Metrics</Typography>
+              <IconButton size="small" onClick={() => setShowAdvancedMetricsGuide(true)}><InfoIcon /></IconButton>
             </Box>
             <Grid container spacing={2}>
-              <Grid item xs={6} md={4}>
-                <Card sx={{ borderLeft: '4px solid #7c3aed' }}>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <SpeedIcon sx={{ color: '#7c3aed', mb: 1 }} />
-                    <Typography variant="h5" fontWeight="bold">
-                      {advancedMetrics.per}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      PER
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      Player Efficiency
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={6} md={4}>
-                <Card sx={{ borderLeft: '4px solid #3b82f6' }}>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <BarChartIcon sx={{ color: '#3b82f6', mb: 1 }} />
-                    <Typography variant="h5" fontWeight="bold">
-                      {advancedMetrics.usageRate}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      USG%
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      Usage Rate
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={6} md={4}>
-                <Card sx={{ borderLeft: '4px solid #10b981' }}>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <EmojiEventsIcon sx={{ color: '#10b981', mb: 1 }} />
-                    <Typography variant="h5" fontWeight="bold">
-                      {advancedMetrics.winShares}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      WS
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      Win Shares
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={6} md={4}>
-                <Card sx={{ borderLeft: '4px solid #8b5cf6' }}>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <StarIcon sx={{ color: '#8b5cf6', mb: 1 }} />
-                    <Typography variant="h5" fontWeight="bold">
-                      {advancedMetrics.vorp}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      VORP
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      Value Added
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={6} md={4}>
-                <Card sx={{ borderLeft: '4px solid #ec4899' }}>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <PulseIcon sx={{ color: '#ec4899', mb: 1 }} />
-                    <Typography variant="h5" fontWeight="bold">
-                      {advancedMetrics.efficiency}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      EFF
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      Efficiency
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
+              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #7c3aed' }}><CardContent sx={{ textAlign: 'center' }}><SpeedIcon sx={{ color: '#7c3aed', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.per}</Typography><Typography variant="caption" color="text.secondary">PER</Typography><Typography variant="caption" display="block" color="text.secondary">Player Efficiency</Typography></CardContent></Card></Grid>
+              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #3b82f6' }}><CardContent sx={{ textAlign: 'center' }}><BarChartIcon sx={{ color: '#3b82f6', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.usageRate}</Typography><Typography variant="caption" color="text.secondary">USG%</Typography><Typography variant="caption" display="block" color="text.secondary">Usage Rate</Typography></CardContent></Card></Grid>
+              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #10b981' }}><CardContent sx={{ textAlign: 'center' }}><EmojiEventsIcon sx={{ color: '#10b981', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.winShares}</Typography><Typography variant="caption" color="text.secondary">WS</Typography><Typography variant="caption" display="block" color="text.secondary">Win Shares</Typography></CardContent></Card></Grid>
+              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #8b5cf6' }}><CardContent sx={{ textAlign: 'center' }}><StarIcon sx={{ color: '#8b5cf6', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.vorp}</Typography><Typography variant="caption" color="text.secondary">VORP</Typography><Typography variant="caption" display="block" color="text.secondary">Value Added</Typography></CardContent></Card></Grid>
+              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #ec4899' }}><CardContent sx={{ textAlign: 'center' }}><PulseIcon sx={{ color: '#ec4899', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.efficiency}</Typography><Typography variant="caption" color="text.secondary">EFF</Typography><Typography variant="caption" display="block" color="text.secondary">Efficiency</Typography></CardContent></Card></Grid>
             </Grid>
           </Box>
-
-          {/* Highlights */}
-          <Typography variant="h6" fontWeight="bold" mb={2}>
-            Highlights
-          </Typography>
+          <Typography variant="h6" fontWeight="bold" mb={2}>Highlights</Typography>
           <List>
             {selectedPlayer.highlights?.map((highlight: string, index: number) => (
-              <ListItem key={index} sx={{ py: 0.5 }}>
-                <CheckCircleIcon sx={{ color: 'success.main', mr: 2, fontSize: 16 }} />
-                <ListItemText primary={highlight} />
-              </ListItem>
+              <ListItem key={index} sx={{ py: 0.5 }}><CheckCircleIcon sx={{ color: 'success.main', mr: 2, fontSize: 16 }} /><ListItemText primary={highlight} /></ListItem>
             ))}
           </List>
-
-          {/* Full Profile Button */}
-          <Button
-            fullWidth
-            variant="contained"
-            startIcon={<PersonIcon />}
-            onClick={() => navigate('/player-profile')}
-            sx={{ mt: 2, bgcolor: '#059669' }}
-          >
-            View Full Player Profile
-          </Button>
+          <Button fullWidth variant="contained" startIcon={<PersonIcon />} onClick={() => navigate('/player-profile')} sx={{ mt: 2, bgcolor: '#059669' }}>View Full Player Profile</Button>
         </CardContent>
       </Card>
     );
@@ -1219,76 +884,37 @@ const PlayerStatsScreen = () => {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
         <CircularProgress />
-        <Typography variant="h6" ml={2}>
-          Loading Player Analytics...
-        </Typography>
+        <Typography variant="h6" ml={2}>Loading Player Analytics...</Typography>
       </Box>
     );
   }
 
   return (
     <Container maxWidth="lg">
-      {/* Header */}
       <Box sx={{ mb: 4, pt: 3 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={() => navigate(-1)}
-            sx={{ color: 'text.primary' }}
-          >
-            Back
-          </Button>
-          <Chip
-            icon={<DiamondIcon />}
-            label="PRO"
-            sx={{ bgcolor: 'warning.main', color: 'white' }}
-          />
+          <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)} sx={{ color: 'text.primary' }}>Back</Button>
+          <Chip icon={<DiamondIcon />} label="PRO" sx={{ bgcolor: 'warning.main', color: 'white' }} />
         </Box>
-
         <Box>
-          <Typography variant="h3" fontWeight="bold" gutterBottom>
-            Player Analytics
-          </Typography>
+          <Typography variant="h3" fontWeight="bold" gutterBottom>Player Analytics</Typography>
           <Typography variant="h6" color="text.secondary">
             Advanced stats, metrics, and player insights
-            {playersData?.is_real_data && (
-              <Chip 
-                label="LIVE DATA" 
-                size="small" 
-                color="success" 
-                sx={{ ml: 2, verticalAlign: 'middle' }}
-              />
-            )}
+            {playersData?.is_real_data && <Chip label="LIVE DATA" size="small" color="success" sx={{ ml: 2, verticalAlign: 'middle' }} />}
           </Typography>
         </Box>
       </Box>
 
-      {/* Error State */}
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          <Typography variant="body1" fontWeight="bold">
-            Failed to load player data
-          </Typography>
-          <Typography variant="body2">
-            {error instanceof Error ? error.message : 'Unknown error'}
-          </Typography>
-          <Box sx={{ mt: 2 }}>
-            <Button 
-              variant="contained" 
-              size="small" 
-              onClick={handleRefresh}
-            >
-              Retry Loading
-            </Button>
-          </Box>
+          <Typography variant="body1" fontWeight="bold">Failed to load player data</Typography>
+          <Typography variant="body2">{error instanceof Error ? error.message : 'Unknown error'}</Typography>
+          <Box sx={{ mt: 2 }}><Button variant="contained" size="small" onClick={handleRefresh}>Retry Loading</Button></Box>
         </Alert>
       )}
 
-      {/* Sport Selector */}
       <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="subtitle1" fontWeight="bold" mb={1}>
-          Select Sport
-        </Typography>
+        <Typography variant="subtitle1" fontWeight="bold" mb={1}>Select Sport</Typography>
         <Box display="flex" flexWrap="wrap" gap={1}>
           {sportsData.map((sport) => (
             <Chip
@@ -1298,19 +924,12 @@ const PlayerStatsScreen = () => {
               onClick={() => handleSportChange(sport.id)}
               color={selectedSport === sport.id ? 'primary' : 'default'}
               variant={selectedSport === sport.id ? 'filled' : 'outlined'}
-              sx={{
-                ...(selectedSport === sport.id && {
-                  bgcolor: sport.color,
-                  color: 'white',
-                  '&:hover': { bgcolor: sport.color }
-                })
-              }}
+              sx={{ ...(selectedSport === sport.id && { bgcolor: sport.color, color: 'white', '&:hover': { bgcolor: sport.color } }) }}
             />
           ))}
         </Box>
       </Paper>
 
-      {/* API Status */}
       <Paper sx={{ p: 2, mb: 3, bgcolor: playersData?.is_real_data ? '#dcfce7' : '#fef3c7' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box>
@@ -1318,21 +937,13 @@ const PlayerStatsScreen = () => {
               {playersData?.is_real_data ? '✅ REAL DATA CONNECTED' : '⚠️ USING MOCK DATA'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Endpoint: /api/fantasy/players • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
+              Endpoint: {selectedSport === 'mlb' || selectedSport === 'nhl' ? 'Python API' : 'Node API'} • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
             </Typography>
           </Box>
-          <Button 
-            size="small" 
-            variant="outlined"
-            onClick={() => setShowApiDebug(!showApiDebug)}
-            startIcon={<BugReportIcon />}
-          >
-            Debug
-          </Button>
+          <Button size="small" variant="outlined" onClick={() => setShowApiDebug(!showApiDebug)} startIcon={<BugReportIcon />}>Debug</Button>
         </Box>
       </Paper>
 
-      {/* Search Bar */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box display="flex" gap={1}>
           <TextField
@@ -1342,152 +953,65 @@ const PlayerStatsScreen = () => {
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
             InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-              endAdornment: searchInput && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSearchInput('')}>
-                    <CloseIcon />
-                  </IconButton>
-                </InputAdornment>
-              ),
+              startAdornment: (<InputAdornment position="start"><SearchIcon /></InputAdornment>),
+              endAdornment: searchInput && (<InputAdornment position="end"><IconButton size="small" onClick={() => setSearchInput('')}><CloseIcon /></IconButton></InputAdornment>),
             }}
           />
-          <Button 
-            variant="contained" 
-            onClick={handleSearch}
-            sx={{ minWidth: 120 }}
-          >
-            Search
-          </Button>
+          <Button variant="contained" onClick={handleSearch} sx={{ minWidth: 120 }}>Search</Button>
         </Box>
-
-        {/* Recent Searches */}
         {searchHistory.length > 0 && !searchInput && (
           <Box mt={2}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-              <Typography variant="caption" color="text.secondary">
-                Recent Searches
-              </Typography>
-              <Button size="small" onClick={clearSearchHistory}>
-                Clear
-              </Button>
+              <Typography variant="caption" color="text.secondary">Recent Searches</Typography>
+              <Button size="small" onClick={clearSearchHistory}>Clear</Button>
             </Box>
             <Box display="flex" gap={1} flexWrap="wrap">
               {searchHistory.map((search, index) => (
-                <Chip
-                  key={index}
-                  label={search}
-                  size="small"
-                  icon={<TimelineIcon />}
-                  onClick={() => setSearchInput(search)}
-                  onDelete={() => {
-                    setSearchHistory(searchHistory.filter((_, i) => i !== index));
-                  }}
-                />
+                <Chip key={index} label={search} size="small" icon={<TimelineIcon />} onClick={() => setSearchInput(search)} onDelete={() => setSearchHistory(searchHistory.filter((_, i) => i !== index))} />
               ))}
             </Box>
           </Box>
         )}
       </Paper>
 
-      {/* Search Prompts */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Box 
-            display="flex" 
-            justifyContent="space-between" 
-            alignItems="center" 
-            sx={{ cursor: 'pointer' }}
-            onClick={() => setShowSearchPrompts(!showSearchPrompts)}
-          >
-            <Box display="flex" alignItems="center" gap={1}>
-              <SearchIcon sx={{ color: '#ef4444' }} />
-              <Typography variant="h6" fontWeight="bold">
-                Search Tips & Examples
-              </Typography>
-            </Box>
+          <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ cursor: 'pointer' }} onClick={() => setShowSearchPrompts(!showSearchPrompts)}>
+            <Box display="flex" alignItems="center" gap={1}><SearchIcon sx={{ color: '#ef4444' }} /><Typography variant="h6" fontWeight="bold">Search Tips & Examples</Typography></Box>
             {showSearchPrompts ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </Box>
-
           {showSearchPrompts && (
             <>
               <Box mt={2}>
-                <Typography variant="subtitle2" fontWeight="bold" mb={1}>
-                  Best Search Examples:
-                </Typography>
+                <Typography variant="subtitle2" fontWeight="bold" mb={1}>Best Search Examples:</Typography>
                 <Grid container spacing={1}>
-                  <Grid item xs={12} sm={6}>
-                    <Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}>
-                      <PersonIcon sx={{ fontSize: 14, color: '#ef4444' }} />
-                      <Typography variant="caption">"Patrick Mahomes stats"</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}>
-                      <PeopleIcon sx={{ fontSize: 14, color: '#3b82f6' }} />
-                      <Typography variant="caption">"Kansas City Chiefs players"</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}>
-                      <ShieldIcon sx={{ fontSize: 14, color: '#10b981' }} />
-                      <Typography variant="caption">"Top 10 quarterbacks"</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}>
-                      <TrendingUpIcon sx={{ fontSize: 14, color: '#f59e0b' }} />
-                      <Typography variant="caption">"Players with 10+ touchdowns"</Typography>
-                    </Box>
-                  </Grid>
+                  <Grid item xs={12} sm={6}><Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}><PersonIcon sx={{ fontSize: 14, color: '#ef4444' }} /><Typography variant="caption">"Patrick Mahomes stats"</Typography></Box></Grid>
+                  <Grid item xs={12} sm={6}><Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}><PeopleIcon sx={{ fontSize: 14, color: '#3b82f6' }} /><Typography variant="caption">"Kansas City Chiefs players"</Typography></Box></Grid>
+                  <Grid item xs={12} sm={6}><Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}><ShieldIcon sx={{ fontSize: 14, color: '#10b981' }} /><Typography variant="caption">"Top 10 quarterbacks"</Typography></Box></Grid>
+                  <Grid item xs={12} sm={6}><Box display="flex" alignItems="center" gap={1} p={1} bgcolor="action.hover" borderRadius={1}><TrendingUpIcon sx={{ fontSize: 14, color: '#f59e0b' }} /><Typography variant="caption">"Players with 10+ touchdowns"</Typography></Box></Grid>
                 </Grid>
               </Box>
-
-              <Alert severity="info" sx={{ mt: 2 }}>
-                <AlertTitle>Pro Tip</AlertTitle>
-                Be specific! Try "LeBron James points per game" or "Mahomes vs Allen comparison"
-              </Alert>
-
-              <Box display="flex" alignItems="center" gap={1} mt={2} p={1} bgcolor="success.light" borderRadius={1}>
-                <BarChartIcon sx={{ fontSize: 14, color: 'success.main' }} />
-                <Typography variant="caption" color="success.dark">
-                  Tap any player for detailed stats. Advanced metrics available for all players.
-                </Typography>
-              </Box>
+              <Alert severity="info" sx={{ mt: 2 }}><AlertTitle>Pro Tip</AlertTitle>Be specific! Try "LeBron James points per game" or "Mahomes vs Allen comparison"</Alert>
+              <Box display="flex" alignItems="center" gap={1} mt={2} p={1} bgcolor="success.light" borderRadius={1}><BarChartIcon sx={{ fontSize: 14, color: 'success.main' }} /><Typography variant="caption" color="success.dark">Tap any player for detailed stats. Advanced metrics available for all players.</Typography></Box>
             </>
           )}
         </CardContent>
       </Card>
 
-      {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth size="small">
               <InputLabel>Filter by Team</InputLabel>
-              <Select
-                value={selectedTeam}
-                onChange={(e) => setSelectedTeam(e.target.value)}
-                label="Filter by Team"
-              >
-                {uniqueTeams.map((team) => (
-                  <MenuItem key={team} value={team}>{team}</MenuItem>
-                ))}
+              <Select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} label="Filter by Team">
+                {uniqueTeams.map((team) => <MenuItem key={team} value={team}>{team}</MenuItem>)}
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth size="small">
               <InputLabel>Filter by Position</InputLabel>
-              <Select
-                value={selectedPosition}
-                onChange={(e) => setSelectedPosition(e.target.value)}
-                label="Filter by Position"
-              >
+              <Select value={selectedPosition} onChange={(e) => setSelectedPosition(e.target.value)} label="Filter by Position">
                 {positionFilters[selectedSport as keyof typeof positionFilters]?.map((position) => (
                   <MenuItem key={position} value={position}>{position}</MenuItem>
                 ))}
@@ -1497,74 +1021,39 @@ const PlayerStatsScreen = () => {
         </Grid>
       </Paper>
 
-      {/* Loading/Refreshing Indicator */}
       {(isLoading || isRefetching) && <LinearProgress sx={{ mb: 2 }} />}
 
-      {/* Debug Panel */}
       {showApiDebug && (
         <Paper sx={{ p: 2, mb: 3, bgcolor: '#f3f4f6' }}>
-          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-            API Debug Information
-          </Typography>
+          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>API Debug Information</Typography>
           <Box sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>
-            <div><strong>Endpoint:</strong> fantasy/players</div>
+            <div><strong>Endpoint:</strong> {selectedSport === 'mlb' || selectedSport === 'nhl' ? 'Python API' : 'Node API'}</div>
             <div><strong>Sport:</strong> {selectedSport}</div>
             <div><strong>API Players:</strong> {playersFromApi.length}</div>
             <div><strong>Processed Players:</strong> {players.length}</div>
             <div><strong>Filtered Players:</strong> {filteredPlayers.length}</div>
             <div><strong>Using Real Data:</strong> {playersData?.is_real_data ? '✅ Yes' : '❌ No'}</div>
             <div><strong>API Response:</strong></div>
-            <pre style={{ 
-              background: '#1e293b', 
-              color: '#f8fafc', 
-              padding: '10px', 
-              borderRadius: '4px',
-              overflow: 'auto',
-              maxHeight: '200px',
-              marginTop: '8px'
-            }}>
-              {JSON.stringify(playersData || {}, null, 2)}
-            </pre>
+            <pre style={{ background: '#1e293b', color: '#f8fafc', padding: '10px', borderRadius: '4px', overflow: 'auto', maxHeight: '200px', marginTop: '8px' }}>{JSON.stringify(playersData || {}, null, 2)}</pre>
             {playersFromApi[0] && (
               <>
                 <div><strong>First Player Sample:</strong></div>
-                <pre style={{ 
-                  background: '#1e293b', 
-                  color: '#f8fafc', 
-                  padding: '10px', 
-                  borderRadius: '4px',
-                  overflow: 'auto',
-                  maxHeight: '200px',
-                  marginTop: '8px'
-                }}>
-                  {JSON.stringify(playersFromApi[0], null, 2)}
-                </pre>
+                <pre style={{ background: '#1e293b', color: '#f8fafc', padding: '10px', borderRadius: '4px', overflow: 'auto', maxHeight: '200px', marginTop: '8px' }}>{JSON.stringify(playersFromApi[0], null, 2)}</pre>
               </>
             )}
           </Box>
         </Paper>
       )}
 
-      {/* Players Section */}
       <Box mb={4}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Box>
-            <Typography variant="h4" fontWeight="bold">
-              Top Performers
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {playersData?.is_real_data ? 'Live data from API' : 'Using mock data'}
-            </Typography>
+            <Typography variant="h4" fontWeight="bold">Top Performers</Typography>
+            <Typography variant="caption" color="text.secondary">{playersData?.is_real_data ? 'Live data from API' : 'Using mock data'}</Typography>
           </Box>
           <Box display="flex" alignItems="center" gap={1}>
-            <Chip
-              label={`${filteredPlayers.length} players`}
-              color="primary"
-              size="small"
-            />
-            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching}>
-              <RefreshIcon />
-            </IconButton>
+            <Chip label={`${filteredPlayers.length} players`} color="primary" size="small" />
+            <IconButton onClick={handleRefresh} disabled={isLoading || isRefetching}><RefreshIcon /></IconButton>
           </Box>
         </Box>
 
@@ -1576,43 +1065,26 @@ const PlayerStatsScreen = () => {
         ) : (
           <Paper sx={{ p: 4, textAlign: 'center' }}>
             <SearchIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              No players found
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Try adjusting your search or filters
-            </Typography>
-            <Box mt={2}>
-              <Button onClick={handleRefresh} sx={{ mr: 1 }} variant="outlined">
-                Retry Loading
-              </Button>
-            </Box>
+            <Typography variant="h6" gutterBottom>No players found</Typography>
+            <Typography variant="body2" color="text.secondary">Try adjusting your search or filters</Typography>
+            <Box mt={2}><Button onClick={handleRefresh} sx={{ mr: 1 }} variant="outlined">Retry Loading</Button></Box>
           </Paper>
         )}
 
-        {/* Footer Info */}
         <Box textAlign="center" mt={4}>
           <Typography variant="caption" color="text.secondary">
-            {playersData?.is_real_data 
-              ? '✅ Stats from real API data. Updates automatically.' 
-              : '⚠️ Using mock data. Check API connection.'}
+            {playersData?.is_real_data ? '✅ Stats from real API data. Updates automatically.' : '⚠️ Using mock data. Check API connection.'}
           </Typography>
           {!playersData?.is_real_data && (
             <Typography variant="caption" display="block" color="warning.main">
-              Please ensure the backend is running and the fantasy/players endpoint is available.
+              Please ensure the backend is running and the API endpoint is available.
             </Typography>
           )}
         </Box>
       </Box>
 
-      {/* Analytics Box */}
       <AnalyticsBox />
-
-      {/* Advanced Metrics Guide Modal */}
-      <AdvancedMetricsGuide
-        open={showAdvancedMetricsGuide}
-        onClose={() => setShowAdvancedMetricsGuide(false)}
-      />
+      <AdvancedMetricsGuide open={showAdvancedMetricsGuide} onClose={() => setShowAdvancedMetricsGuide(false)} />
     </Container>
   );
 };

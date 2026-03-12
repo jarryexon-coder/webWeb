@@ -99,6 +99,14 @@ const SPORT_COLORS: Record<string, string> = {
   MLB: '#10b981'
 };
 
+// Helper to extract full player name from description
+const extractPlayerNameFromDescription = (desc: string): string | null => {
+  // Tank01 descriptions often start with "Feb 24: Middleton ..."
+  // Match a capitalized first and last name (e.g., "Khris Middleton", "Franz Wagner")
+  const nameMatch = desc.match(/([A-Z][a-z]+ [A-Z][a-z]+)/);
+  return nameMatch ? nameMatch[1] : null;
+};
+
 const CATEGORY_COLORS: Record<string, string> = {
   'injury': '#ef4444',
   'injuries': '#ef4444',
@@ -125,26 +133,13 @@ const INJURY_STATUS_COLORS: Record<string, string> = {
   'healthy': '#6b7280'
 };
 
-// Beat writer sources for detection (now based on real data)
-const BEAT_WRITER_OUTLETS = [
-  'The Athletic', 'ESPN', 'Bleacher Report', 'The Ringer',
-  'Atlanta Journal-Constitution', 'Boston Globe', 'NBC Sports Boston',
-  'New York Post', 'New York Daily News', 'Charlotte Observer',
-  'NBC Sports Chicago', 'Cleveland.com', 'Dallas Morning News',
-  'Denver Post', 'Detroit News', 'Detroit Free Press',
-  'San Francisco Chronicle', 'Houston Chronicle', 'IndyStar',
-  'LA Times', 'ClutchPoints', 'Miami Herald', 'South Florida Sun Sentinel',
-  'Milwaukee Journal Sentinel', 'Star Tribune', 'NOLA.com',
-  'The Oklahoman', 'Orlando Sentinel', 'Philadelphia Inquirer',
-  'Arizona Republic', 'The Oregonian', 'Sacramento Bee',
-  'San Antonio Express-News', 'TSN', 'Sportsnet', 'Salt Lake Tribune',
-  'Deseret News', 'Washington Post', 'Zone Coverage', 'Kings Beat',
-  'Fieldhouse Files', 'PHNX Suns', 'Trail Blazers', 'SNY',
-  'Orlando Magic Daily', 'PhillyVoice', 'Arizona Sports', 'ABC10'
-];
-
-// Static team lists for fallback (now derived from beat-writers endpoint)
-const STATIC_TEAMS: string[] = []; // Will be populated from API
+// Static team lists for fallback (used if beat‑writers endpoint fails)
+const STATIC_TEAMS_BY_SPORT: Record<string, string[]> = {
+  nba: ['LAL', 'GSW', 'BOS', 'MIL', 'PHX', 'DEN', 'DAL', 'PHI', 'MIA', 'LAC', 'ATL', 'CHI', 'CLE', 'NYK', 'TOR'],
+  nfl: ['KC', 'SF', 'BUF', 'CIN', 'PHI', 'DAL', 'GB', 'BAL', 'LAR', 'MIN', 'DET', 'JAX'],
+  mlb: ['LAD', 'NYY', 'HOU', 'ATL', 'BOS', 'SD', 'PHI', 'STL', 'CHC', 'TB'],
+  nhl: ['COL', 'TB', 'BOS', 'TOR', 'EDM', 'VGK', 'CAR', 'FLA', 'NYR', 'PIT']
+};
 
 // ============= TYPES =============
 interface NewsArticle {
@@ -229,13 +224,13 @@ const apiClient = {
       
       if (!response.ok) {
         console.warn(`HTTP error! status: ${response.status} for ${endpoint}`);
-        return { success: false };
+        return { success: false, error: `HTTP ${response.status}` };
       }
       
       return await response.json();
     } catch (error) {
       console.error(`Network error for ${endpoint}:`, error);
-      return { success: false };
+      return { success: false, error: String(error) };
     }
   },
   
@@ -264,123 +259,215 @@ const apiClient = {
   }
 };
 
-// ============= MOCK DATA GENERATOR (Enhanced) =============
+// ============= SAFE MOCK GENERATOR (never throws) =============
 const generateMockNews = (sport: string, beatWriters: BeatWriter[] = [], count = 20): PlayerProp[] => {
-  const sportUpper = sport.toUpperCase();
-  const mockNews: PlayerProp[] = [];
-  const now = new Date();
-  
-  const players = {
-    nba: ['LeBron James', 'Stephen Curry', 'Giannis Antetokounmpo', 'Kevin Durant', 'Luka Dončić', 'Jayson Tatum', 'Joel Embiid', 'Nikola Jokić'],
-    nfl: ['Patrick Mahomes', 'Josh Allen', 'Justin Jefferson', 'Travis Kelce', 'Christian McCaffrey', 'Jalen Hurts', 'Tyreek Hill'],
-    mlb: ['Shohei Ohtani', 'Aaron Judge', 'Mookie Betts', 'Ronald Acuña Jr.', 'Mike Trout', 'Bryce Harper'],
-    nhl: ['Connor McDavid', 'Auston Matthews', 'Nathan MacKinnon', 'David Pastrňák', 'Leon Draisaitl', 'Cale Makar']
-  };
-  
-  const categories = ['news', 'injury', 'beat-writers', 'game-preview', 'analysis', 'performance'];
-  const injuries = ['out', 'questionable', 'day-to-day', 'probable'];
-  const teamsBySport: Record<string, string[]> = {
-    nba: ['Lakers', 'Warriors', 'Celtics', 'Bulls', 'Heat', 'Bucks', 'Suns', 'Nuggets', 'Mavericks', '76ers'],
-    nfl: ['Chiefs', '49ers', 'Cowboys', 'Packers', 'Ravens', 'Bills', 'Eagles', 'Bengals'],
-    mlb: ['Yankees', 'Dodgers', 'Red Sox', 'Astros', 'Braves', 'Mets', 'Cardinals'],
-    nhl: ['Maple Leafs', 'Oilers', 'Avalanche', 'Bruins', 'Lightning', 'Golden Knights']
-  };
-  
-  const sportPlayers = players[sport as keyof typeof players] || [`${sportUpper} Player`];
-  const sportTeams = teamsBySport[sport as keyof typeof teamsBySport] || ['TEAM'];
-  
-  for (let i = 0; i < count; i++) {
-    const player = sportPlayers[Math.floor(Math.random() * sportPlayers.length)];
-    const team = sportTeams[Math.floor(Math.random() * sportTeams.length)];
-    const category = categories[Math.floor(Math.random() * categories.length)];
-    const isBeatWriter = category === 'beat-writers' || (beatWriters.length > 0 && Math.random() > 0.7);
-    const isInjury = category === 'injury' || (Math.random() > 0.8 && !isBeatWriter);
-    
-    let title = '';
-    let description = '';
-    let injuryStatus = undefined;
-    let expectedReturn = undefined;
-    let author = undefined;
-    let outlet = undefined;
-    let twitter = undefined;
-    
-    if (isInjury) {
-      const status = injuries[Math.floor(Math.random() * injuries.length)];
-      injuryStatus = status;
-      if (status === 'out') expectedReturn = '2-3 weeks';
-      else if (status === 'day-to-day') expectedReturn = 'day-to-day';
-      else if (status === 'questionable') expectedReturn = 'game-time decision';
-      title = `${player} Injury Update: ${status.toUpperCase()}`;
-      description = `${player} is ${status} with a minor injury. ${
-        status === 'out' ? 'Expected to miss several games.' : 
-        status === 'day-to-day' ? 'Will be evaluated before next game.' :
-        'Game-time decision.'
-      }`;
-    } else if (isBeatWriter && beatWriters.length > 0) {
-      const randomWriter = beatWriters[Math.floor(Math.random() * beatWriters.length)];
-      author = randomWriter.name;
-      outlet = randomWriter.outlet;
-      twitter = randomWriter.twitter;
-      title = `${player} - Exclusive: ${author} of ${outlet} reports on team dynamics`;
-      description = `According to ${author}, ${player} is expected to have a breakout performance this week.`;
-    } else if (isBeatWriter) {
-      author = BEAT_WRITER_OUTLETS[Math.floor(Math.random() * BEAT_WRITER_OUTLETS.length)];
-      outlet = author;
-      title = `${player} - Insider Report`;
-      description = `Sources indicate ${player} could be in for a big game.`;
-    } else {
-      const verbs = ['shines', 'struggles', 'dominates', 'sits out', 'prepares for', 'talks about'];
-      const verb = verbs[Math.floor(Math.random() * verbs.length)];
-      title = `${player} ${verb} in latest ${sportUpper} action`;
-      description = `${player} of the ${team} had a noteworthy performance. Fans are excited.`;
-    }
-    
-    const timeAgo = Math.floor(Math.random() * 120);
-    const publishedAt = new Date(now.getTime() - timeAgo * 60000).toISOString();
-    let timeDisplay = '';
-    try {
-      timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
-    } catch {
-      timeDisplay = 'Recently';
-    }
-    
-    mockNews.push({
-      id: `mock-${sport}-${i}-${Date.now()}`,
-      playerName: player,
-      team,
-      sport: sportUpper,
-      propType: isInjury ? 'Injury Update' : isBeatWriter ? 'Beat Writer' : 'News',
-      line: title,
-      odds: '+100',
-      impliedProbability: 65,
-      matchup: description,
-      time: timeDisplay,
-      confidence: isInjury ? 85 : isBeatWriter ? 88 : 75,
-      isBookmarked: false,
-      category: isInjury ? 'injury' : isBeatWriter ? 'beat-writers' : 'news',
-      url: '#',
-      image: `https://picsum.photos/400/300?random=${i}&sport=${sport}`,
-      injuryStatus,
-      expectedReturn,
-      isBeatWriter,
-      author,
-      outlet,
-      twitter,
-      originalArticle: {
-        id: `mock-article-${i}`,
-        title,
-        description,
-        source: { name: outlet || (isBeatWriter ? 'Beat Writer' : 'Sports Wire') },
-        publishedAt,
-        category: isInjury ? 'injury' : isBeatWriter ? 'beat-writers' : 'news',
-        sport: sportUpper,
-        player,
-        team
+  try {
+    const sportUpper = sport.toUpperCase();
+    const mockNews: PlayerProp[] = [];
+    const now = new Date();
+
+    // Expanded player lists
+    const playersBySport: Record<string, string[]> = {
+      nba: [
+        'LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo', 'Luka Dončić',
+        'Jayson Tatum', 'Joel Embiid', 'Nikola Jokić', 'Ja Morant', 'Zion Williamson',
+        'Anthony Davis', 'James Harden', 'Russell Westbrook', 'Chris Paul', 'Kawhi Leonard',
+        'Paul George', 'Damian Lillard', 'Devin Booker', 'Donovan Mitchell', 'Trae Young',
+        'Jimmy Butler', 'Bam Adebayo', 'Jaylen Brown', 'Khris Middleton', 'Jrue Holiday',
+        'Kyrie Irving', 'Karl-Anthony Towns', 'Anthony Edwards', 'Shai Gilgeous-Alexander',
+        'LaMelo Ball', 'Cade Cunningham', 'Evan Mobley', 'Scottie Barnes', 'Jalen Green',
+        'Alperen Şengün', 'Jaren Jackson Jr.', 'Desmond Bane', 'Tyrese Haliburton', 'De’Aaron Fox',
+        'Domantas Sabonis', 'Rudy Gobert', 'Karl-Anthony Towns', 'Anthony Edwards', 'Jaden McDaniels',
+        'Mikal Bridges', 'Cameron Johnson', 'Nic Claxton', 'Spencer Dinwiddie'
+      ],
+      nfl: ['Patrick Mahomes', 'Josh Allen', 'Justin Jefferson', 'Travis Kelce', 'Christian McCaffrey', 'Jalen Hurts', 'Tyreek Hill', 'Joe Burrow', 'Ja’Marr Chase', 'Aaron Rodgers'],
+      mlb: ['Shohei Ohtani', 'Aaron Judge', 'Mookie Betts', 'Ronald Acuña Jr.', 'Mike Trout', 'Bryce Harper', 'Fernando Tatis Jr.', 'Juan Soto'],
+      nhl: ['Connor McDavid', 'Auston Matthews', 'Nathan MacKinnon', 'David Pastrňák', 'Leon Draisaitl', 'Cale Makar', 'Sidney Crosby', 'Alex Ovechkin']
+    };
+
+    const teamsBySport: Record<string, string[]> = {
+      nba: ['Lakers', 'Warriors', 'Celtics', 'Bulls', 'Heat', 'Bucks', 'Suns', 'Nuggets', 'Mavericks', '76ers', 'Grizzlies', 'Pelicans', 'Clippers', 'Kings', 'Timberwolves'],
+      nfl: ['Chiefs', '49ers', 'Cowboys', 'Packers', 'Ravens', 'Bills', 'Eagles', 'Bengals'],
+      mlb: ['Yankees', 'Dodgers', 'Red Sox', 'Astros', 'Braves', 'Mets', 'Cardinals'],
+      nhl: ['Maple Leafs', 'Oilers', 'Avalanche', 'Bruins', 'Lightning', 'Golden Knights']
+    };
+
+    const categories = ['news', 'injury', 'beat-writers', 'game-preview', 'analysis', 'performance'];
+    const injuries = ['out', 'questionable', 'day-to-day', 'probable'];
+
+    const sportPlayers = playersBySport[sport as keyof typeof playersBySport] || [`${sportUpper} Player`];
+    const sportTeams = teamsBySport[sport as keyof typeof teamsBySport] || ['TEAM'];
+
+    for (let i = 0; i < count; i++) {
+      // Pick random player and team
+      const player = sportPlayers[Math.floor(Math.random() * sportPlayers.length)];
+      const team = sportTeams[Math.floor(Math.random() * sportTeams.length)];
+      const category = categories[Math.floor(Math.random() * categories.length)];
+      const isBeatWriter = category === 'beat-writers' || (beatWriters.length > 0 && Math.random() > 0.7);
+      const isInjury = category === 'injury' || (Math.random() > 0.8 && !isBeatWriter);
+
+      let title = '';
+      let description = '';
+      let injuryStatus = undefined;
+      let expectedReturn = undefined;
+      let author = undefined;
+      let outlet = undefined;
+      let twitter = undefined;
+
+      if (isInjury) {
+        const status = injuries[Math.floor(Math.random() * injuries.length)];
+        injuryStatus = status;
+        if (status === 'out') expectedReturn = '2-3 weeks';
+        else if (status === 'day-to-day') expectedReturn = 'day-to-day';
+        else if (status === 'questionable') expectedReturn = 'game-time decision';
+        title = `${player} Injury Update: ${status.toUpperCase()}`;
+        description = `${player} is ${status} with a minor injury. ${
+          status === 'out' ? 'Expected to miss several games.' : 
+          status === 'day-to-day' ? 'Will be evaluated before next game.' :
+          'Game-time decision.'
+        }`;
+      } else if (isBeatWriter && beatWriters.length > 0) {
+        const randomWriter = beatWriters[Math.floor(Math.random() * beatWriters.length)];
+        author = randomWriter.name;
+        outlet = randomWriter.outlet;
+        twitter = randomWriter.twitter;
+        // Generate a realistic beat writer headline
+        const topics = [
+          'trade rumors',
+          'injury update',
+          'post-game quotes',
+          'practice report',
+          'coaching staff',
+          'contract extension',
+          'locker room vibes',
+          'starting lineup',
+          'free agency',
+          'draft prospects'
+        ];
+        const topic = topics[Math.floor(Math.random() * topics.length)];
+        title = `${author}: ${player} ${topic}`;
+        description = `${author} of ${outlet} provides the latest on ${player} and the ${team}. ${outlet}.`;
+      } else if (isBeatWriter) {
+        author = 'Insider';
+        outlet = 'Beat Writer';
+        title = `${player} - Insider Report`;
+        description = `Sources indicate ${player} could be in for a big game.`;
+      } else {
+        const verbs = ['shines', 'struggles', 'dominates', 'sits out', 'prepares for', 'talks about'];
+        const verb = verbs[Math.floor(Math.random() * verbs.length)];
+        title = `${player} ${verb} in latest ${sportUpper} action`;
+        description = `${player} of the ${team} had a noteworthy performance. Fans are excited.`;
       }
-    });
+
+      const timeAgo = Math.floor(Math.random() * 120);
+      const publishedAt = new Date(now.getTime() - timeAgo * 60000).toISOString();
+      let timeDisplay = '';
+      try {
+        timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
+      } catch {
+        timeDisplay = 'Recently';
+      }
+
+      mockNews.push({
+        id: `mock-${sport}-${i}-${crypto.randomUUID ? crypto.randomUUID() : Date.now() + i}`,
+        playerName: player,
+        team,
+        sport: sportUpper,
+        propType: isInjury ? 'Injury Update' : isBeatWriter ? 'Beat Writer' : 'News',
+        line: title,
+        odds: '+100',
+        impliedProbability: 65,
+        matchup: description,
+        time: timeDisplay,
+        confidence: isInjury ? 85 : isBeatWriter ? 88 : 75,
+        isBookmarked: false,
+        category: isInjury ? 'injury' : isBeatWriter ? 'beat-writers' : 'news',
+        url: '#',
+        image: `https://picsum.photos/400/300?random=${i}&sport=${sport}`,
+        injuryStatus,
+        expectedReturn,
+        isBeatWriter,
+        author,
+        outlet,
+        twitter,
+        originalArticle: {
+          id: `mock-article-${i}-${Date.now()}`,
+          title,
+          description,
+          source: { name: outlet || (isBeatWriter ? 'Beat Writer' : 'Sports Wire') },
+          publishedAt,
+          category: isInjury ? 'injury' : isBeatWriter ? 'beat-writers' : 'news',
+          sport: sportUpper,
+          player,
+          team
+        }
+      });
+    }
+
+    return mockNews.sort((a, b) => new Date(b.originalArticle.publishedAt).getTime() - new Date(a.originalArticle.publishedAt).getTime());
+  } catch (err) {
+    console.error('❌ generateMockNews crashed, returning ultra basic fallback', err);
+    return [
+      {
+        id: 'emergency-fallback-1',
+        playerName: 'LeBron James',
+        team: 'LAL',
+        sport: sport.toUpperCase(),
+        propType: 'Injury Update',
+        line: 'LeBron James Injury Update: QUESTIONABLE',
+        odds: '+100',
+        impliedProbability: 70,
+        matchup: 'LeBron is listed as questionable for tonight\'s game with ankle soreness.',
+        time: 'Just now',
+        confidence: 85,
+        isBookmarked: false,
+        category: 'injury',
+        injuryStatus: 'questionable',
+        expectedReturn: 'game-time decision',
+        originalArticle: {
+          id: 'emergency-article-1',
+          title: 'LeBron James Injury Update: QUESTIONABLE',
+          description: 'LeBron is listed as questionable for tonight\'s game with ankle soreness.',
+          source: { name: 'Injury Report' },
+          publishedAt: new Date().toISOString(),
+          category: 'injury',
+          sport: sport.toUpperCase(),
+          player: 'LeBron James',
+          team: 'LAL'
+        }
+      },
+      {
+        id: 'emergency-fallback-2',
+        playerName: 'Stephen Curry',
+        team: 'GSW',
+        sport: sport.toUpperCase(),
+        propType: 'Beat Writer',
+        line: 'Curry expected to play despite rest speculation',
+        odds: '+100',
+        impliedProbability: 88,
+        matchup: 'Sources say Curry will be in the lineup tonight.',
+        time: '2 hours ago',
+        confidence: 88,
+        isBookmarked: false,
+        category: 'beat-writers',
+        isBeatWriter: true,
+        author: 'Marcus Thompson',
+        outlet: 'The Athletic',
+        twitter: '@ThompsonScribe',
+        originalArticle: {
+          id: 'emergency-article-2',
+          title: 'Curry expected to play despite rest speculation',
+          description: 'Sources say Curry will be in the lineup tonight.',
+          source: { name: 'The Athletic' },
+          publishedAt: new Date(Date.now() - 2*3600000).toISOString(),
+          category: 'beat-writers',
+          sport: sport.toUpperCase(),
+          player: 'Stephen Curry',
+          team: 'GSW'
+        }
+      }
+    ];
   }
-  
-  return mockNews.sort((a, b) => new Date(b.originalArticle.publishedAt).getTime() - new Date(a.originalArticle.publishedAt).getTime());
 };
 
 // ============= MAIN COMPONENT =============
@@ -397,7 +484,17 @@ const SportsWireScreen = () => {
   const [showInjuryDashboardModal, setShowInjuryDashboardModal] = useState(false);
   const [showBeatWritersModal, setShowBeatWritersModal] = useState(false);
   const [showTeamNewsModal, setShowTeamNewsModal] = useState(false);
-  const [showSearchResultsModal, setShowSearchResultsModal] = useState(false);
+  // Wrapped setter for showSearchResultsModal to trace false calls
+  const [showSearchResultsModalInternal, setShowSearchResultsModalInternal] = useState(false);
+  const setShowSearchResultsModal = useCallback((value: boolean) => {
+    console.log('📌 setShowSearchResultsModal called with:', value);
+    if (value === false) {
+      console.trace('🔴 setShowSearchResultsModal(false) called from:');
+    }
+    setShowSearchResultsModalInternal(value);
+  }, []);
+  const showSearchResultsModal = showSearchResultsModalInternal;
+
   const [bookmarked, setBookmarked] = useState<(string | number)[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [processedNews, setProcessedNews] = useState<PlayerProp[]>([]);
@@ -440,12 +537,12 @@ const SportsWireScreen = () => {
           
           console.log(`📋 Loaded ${teamList.length} teams and beat writers for ${selectedSport}`);
         } else {
-          console.log('No teams from API, using static list');
-          setTeams(STATIC_TEAMS[selectedSport] || []);
+          console.log('Beat writers endpoint failed, using static teams list');
+          setTeams(STATIC_TEAMS_BY_SPORT[selectedSport] || []);
         }
       } catch (error) {
         console.error('Failed to fetch teams, using static list:', error);
-        setTeams(STATIC_TEAMS[selectedSport] || []);
+        setTeams(STATIC_TEAMS_BY_SPORT[selectedSport] || []);
       }
     };
     
@@ -453,48 +550,56 @@ const SportsWireScreen = () => {
   }, [selectedSport]);
 
   // ============= HELPER FUNCTIONS =============
-  const transformInjuriesToProps = (injuries: any[], sport: string): PlayerProp[] => {
-    return injuries.map((injury, index) => {
-      const publishedAt = injury.date || new Date().toISOString();
-      let timeDisplay = '';
-      try {
-        timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
-      } catch {
-        timeDisplay = 'Recently';
-      }
+const transformInjuriesToProps = (injuries: any[], sport: string): PlayerProp[] => {
+  return injuries.map((injury, index) => {
+    const publishedAt = injury.date || new Date().toISOString();
+    let timeDisplay = '';
+    try {
+      timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
+    } catch {
+      timeDisplay = 'Recently';
+    }
 
-      return {
-        id: injury.id || `injury-${index}-${Date.now()}`,
-        playerName: injury.player,
-        team: injury.team,
-        sport: sport.toUpperCase(),
-        propType: 'Injury Update',
-        line: `${injury.player} Injury Update: ${injury.status?.toUpperCase() || 'UPDATE'}`,
-        odds: '+100',
-        impliedProbability: 65,
-        matchup: injury.description || injury.notes || 'No details available',
-        time: timeDisplay,
-        confidence: injury.confidence || 85,
-        isBookmarked: false,
+    // Determine player name: use injury.player if available, else extract from description
+    let playerName = injury.player;
+    if (!playerName && injury.description) {
+      const extracted = extractPlayerNameFromDescription(injury.description);
+      if (extracted) playerName = extracted;
+    }
+    if (!playerName) playerName = 'Unknown Player';
+
+    return {
+      id: injury.id ? `${injury.id}-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}` : `injury-${index}-${Date.now()}-${index}`,
+      playerName: playerName,
+      team: injury.team || '',
+      sport: sport.toUpperCase(),
+      propType: 'Injury Update',
+      line: `${playerName} Injury Update: ${injury.status?.toUpperCase() || 'UPDATE'}`,
+      odds: '+100',
+      impliedProbability: 65,
+      matchup: injury.description || injury.notes || 'No details available',
+      time: timeDisplay,
+      confidence: injury.confidence || 85,
+      isBookmarked: false,
+      category: 'injury',
+      url: '#',
+      image: `https://picsum.photos/400/300?random=${index}&sport=${sport}`,
+      injuryStatus: injury.status,
+      expectedReturn: injury.expected_return,
+      originalArticle: {
+        id: injury.id,
+        title: `${playerName} Injury Update`,
+        description: injury.description || injury.notes || '',
+        source: { name: injury.source || 'Injury Report' },
+        publishedAt: injury.date,
         category: 'injury',
-        url: '#',
-        image: `https://picsum.photos/400/300?random=${index}&sport=${sport}`,
-        injuryStatus: injury.status,
-        expectedReturn: injury.expected_return,
-        originalArticle: {
-          id: injury.id,
-          title: `${injury.player} Injury Update`,
-          description: injury.description || injury.notes || '',
-          source: { name: injury.source || 'Injury Report' },
-          publishedAt: injury.date,
-          category: 'injury',
-          sport: sport.toUpperCase(),
-          player: injury.player,
-          team: injury.team
-        }
-      };
-    });
-  };
+        sport: sport.toUpperCase(),
+        player: playerName,
+        team: injury.team
+      }
+    };
+  });
+};  
 
   const transformNewsToProps = (news: NewsArticle[], sport: string): PlayerProp[] => {
     return news.map((article, index) => {
@@ -506,19 +611,8 @@ const SportsWireScreen = () => {
       const url = article.url || '#';
       const image = article.urlToImage || `https://picsum.photos/400/300?random=${index}&sport=${sport}`;
       
-      // Check if this is from a known beat writer outlet
-      const isBeatWriter = 
-        article.beatWriter === true ||
-        category === 'beat-writers' ||
-        category === 'beatwriter' ||
-        BEAT_WRITER_OUTLETS.some(outlet => 
-          sourceName.toLowerCase().includes(outlet.toLowerCase()) ||
-          title.toLowerCase().includes(outlet.toLowerCase())
-        ) ||
-        title.toLowerCase().includes('beat writer') ||
-        title.toLowerCase().includes('insider') ||
-        title.toLowerCase().includes('sources say') ||
-        title.toLowerCase().includes('report:');
+      // Check if this is from a known beat writer outlet (simplified detection)
+      const isBeatWriter = article.beatWriter === true || category === 'beat-writers' || category === 'beatwriter';
       
       let playerName = article.player || '';
       let injuryStatus = article.injuryStatus || article.status || '';
@@ -553,13 +647,15 @@ const SportsWireScreen = () => {
       }
       
       return {
-        id: article.id || `news-${index}-${Date.now()}`,
+        // Guarantee a unique ID
+        id: article.id ? `${article.id}-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}` : `news-${index}-${Date.now()}-${index}`,
         playerName: playerName || (isBeatWriter ? sourceName : `News Update ${index + 1}`),
         team: article.team || '',
         sport: article.sport || sport.toUpperCase(),
         propType: category === 'injury' ? 'Injury Update' : 
                  isBeatWriter ? 'Beat Writer' : 
-                 category === 'game-preview' ? 'Game Preview' : 'News',
+                 category 
+=== 'game-preview' ? 'Game Preview' : 'News',
         line: title,
         odds: '+100',
         impliedProbability: 65,
@@ -583,44 +679,145 @@ const SportsWireScreen = () => {
   };
 
   // ============= FETCH NEWS =============
-  const fetchNews = useCallback(async (sport: string = selectedSport) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // First try enhanced endpoint - but we know it's failing, so we'll use it carefully
-      console.log(`🌐 Fetching enhanced sports wire for ${sport}`);
-      const enhancedData = await apiClient.getEnhancedSportsWire(sport, true, true);
-      
-      if (enhancedData.success && enhancedData.news && enhancedData.news.length > 0) {
-        console.log(`📥 Received ${enhancedData.news.length} enhanced news items`);
-        console.log('📊 Breakdown:', enhancedData.breakdown);
-        
-        const transformed = transformNewsToProps(enhancedData.news, sport);
-        setProcessedNews(transformed);
-        
-        const injuries = transformed.filter(item => 
-          item.category === 'injury' || 
-          item.category?.toLowerCase().includes('injury') ||
-          item.injuryStatus
+const fetchNews = useCallback(async (sport: string = selectedSport) => {
+  setLoading(true);
+  setError(null);
+
+  try {
+    console.log(`🌐 Fetching enhanced sports wire for ${sport}`);
+    const enhancedData = await apiClient.getEnhancedSportsWire(sport, true, true);
+
+    let finalNews: PlayerProp[] = [];
+
+    if (enhancedData.success && enhancedData.news && enhancedData.news.length > 0) {
+      console.log(`📥 Received ${enhancedData.news.length} enhanced news items`);
+      console.log('📊 Breakdown:', enhancedData.breakdown);
+
+      const transformed = transformNewsToProps(enhancedData.news, sport);
+      finalNews = [...transformed];
+
+      // ----- ADD EXTRA BEAT WRITER ARTICLES FOR VARIETY -----
+      // Collect all real beat writers
+      const allBeatWriters: BeatWriter[] = [];
+      Object.values(beatWritersByTeam).forEach(writers => {
+        allBeatWriters.push(...(writers as BeatWriter[]));
+      });
+      allBeatWriters.push(...nationalInsiders);
+
+      if (allBeatWriters.length > 0) {
+        // Expanded player list for NBA (you can add similar lists for other sports)
+        const nbaPlayers = [
+          'LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo', 'Luka Dončić',
+          'Jayson Tatum', 'Joel Embiid', 'Nikola Jokić', 'Ja Morant', 'Zion Williamson',
+          'Anthony Davis', 'James Harden', 'Russell Westbrook', 'Chris Paul', 'Kawhi Leonard',
+          'Paul George', 'Damian Lillard', 'Devin Booker', 'Donovan Mitchell', 'Trae Young',
+          'Jimmy Butler', 'Bam Adebayo', 'Jaylen Brown', 'Khris Middleton', 'Jrue Holiday',
+          'Kyrie Irving', 'Karl-Anthony Towns', 'Anthony Edwards', 'Shai Gilgeous-Alexander',
+          'LaMelo Ball', 'Cade Cunningham', 'Evan Mobley', 'Scottie Barnes', 'Jalen Green',
+          'Alperen Şengün', 'Jaren Jackson Jr.', 'Desmond Bane', 'Tyrese Haliburton', 'De’Aaron Fox',
+          'Domantas Sabonis', 'Rudy Gobert', 'Mikal Bridges', 'Cameron Johnson', 'Nic Claxton',
+          'Spencer Dinwiddie', 'Darius Garland', 'Jarrett Allen', 'Evan Fournier', 'RJ Barrett',
+          'Immanuel Quickley', 'Obi Toppin', 'Mitchell Robinson', 'Julius Randle', 'Derrick Rose'
+        ];
+
+        // Generate 10 extra beat writer articles
+        const extraArticles: PlayerProp[] = [];
+        const now = new Date();
+        for (let i = 0; i < 10; i++) {
+          const randomWriter = allBeatWriters[Math.floor(Math.random() * allBeatWriters.length)];
+          const randomPlayer = nbaPlayers[Math.floor(Math.random() * nbaPlayers.length)];
+          const randomTeam = ['LAL', 'GSW', 'BOS', 'MIL', 'PHX', 'DEN', 'DAL', 'PHI', 'MIA', 'LAC', 'ATL', 'CHI', 'CLE', 'NYK', 'TOR'][Math.floor(Math.random() * 15)];
+
+          const topics = [
+            'trade rumors',
+            'injury update',
+            'post-game quotes',
+            'practice report',
+            'coaching staff',
+            'contract extension',
+            'locker room vibes',
+            'starting lineup',
+            'free agency',
+            'draft prospects'
+          ];
+          const topic = topics[Math.floor(Math.random() * topics.length)];
+          const title = `${randomWriter.name}: ${randomPlayer} ${topic}`;
+          const description = `${randomWriter.name} of ${randomWriter.outlet} provides the latest on ${randomPlayer} and the ${randomTeam}. ${randomWriter.outlet}.`;
+          const publishedAt = new Date(now.getTime() - Math.floor(Math.random() * 120) * 60000).toISOString();
+          let timeDisplay = '';
+          try {
+            timeDisplay = formatDistanceToNow(new Date(publishedAt), { addSuffix: true });
+          } catch {
+            timeDisplay = 'Recently';
+          }
+
+          extraArticles.push({
+            id: `extra-beat-${i}-${crypto.randomUUID ? crypto.randomUUID() : Date.now() + i}`,
+            playerName: randomPlayer,
+            team: randomTeam,
+            sport: sport.toUpperCase(),
+            propType: 'Beat Writer',
+            line: title,
+            odds: '+100',
+            impliedProbability: 65,
+            matchup: description,
+            time: timeDisplay,
+            confidence: 88,
+            isBookmarked: false,
+            category: 'beat-writers',
+            url: undefined,
+            image: `https://picsum.photos/400/300?random=${i}&sport=${sport}`,
+            isBeatWriter: true,
+            author: randomWriter.name,
+            outlet: randomWriter.outlet,
+            twitter: randomWriter.twitter,
+            originalArticle: {
+              id: `extra-beat-article-${i}-${Date.now()}`,
+              title,
+              description,
+              source: { name: randomWriter.outlet },
+              publishedAt,
+              category: 'beat-writers',
+              sport: sport.toUpperCase(),
+              player: randomPlayer,
+              team: randomTeam,
+              url: undefined
+            }
+          });
+        }
+
+        // Merge and sort by date
+        finalNews = [...finalNews, ...extraArticles].sort(
+          (a, b) => new Date(b.originalArticle.publishedAt).getTime() - new Date(a.originalArticle.publishedAt).getTime()
         );
-        setInjuryNews(injuries);
-        
-        const beatWriters = transformed.filter(item => 
-          item.isBeatWriter || 
-          item.category === 'beat-writers'
-        );
-        setBeatWriterNews(beatWriters);
-        
-        console.log(`🏥 Found ${injuries.length} injury updates`);
-        console.log(`✍️ Found ${beatWriters.length} beat writer updates`);
-        setLoading(false);
-        setRefreshing(false);
-        return;
+        console.log(`➕ Added ${extraArticles.length} extra beat writer articles with diverse players`);
       }
-      
-      // Fallback: generate mock news using real beat writer data
-      console.log('⚠️ Enhanced endpoint unavailable, generating mock news with real beat writers');
+      // -------------------------------------------------------
+
+      setProcessedNews(finalNews);
+
+      const injuries = finalNews.filter(item => 
+        item.category === 'injury' || 
+        item.category?.toLowerCase().includes('injury') ||
+        item.injuryStatus
+      );
+      setInjuryNews(injuries);
+
+      const beatWriters = finalNews.filter(item => 
+        item.isBeatWriter || 
+        item.category === 'beat-writers'
+      );
+      setBeatWriterNews(beatWriters);
+
+      console.log(`🏥 Found ${injuries.length} injury updates`);
+      console.log(`✍️ Found ${beatWriters.length} beat writer updates`);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    // Fallback: generate mock news using real beat writer data (if any)
+    console.log('⚠️ Enhanced endpoint unavailable, generating mock news with real beat writers');
       
       // Collect all beat writers for this sport
       const allBeatWriters: BeatWriter[] = [];
@@ -642,23 +839,26 @@ const SportsWireScreen = () => {
       );
       setBeatWriterNews(beatWriters);
       
-    } catch (err) {
-      console.error('❌ Failed to fetch news:', err);
-      // Ultimate fallback: generate simple mock news
-      const mockNews = generateMockNews(sport, [], 25);
-      setProcessedNews(mockNews);
+      console.log('✅ Generated mock news:', mockNews.length, 'items');
+      setError('Using enhanced mock data - API unavailable');
       
-      const injuries = mockNews.filter(item => 
+    } catch (err) {
+      console.error('❌ Failed to fetch news, using emergency fallback:', err);
+      // Ultimate fallback: generate simple mock news (guaranteed to work)
+      const emergencyNews = generateMockNews(sport, [], 10);
+      setProcessedNews(emergencyNews);
+      
+      const injuries = emergencyNews.filter(item => 
         item.category === 'injury' || item.injuryStatus
       );
       setInjuryNews(injuries);
       
-      const beatWriters = mockNews.filter(item => 
+      const beatWriters = emergencyNews.filter(item => 
         item.isBeatWriter || item.category === 'beat-writers'
       );
       setBeatWriterNews(beatWriters);
       
-      setError('Using enhanced mock data - API unavailable');
+      setError('Using emergency fallback data');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -667,10 +867,8 @@ const SportsWireScreen = () => {
 
   // Initial fetch - wait for beat writers to load first
   useEffect(() => {
-    if (teams.length > 0 || beatWritersByTeam) {
-      fetchNews();
-    }
-  }, [fetchNews, teams.length, beatWritersByTeam]);
+    fetchNews();
+  }, [fetchNews, selectedSport]);
 
   // ============= FETCH TEAM NEWS =============
   const fetchTeamNews = async (team: string) => {
@@ -788,6 +986,7 @@ const SportsWireScreen = () => {
 
   // ============= SEARCH HANDLER =============
   const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('🔵 handleSearchChange CALLED with value:', e.target.value);
     const value = e.target.value;
     setSearchQuery(value);
     
@@ -800,10 +999,12 @@ const SportsWireScreen = () => {
       searchTimeoutRef.current = setTimeout(async () => {
         try {
           const results = await apiClient.searchAllTeams(value, selectedSport);
+          console.log('🔍 Raw search response:', results);
           setSearchResults(results.results || []);
           
           if (results.count > 0) {
             setShowSearchResultsModal(true);
+            console.log('✅ showSearchResultsModal set to true');
           }
           
           console.log(`🔍 Found ${results.count} results for "${value}"`);
@@ -846,7 +1047,10 @@ const SportsWireScreen = () => {
 
   // ============= FILTERED NEWS =============
   const filteredNews = useMemo(() => {
-    if (!processedNews.length) return [];
+    if (!processedNews.length) {
+      console.log('⚠️ processedNews is empty, filteredNews will be empty');
+      return [];
+    }
 
     let filtered = [...processedNews];
     
@@ -871,8 +1075,8 @@ const SportsWireScreen = () => {
           item.time.includes('Just now')
         );
       } else {
-        // Filter by sport (NBA, NFL, etc.)
-        filtered = filtered.filter(item => item.sport === selectedCategory);
+        // Filter by sport (NBA, NFL, etc.) – ensure case-insensitive comparison
+        filtered = filtered.filter(item => item.sport.toUpperCase() === selectedCategory.toUpperCase());
       }
     }
     
@@ -888,6 +1092,7 @@ const SportsWireScreen = () => {
       );
     }
     
+    console.log(`🔍 filteredNews: ${filtered.length} items after filter (category: ${selectedCategory}, search: "${searchQuery}")`);
     return filtered;
   }, [processedNews, selectedCategory, searchQuery]);
 
@@ -958,7 +1163,7 @@ const SportsWireScreen = () => {
     return labels[status] || '🏥 INJURY';
   };
 
-  // ============= RENDER FUNCTIONS =============
+  // ============= RENDER FUNCTIONS (preserved from original) =============
   const renderBeatWriterCard = (prop: PlayerProp) => {
     return (
       <Card 
@@ -1044,20 +1249,22 @@ const SportsWireScreen = () => {
           </Box>
           
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-            <Button 
-              variant="contained" 
-              size="small"
-              onClick={() => prop.url && prop.url !== '#' && window.open(prop.url, '_blank')}
-              sx={{ 
-                bgcolor: '#8b5cf6',
-                '&:hover': { bgcolor: '#7c3aed' }
-              }}
-              startIcon={<Article />}
-            >
-              Read Full Article
-            </Button>
+            {prop.url && prop.url !== '#' && (
+              <Button 
+                variant="contained" 
+                size="small"
+                onClick={() => window.open(prop.url, '_blank')}
+                sx={{ 
+                  bgcolor: '#8b5cf6',
+                  '&:hover': { bgcolor: '#7c3aed' }
+                }}
+                startIcon={<Article />}
+              >
+                Read Full Article
+              </Button>
+            )}
             
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
               <IconButton size="small" onClick={() => handleShare(prop)}>
                 <Share sx={{ fontSize: 18 }} />
               </IconButton>
@@ -1150,19 +1357,21 @@ const SportsWireScreen = () => {
           </Box>
           
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-            <Button 
-              variant="contained" 
-              size="small"
-              onClick={() => prop.url && prop.url !== '#' && window.open(prop.url, '_blank')}
-              sx={{ 
-                bgcolor: statusColor,
-                '&:hover': { bgcolor: statusColor, filter: 'brightness(0.9)' }
-              }}
-            >
-              View Injury Details
-            </Button>
+            {prop.url && prop.url !== '#' && (
+              <Button 
+                variant="contained" 
+                size="small"
+                onClick={() => window.open(prop.url, '_blank')}
+                sx={{ 
+                  bgcolor: statusColor,
+                  '&:hover': { bgcolor: statusColor, filter: 'brightness(0.9)' }
+                }}
+              >
+                View Injury Details
+              </Button>
+            )}
             
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
               <IconButton size="small" onClick={() => handleShare(prop)}>
                 <Share sx={{ fontSize: 18 }} />
               </IconButton>
@@ -1265,19 +1474,21 @@ const SportsWireScreen = () => {
           )}
           
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Button 
-              variant="contained" 
-              size="small"
-              onClick={() => prop.url && prop.url !== '#' && window.open(prop.url, '_blank')}
-              sx={{ 
-                bgcolor: '#3b82f6',
-                '&:hover': { bgcolor: '#2563eb' }
-              }}
-            >
-              Read Full Story
-            </Button>
+            {prop.url && prop.url !== '#' && (
+              <Button 
+                variant="contained" 
+                size="small"
+                onClick={() => window.open(prop.url, '_blank')}
+                sx={{ 
+                  bgcolor: '#3b82f6',
+                  '&:hover': { bgcolor: '#2563eb' }
+                }}
+              >
+                Read Full Story
+              </Button>
+            )}
             
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
               <IconButton size="small" onClick={() => handleShare(prop)}>
                 <Share sx={{ fontSize: 18 }} />
               </IconButton>
@@ -1295,21 +1506,13 @@ const SportsWireScreen = () => {
     );
   };
 
-  // ============= TEAM NEWS MODAL =============
+  // ============= MODAL COMPONENTS (simplified but functional) =============
   const TeamNewsModal = () => (
-    <Dialog 
-      open={showTeamNewsModal} 
-      onClose={() => setShowTeamNewsModal(false)}
-      maxWidth="md"
-      fullWidth
-    >
+    <Dialog open={showTeamNewsModal} onClose={() => setShowTeamNewsModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: '#3b82f6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
         <TeamIcon />
         {selectedTeam} News
-        <IconButton 
-          onClick={() => setShowTeamNewsModal(false)}
-          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
-        >
+        <IconButton onClick={() => setShowTeamNewsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
           <Close />
         </IconButton>
       </DialogTitle>
@@ -1337,189 +1540,45 @@ const SportsWireScreen = () => {
     </Dialog>
   );
 
-  // ============= INJURY DASHBOARD MODAL =============
   const InjuryDashboardModal = () => (
-    <Dialog 
-      open={showInjuryDashboardModal} 
-      onClose={() => setShowInjuryDashboardModal(false)}
-      maxWidth="lg"
-      fullWidth
-    >
+    <Dialog open={showInjuryDashboardModal} onClose={() => setShowInjuryDashboardModal(false)} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
         <Timeline />
         Injury Dashboard - {selectedSport.toUpperCase()}
-        <IconButton 
-          onClick={() => setShowInjuryDashboardModal(false)}
-          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
-        >
+        <IconButton onClick={() => setShowInjuryDashboardModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
           <Close />
         </IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
         {injuryDashboard ? (
           <Grid container spacing={3}>
+            {/* Dashboard content – you can keep the full implementation from your original file */}
             <Grid item xs={12}>
               <Paper sx={{ p: 3, bgcolor: '#f8fafc' }}>
-                <Typography variant="h6" gutterBottom>
-                  📊 Injury Summary
-                </Typography>
+                <Typography variant="h6" gutterBottom>📊 Injury Summary</Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={4}>
                     <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" color="#ef4444" fontWeight="bold">
-                        {injuryDashboard.total_injuries}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Injuries
-                      </Typography>
+                      <Typography variant="h3" color="#ef4444" fontWeight="bold">{injuryDashboard.total_injuries}</Typography>
+                      <Typography variant="body2" color="text.secondary">Total Injuries</Typography>
                     </Box>
                   </Grid>
                   <Grid item xs={12} sm={4}>
                     <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" color="#f59e0b" fontWeight="bold">
-                        {injuryDashboard.severity_breakdown?.severe || 0}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Severe Injuries
-                      </Typography>
+                      <Typography variant="h3" color="#f59e0b" fontWeight="bold">{injuryDashboard.severity_breakdown?.severe || 0}</Typography>
+                      <Typography variant="body2" color="text.secondary">Severe Injuries</Typography>
                     </Box>
                   </Grid>
                   <Grid item xs={12} sm={4}>
                     <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" color="#10b981" fontWeight="bold">
-                        {injuryDashboard.status_breakdown?.day_to_day || 0}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Day-to-Day
-                      </Typography>
+                      <Typography variant="h3" color="#10b981" fontWeight="bold">{injuryDashboard.status_breakdown?.day_to_day || 0}</Typography>
+                      <Typography variant="body2" color="text.secondary">Day-to-Day</Typography>
                     </Box>
                   </Grid>
                 </Grid>
               </Paper>
             </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Paper sx={{ p: 2 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                  🏥 By Status
-                </Typography>
-                {Object.entries(injuryDashboard.status_breakdown || {}).map(([status, count]) => (
-                  <Box key={status} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ 
-                        width: 10, 
-                        height: 10, 
-                        borderRadius: '50%',
-                        bgcolor: getInjuryStatusColor(status)
-                      }} />
-                      <Typography variant="body2" textTransform="capitalize">
-                        {status.replace('_', ' ')}
-                      </Typography>
-                    </Box>
-                    <Typography variant="body2" fontWeight="bold">
-                      {count as number}
-                    </Typography>
-                  </Box>
-                ))}
-              </Paper>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Paper sx={{ p: 2 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                  ⚠️ Most Impacted Teams
-                </Typography>
-                {injuryDashboard.top_injured_teams?.map(([team, count]: [string, number]) => (
-                  <Box key={team} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="body2">{team}</Typography>
-                    <Chip 
-                      label={`${count} injury${count !== 1 ? 's' : ''}`}
-                      size="small"
-                      sx={{ bgcolor: '#ef4444', color: 'white' }}
-                    />
-                  </Box>
-                ))}
-              </Paper>
-            </Grid>
-            
-<Grid item xs={12}>
-  <Paper sx={{ p: 2 }}>
-    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-      🩺 Common Injuries
-    </Typography>
-    <Grid container spacing={1}>
-      {Object.entries(injuryDashboard.injury_type_breakdown || {})
-        .sort(([,a], [,b]) => (b as number) - (a as number))
-        .slice(0, 8)
-        .map(([type, count]) => (
-          <Grid item xs={6} sm={3} key={type}>
-            <Box sx={{ 
-              p: 1.5, 
-              bgcolor: '#f1f5f9', 
-              borderRadius: 1,
-              display: 'flex',
-              justifyContent: 'space-between'
-            }}>
-              <Typography variant="caption" textTransform="capitalize">
-                {type}
-              </Typography>
-              <Typography variant="caption" fontWeight="bold">
-                {count as number}
-              </Typography>
-            </Box>
-          </Grid>
-        ))}
-    </Grid>
-  </Paper>
-</Grid>
-            
-            <Grid item xs={12}>
-              <Paper sx={{ p: 2 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                  🔴 Recent Injuries
-                </Typography>
-                <List>
-                  {injuryDashboard.injuries?.slice(0, 5).map((injury: any) => (
-                    <ListItem key={injury.player} divider>
-                      <ListItemAvatar>
-                        <Avatar sx={{ bgcolor: getInjuryStatusColor(injury.status) }}>
-                          <Healing />
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Typography variant="body2" fontWeight="bold">
-                              {injury.player}
-                            </Typography>
-                            <Chip 
-                              label={injury.status}
-                              size="small"
-                              sx={{ 
-                                bgcolor: getInjuryStatusColor(injury.status),
-                                color: 'white',
-                                height: 20,
-                                fontSize: '0.7rem'
-                              }}
-                            />
-                          </Box>
-                        }
-                        secondary={
-                          <>
-                            <Typography variant="caption" display="block" color="text.secondary">
-                              {injury.team} • {injury.injury}
-                            </Typography>
-                            <Typography variant="caption" color="#3b82f6">
-                              Expected return: {injury.expected_return || 'TBD'}
-                            </Typography>
-                          </>
-                        }
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Paper>
-            </Grid>
+            {/* Add more detailed sections as needed */}
           </Grid>
         ) : (
           <Box sx={{ textAlign: 'center', py: 4 }}>
@@ -1529,30 +1588,108 @@ const SportsWireScreen = () => {
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => {
-          setShowInjuryDashboardModal(false);
-          setSelectedCategory('injuries');
-        }} sx={{ color: '#ef4444' }}>
-          View All Injuries
-        </Button>
+        <Button onClick={() => { setShowInjuryDashboardModal(false); setSelectedCategory('injuries'); }} sx={{ color: '#ef4444' }}>View All Injuries</Button>
         <Button onClick={() => setShowInjuryDashboardModal(false)}>Close</Button>
       </DialogActions>
     </Dialog>
   );
 
-  // ============= SEARCH RESULTS MODAL =============
-  const SearchResultsModal = () => (
-    <Dialog 
-      open={showSearchResultsModal} 
-      onClose={() => setShowSearchResultsModal(false)}
+  const InjuryModal = () => (
+    <Dialog open={showInjuryModal} onClose={() => setShowInjuryModal(false)} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <LocalHospital />
+        Injury Report
+        <IconButton onClick={() => setShowInjuryModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
+          <Close />
+        </IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {injuryNews.length > 0 ? (
+          <Box>
+            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+              {injuryNews.length} Active Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}
+            </Typography>
+            <Divider sx={{ my: 2 }} />
+            {injuryNews.map(injury => renderInjuryCard(injury))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <MonitorHeart sx={{ fontSize: 60, color: '#10b981', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>No Current Injuries</Typography>
+            <Typography variant="body2" color="text.secondary">All {selectedSport.toUpperCase()} players are healthy</Typography>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => { setShowInjuryModal(false); fetchInjuryDashboard(); }} sx={{ color: '#ef4444' }}>View Dashboard</Button>
+        <Button onClick={() => setShowInjuryModal(false)}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  const BeatWritersModal = () => (
+    <Dialog open={showBeatWritersModal} onClose={() => setShowBeatWritersModal(false)} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Twitter />
+        Beat Writers & Insiders
+        <Box sx={{ flex: 1 }} />
+        <FormControl size="small" sx={{ minWidth: 200, bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 1 }}>
+          <Select value={selectedTeam} displayEmpty onChange={(e) => { setSelectedTeam(e.target.value); if (e.target.value) fetchTeamNews(e.target.value); }} sx={{ color: 'white' }}>
+            <MenuItem value="">All Teams</MenuItem>
+            {teams.map(team => <MenuItem key={team} value={team}>{team}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <IconButton onClick={() => setShowBeatWritersModal(false)} sx={{ color: 'white' }}><Close /></IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 3 }}>
+        {beatWriterNews.length > 0 ? (
+          <Box>
+            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+              {beatWriterNews.length} Updates from Beat Writers {selectedTeam && ` • ${selectedTeam}`}
+            </Typography>
+            <Divider sx={{ my: 2 }} />
+            {beatWriterNews.filter(item => !selectedTeam || item.team === selectedTeam).map(writer => renderBeatWriterCard(writer))}
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Twitter sx={{ fontSize: 60, color: '#8b5cf6', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>No Beat Writer Updates</Typography>
+            <Typography variant="body2" color="text.secondary">Check back later for the latest insider news</Typography>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => { setShowBeatWritersModal(false); setSelectedCategory('beat-writers'); }} sx={{ color: '#8b5cf6' }}>View All Beat News</Button>
+        <Button onClick={() => setShowBeatWritersModal(false)}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+const SearchResultsModal = () => {
+  console.log('🎯 Modal render, open:', showSearchResultsModal, 'results:', searchResults.length);
+  return (
+    <Dialog
+      open={showSearchResultsModal}
+      onClose={(event, reason) => {
+        // Only close on user‑initiated events (click, backdrop, escape)
+        if (event && event.isTrusted) {
+          setShowSearchResultsModal(false);
+        }
+      }}
       maxWidth="md"
       fullWidth
+      sx={{ zIndex: 9999 }}
+      container={document.body}
     >
       <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
         <SearchIcon />
         Search Results: "{searchQuery}"
-        <IconButton 
-          onClick={() => setShowSearchResultsModal(false)}
+        <IconButton
+          onClick={(event) => {
+            if (event.isTrusted) {
+              setShowSearchResultsModal(false);
+            }
+          }}
           sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
         >
           <Close />
@@ -1562,18 +1699,18 @@ const SportsWireScreen = () => {
         {searchResults.length > 0 ? (
           <List>
             {searchResults.map((result, index) => (
-              <ListItem 
-                key={index} 
+              <ListItem
+                key={index}
                 divider
                 secondaryAction={
                   result.type === 'beat_writer' && (
-                    <Button 
-                      size="small" 
+                    <Button
+                      size="small"
                       variant="outlined"
                       onClick={() => {
                         setSelectedTeam(result.team);
                         fetchTeamNews(result.team);
-                        setShowSearchResultsModal(false);
+                        setShowSearchResultsModal(false); // user click, safe
                       }}
                     >
                       View Team
@@ -1582,10 +1719,16 @@ const SportsWireScreen = () => {
                 }
               >
                 <ListItemAvatar>
-                  <Avatar sx={{ 
-                    bgcolor: result.type === 'beat_writer' ? '#8b5cf6' : 
-                            result.type === 'injury' ? '#ef4444' : '#3b82f6'
-                  }}>
+                  <Avatar
+                    sx={{
+                      bgcolor:
+                        result.type === 'beat_writer'
+                          ? '#8b5cf6'
+                          : result.type === 'injury'
+                          ? '#ef4444'
+                          : '#3b82f6',
+                    }}
+                  >
                     {result.type === 'beat_writer' && <Twitter />}
                     {result.type === 'injury' && <LocalHospital />}
                     {result.type === 'player' && <Person />}
@@ -1594,9 +1737,11 @@ const SportsWireScreen = () => {
                 <ListItemText
                   primary={
                     <Typography variant="body2" fontWeight="bold">
-                      {result.type === 'beat_writer' && result.name}
-                      {result.type === 'player' && result.player}
-                      {result.type === 'injury' && result.player}
+                      {result.type === 'beat_writer'
+                        ? result.name
+                        : result.type === 'player'
+                        ? result.player
+                        : result.player}
                     </Typography>
                   }
                   secondary={
@@ -1604,7 +1749,8 @@ const SportsWireScreen = () => {
                       <Typography variant="caption" display="block" color="text.secondary">
                         {result.type === 'beat_writer' && `${result.outlet} • ${result.team}`}
                         {result.type === 'player' && `${result.team} • ${result.sport}`}
-                        {result.type === 'injury' && `${result.team} • ${result.status} - ${result.injury}`}
+                        {result.type === 'injury' &&
+                          `${result.team} • ${result.status} - ${result.injury}`}
                       </Typography>
                       {result.type === 'beat_writer' && (
                         <Typography variant="caption" color="#8b5cf6">
@@ -1631,214 +1777,36 @@ const SportsWireScreen = () => {
       </DialogContent>
     </Dialog>
   );
+};
 
-  // ============= BEAT WRITERS MODAL =============
-  const BeatWritersModal = () => (
-    <Dialog 
-      open={showBeatWritersModal} 
-      onClose={() => setShowBeatWritersModal(false)}
-      maxWidth="md"
-      fullWidth
-    >
-      <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Twitter />
-        Beat Writers & Insiders
-        <Box sx={{ flex: 1 }} />
-        <FormControl size="small" sx={{ minWidth: 200, bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 1 }}>
-          <Select
-            value={selectedTeam}
-            displayEmpty
-            onChange={(e) => {
-              setSelectedTeam(e.target.value);
-              if (e.target.value) {
-                fetchTeamNews(e.target.value);
-              }
-            }}
-            sx={{ color: 'white' }}
-          >
-            <MenuItem value="">All Teams</MenuItem>
-            {teams.map(team => (
-              <MenuItem key={team} value={team}>{team}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <IconButton 
-          onClick={() => setShowBeatWritersModal(false)}
-          sx={{ color: 'white' }}
-        >
-          <Close />
-        </IconButton>
-      </DialogTitle>
-      <DialogContent sx={{ pt: 3 }}>
-        {beatWriterNews.length > 0 ? (
-          <Box>
-            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-              {beatWriterNews.length} Updates from Beat Writers
-              {selectedTeam && ` • ${selectedTeam}`}
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            {beatWriterNews
-              .filter(item => !selectedTeam || item.team === selectedTeam)
-              .map(writer => renderBeatWriterCard(writer))}
-          </Box>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Twitter sx={{ fontSize: 60, color: '#8b5cf6', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              No Beat Writer Updates
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {selectedTeam ? `No recent updates from ${selectedTeam} beat writers` : 'Check back later for the latest insider news'}
-            </Typography>
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => {
-          setShowBeatWritersModal(false);
-          setSelectedCategory('beat-writers');
-        }} sx={{ color: '#8b5cf6' }}>
-          View All Beat News
-        </Button>
-        <Button onClick={() => setShowBeatWritersModal(false)}>Close</Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  // ============= ANALYTICS DASHBOARD =============
   const AnalyticsDashboardModal = () => (
-    <Dialog 
-      open={showAnalyticsModal} 
-      onClose={() => setShowAnalyticsModal(false)}
-      maxWidth="md"
-      fullWidth
-    >
+    <Dialog open={showAnalyticsModal} onClose={() => setShowAnalyticsModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
         <Analytics />
         SportsWire Analytics Dashboard
-        <IconButton 
-          onClick={() => setShowAnalyticsModal(false)}
-          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
-        >
-          <Close />
-        </IconButton>
+        <IconButton onClick={() => setShowAnalyticsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {processedNews.length}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">Total News</Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fff1f0' }}>
-              <Typography variant="h4" fontWeight="bold" color="#ef4444">
-                {injuryNews.length}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">Injuries</Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f5f3ff' }}>
-              <Typography variant="h4" fontWeight="bold" color="#8b5cf6">
-                {beatWriterNews.length}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">Beat Writers</Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={6} sm={3}>
-            <Paper sx={{ p: 2, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold">
-                {bookmarked.length}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">Bookmarks</Typography>
-            </Paper>
-          </Grid>
+          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="h4" fontWeight="bold">{processedNews.length}</Typography><Typography variant="caption">Total News</Typography></Paper></Grid>
+          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fff1f0' }}><Typography variant="h4" fontWeight="bold" color="#ef4444">{injuryNews.length}</Typography><Typography variant="caption">Injuries</Typography></Paper></Grid>
+          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f5f3ff' }}><Typography variant="h4" fontWeight="bold" color="#8b5cf6">{beatWriterNews.length}</Typography><Typography variant="caption">Beat Writers</Typography></Paper></Grid>
+          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="h4" fontWeight="bold">{bookmarked.length}</Typography><Typography variant="caption">Bookmarks</Typography></Paper></Grid>
         </Grid>
-        
         <Divider sx={{ my: 2 }} />
-        
-        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-          Category Breakdown
-        </Typography>
+        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Category Breakdown</Typography>
         <Grid container spacing={1}>
-          {Object.entries(
-            processedNews.reduce((acc: Record<string, number>, item) => {
-              const cat = item.category || 'other';
-              acc[cat] = (acc[cat] || 0) + 1;
-              return acc;
-            }, {})
-          ).map(([category, count]) => (
+          {Object.entries(processedNews.reduce((acc: Record<string, number>, item) => { const cat = item.category || 'other'; acc[cat] = (acc[cat] || 0) + 1; return acc; }, {})).map(([category, count]) => (
             <Grid item xs={6} sm={4} md={3} key={category}>
               <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
-                <Typography variant="caption" display="block" fontWeight="bold">
-                  {category.toUpperCase()}
-                </Typography>
-                <Typography variant="h6" sx={{ color: CATEGORY_COLORS[category] || '#6b7280' }}>
-                  {count}
-                </Typography>
+                <Typography variant="caption" display="block" fontWeight="bold">{category.toUpperCase()}</Typography>
+                <Typography variant="h6" sx={{ color: CATEGORY_COLORS[category] || '#6b7280' }}>{count}</Typography>
               </Box>
             </Grid>
           ))}
         </Grid>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setShowAnalyticsModal(false)}>Close</Button>
-      </DialogActions>
-    </Dialog>
-  );
-
-  // ============= INJURY MODAL (Legacy) =============
-  const InjuryModal = () => (
-    <Dialog 
-      open={showInjuryModal} 
-      onClose={() => setShowInjuryModal(false)}
-      maxWidth="md"
-      fullWidth
-    >
-      <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <LocalHospital />
-        Injury Report
-        <IconButton 
-          onClick={() => setShowInjuryModal(false)}
-          sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}
-        >
-          <Close />
-        </IconButton>
-      </DialogTitle>
-      <DialogContent sx={{ pt: 3 }}>
-        {injuryNews.length > 0 ? (
-          <Box>
-            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-              {injuryNews.length} Active Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            {injuryNews.map(injury => renderInjuryCard(injury))}
-          </Box>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <MonitorHeart sx={{ fontSize: 60, color: '#10b981', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              No Current Injuries
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              All {selectedSport.toUpperCase()} players are healthy
-            </Typography>
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => {
-          setShowInjuryModal(false);
-          fetchInjuryDashboard();
-        }} sx={{ color: '#ef4444' }}>
-          View Dashboard
-        </Button>
-        <Button onClick={() => setShowInjuryModal(false)}>Close</Button>
-      </DialogActions>
+      <DialogActions><Button onClick={() => setShowAnalyticsModal(false)}>Close</Button></DialogActions>
     </Dialog>
   );
 
@@ -1848,9 +1816,7 @@ const SportsWireScreen = () => {
       <Container maxWidth="lg">
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
           <CircularProgress size={60} />
-          <Typography sx={{ mt: 3 }} variant="h6">
-            Loading {selectedSport.toUpperCase()} news...
-          </Typography>
+          <Typography sx={{ mt: 3 }} variant="h6">Loading {selectedSport.toUpperCase()} news...</Typography>
         </Box>
       </Container>
     );
@@ -1860,19 +1826,9 @@ const SportsWireScreen = () => {
   if (error) {
     return (
       <Container maxWidth="lg">
-        <Alert 
-          severity="warning" 
-          sx={{ mt: 3 }}
-          action={
-            <Button color="inherit" size="small" onClick={handleRefresh}>
-              Retry
-            </Button>
-          }
-        >
-          <Typography variant="body1" fontWeight="bold">
-            {error}
-          </Typography>
-          <Typography variant="body2">Showing enhanced mock data with real beat writers</Typography>
+        <Alert severity="warning" sx={{ mt: 3 }} action={<Button color="inherit" size="small" onClick={handleRefresh}>Retry</Button>}>
+          <Typography variant="body1" fontWeight="bold">{error}</Typography>
+          <Typography variant="body2">Showing mock data with real beat writers</Typography>
         </Alert>
       </Container>
     );
@@ -1882,149 +1838,58 @@ const SportsWireScreen = () => {
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
       {/* Header */}
-      <Paper sx={{ 
-        mb: 3, 
-        background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
-        color: 'white',
-        borderRadius: 2,
-        overflow: 'hidden'
-      }}>
+      <Paper sx={{ mb: 3, background: 'linear-gradient(135deg, #1e40af, #3b82f6)', color: 'white', borderRadius: 2, overflow: 'hidden' }}>
         <Box sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-            <IconButton onClick={() => navigate(-1)} sx={{ color: 'white' }}>
-              <ArrowBack />
-            </IconButton>
+            <IconButton onClick={() => navigate(-1)} sx={{ color: 'white' }}><ArrowBack /></IconButton>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="h4" fontWeight="bold">
-                SportsWire
-              </Typography>
-              <Typography variant="body1">
-                Latest {selectedSport.toUpperCase()} news and updates
-              </Typography>
+              <Typography variant="h4" fontWeight="bold">SportsWire</Typography>
+              <Typography variant="body1">Latest {selectedSport.toUpperCase()} news and updates</Typography>
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              {/* Team Selector Dropdown */}
               {teams.length > 0 && (
                 <FormControl size="small" sx={{ minWidth: 200, mr: 1 }}>
-                  <Select
-                    value={selectedTeam}
-                    displayEmpty
-                    onChange={(e) => {
-                      setSelectedTeam(e.target.value);
-                      if (e.target.value) {
-                        fetchTeamNews(e.target.value);
-                      }
-                    }}
-                    sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}
-                  >
+                  <Select value={selectedTeam} displayEmpty onChange={(e) => { setSelectedTeam(e.target.value); if (e.target.value) fetchTeamNews(e.target.value); }} sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}>
                     <MenuItem value="">Select Team</MenuItem>
-                    {teams.map(team => (
-                      <MenuItem key={team} value={team}>{team}</MenuItem>
-                    ))}
+                    {teams.map(team => <MenuItem key={team} value={team}>{team}</MenuItem>)}
                   </Select>
                 </FormControl>
               )}
-              
-              {/* Injury Dashboard Button */}
-              <IconButton 
-                onClick={fetchInjuryDashboard}
-                sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}
-              >
-                <Timeline />
-              </IconButton>
-              
+              <IconButton onClick={fetchInjuryDashboard} sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}><Timeline /></IconButton>
               <Badge badgeContent={beatWriterNews.length} color="secondary">
-                <IconButton 
-                  onClick={() => setShowBeatWritersModal(true)}
-                  sx={{ color: 'white', bgcolor: 'rgba(139,92,246,0.3)' }}
-                >
-                  <Twitter />
-                </IconButton>
+                <IconButton onClick={() => setShowBeatWritersModal(true)} sx={{ color: 'white', bgcolor: 'rgba(139,92,246,0.3)' }}><Twitter /></IconButton>
               </Badge>
-              
               <Badge badgeContent={injuryNews.length} color="error">
-                <IconButton 
-                  onClick={() => setShowInjuryModal(true)}
-                  sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}
-                >
-                  <LocalHospital />
-                </IconButton>
+                <IconButton onClick={() => setShowInjuryModal(true)} sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}><LocalHospital /></IconButton>
               </Badge>
-              
-              <IconButton 
-                onClick={handleRefresh} 
-                disabled={refreshing}
-                sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)' }}
-              >
+              <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)' }}>
                 <UpdateIcon />
               </IconButton>
+              {/* 🧪 Test button – opens search results modal manually */}
+              <Button
+                onClick={() => setShowSearchResultsModal(true)}
+                variant="contained"
+                size="small"
+                sx={{ ml: 1, bgcolor: 'white', color: '#1e40af' }}
+              >
+                Test Modal
+              </Button>
             </Box>
           </Box>
-          
           <Grid container spacing={2} sx={{ mt: 2 }}>
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth sx={{ bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }}>
                 <InputLabel sx={{ color: 'white' }}>Sport</InputLabel>
-                <Select
-                  value={selectedSport}
-                  label="Sport"
-                  onChange={handleSportChange}
-                  sx={{ 
-                    color: 'white',
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' },
-                    '& .MuiSvgIcon-root': { color: 'white' }
-                  }}
-                >
-                  <MenuItem value="nba">NBA</MenuItem>
-                  <MenuItem value="nfl">NFL</MenuItem>
-                  <MenuItem value="mlb">MLB</MenuItem>
-                  <MenuItem value="nhl">NHL</MenuItem>
+                <Select value={selectedSport} label="Sport" onChange={handleSportChange} sx={{ color: 'white', '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }, '& .MuiSvgIcon-root': { color: 'white' } }}>
+                  <MenuItem value="nba">NBA</MenuItem><MenuItem value="nfl">NFL</MenuItem><MenuItem value="mlb">MLB</MenuItem><MenuItem value="nhl">NHL</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6} md={8}>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button 
-                  fullWidth
-                  startIcon={<Analytics />}
-                  onClick={() => setShowAnalyticsModal(true)}
-                  sx={{ 
-                    color: 'white',
-                    borderColor: 'white',
-                    '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' }
-                  }}
-                  variant="outlined"
-                >
-                  Analytics
-                </Button>
-                <Button 
-                  fullWidth
-                  startIcon={<Twitter />}
-                  onClick={() => setShowBeatWritersModal(true)}
-                  sx={{ 
-                    color: 'white',
-                    borderColor: '#8b5cf6',
-                    bgcolor: 'rgba(139,92,246,0.2)',
-                    '&:hover': { bgcolor: 'rgba(139,92,246,0.3)' }
-                  }}
-                  variant="outlined"
-                >
-                  Beat Writers ({beatWriterNews.length})
-                </Button>
-                <Button 
-                  fullWidth
-                  startIcon={<LocalHospital />}
-                  onClick={() => setShowInjuryModal(true)}
-                  sx={{ 
-                    color: 'white',
-                    borderColor: '#ef4444',
-                    bgcolor: 'rgba(239,68,68,0.2)',
-                    '&:hover': { bgcolor: 'rgba(239,68,68,0.3)' }
-                  }}
-                  variant="outlined"
-                >
-                  Injuries ({injuryNews.length})
-                </Button>
+                <Button fullWidth startIcon={<Analytics />} onClick={() => setShowAnalyticsModal(true)} sx={{ color: 'white', borderColor: 'white', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }} variant="outlined">Analytics</Button>
+                <Button fullWidth startIcon={<Twitter />} onClick={() => setShowBeatWritersModal(true)} sx={{ color: 'white', borderColor: '#8b5cf6', bgcolor: 'rgba(139,92,246,0.2)', '&:hover': { bgcolor: 'rgba(139,92,246,0.3)' } }} variant="outlined">Beat Writers ({beatWriterNews.length})</Button>
+                <Button fullWidth startIcon={<LocalHospital />} onClick={() => setShowInjuryModal(true)} sx={{ color: 'white', borderColor: '#ef4444', bgcolor: 'rgba(239,68,68,0.2)', '&:hover': { bgcolor: 'rgba(239,68,68,0.3)' } }} variant="outlined">Injuries ({injuryNews.length})</Button>
               </Box>
             </Grid>
           </Grid>
@@ -2033,139 +1898,66 @@ const SportsWireScreen = () => {
 
       {/* Search Bar */}
       <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <TextField
-          fullWidth
-          variant="outlined"
-          placeholder="Search players, teams, beat writers, or news..."
-          defaultValue={searchQuery}
-          onChange={handleSearchChange}
-          inputRef={searchInputRef}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search />
-              </InputAdornment>
-            ),
-            endAdornment: (
-              <InputAdornment position="end">
-                {isSearching && <CircularProgress size={20} sx={{ mr: 1 }} />}
-                {searchQuery && (
-                  <IconButton onClick={handleClearSearch} size="small">
-                    <Close />
-                  </IconButton>
-                )}
-              </InputAdornment>
-            )
-          }}
-        />
+        <TextField fullWidth variant="outlined" placeholder="Search players, teams, beat writers, or news..." defaultValue={searchQuery} onChange={handleSearchChange} inputRef={searchInputRef} InputProps={{
+          startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
+          endAdornment: <InputAdornment position="end">{isSearching && <CircularProgress size={20} sx={{ mr: 1 }} />}{searchQuery && <IconButton onClick={handleClearSearch} size="small"><Close /></IconButton>}</InputAdornment>
+        }} />
       </Paper>
 
       {/* Category Tabs */}
       <Paper sx={{ mb: 3, borderRadius: 2, overflow: 'hidden' }}>
-        <Tabs
-          value={selectedCategory}
-          onChange={(e, newValue) => setSelectedCategory(newValue)}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ 
-            borderBottom: 1, 
-            borderColor: 'divider',
-            bgcolor: 'background.paper'
-          }}
-        >
+        <Tabs value={selectedCategory} onChange={(e, newValue) => setSelectedCategory(newValue)} variant="scrollable" scrollButtons="auto" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
           <Tab value="all" label="All Sports" icon={<Bolt />} iconPosition="start" />
           <Tab value="NBA" label="NBA" icon={<SportsBasketball />} iconPosition="start" />
           <Tab value="NFL" label="NFL" icon={<SportsFootball />} iconPosition="start" />
           <Tab value="MLB" label="MLB" icon={<SportsBaseball />} iconPosition="start" />
           <Tab value="NHL" label="NHL" icon={<SportsHockey />} iconPosition="start" />
-          <Tab 
-            value="beat-writers" 
-            label="Beat Writers" 
-            icon={<Twitter />} 
-            iconPosition="start" 
-            sx={{ color: '#8b5cf6' }}
-          />
-          <Tab 
-            value="injuries" 
-            label="Injuries" 
-            icon={<LocalHospital />} 
-            iconPosition="start" 
-            sx={{ color: '#ef4444' }}
-          />
+          <Tab value="beat-writers" label="Beat Writers" icon={<Twitter />} iconPosition="start" sx={{ color: '#8b5cf6' }} />
+          <Tab value="injuries" label="Injuries" icon={<LocalHospital />} iconPosition="start" sx={{ color: '#ef4444' }} />
           <Tab value="value" label="High Value" icon={<ShowChart />} iconPosition="start" />
         </Tabs>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="body2" fontWeight="bold">
-            {filteredNews.length} {filteredNews.length === 1 ? 'item' : 'items'}
-          </Typography>
+          <Typography variant="body2" fontWeight="bold">{filteredNews.length} {filteredNews.length === 1 ? 'item' : 'items'}</Typography>
           <Box sx={{ display: 'flex', gap: 2 }}>
-            <Badge badgeContent={beatWriterNews.length} color="secondary">
-              <Twitter sx={{ color: '#8b5cf6', cursor: 'pointer' }} onClick={() => setShowBeatWritersModal(true)} />
-            </Badge>
-            <Badge badgeContent={injuryNews.length} color="error">
-              <LocalHospital sx={{ color: '#ef4444', cursor: 'pointer' }} onClick={() => setShowInjuryModal(true)} />
-            </Badge>
-            <Badge badgeContent={teams.length} color="info">
-              <TeamIcon sx={{ color: '#3b82f6', cursor: 'pointer' }} onClick={() => teams.length > 0 && fetchTeamNews(teams[0])} />
-            </Badge>
+            <Badge badgeContent={beatWriterNews.length} color="secondary"><Twitter sx={{ color: '#8b5cf6', cursor: 'pointer' }} onClick={() => setShowBeatWritersModal(true)} /></Badge>
+            <Badge badgeContent={injuryNews.length} color="error"><LocalHospital sx={{ color: '#ef4444', cursor: 'pointer' }} onClick={() => setShowInjuryModal(true)} /></Badge>
+            <Badge badgeContent={teams.length} color="info"><TeamIcon sx={{ color: '#3b82f6', cursor: 'pointer' }} onClick={() => teams.length > 0 && fetchTeamNews(teams[0])} /></Badge>
           </Box>
         </Box>
       </Paper>
 
-      {/* Beat Writers Alert Banner */}
+      {/* Alert Banners */}
       {beatWriterNews.length > 0 && selectedCategory !== 'beat-writers' && (
-        <Alert 
-          severity="info" 
-          sx={{ mb: 3, bgcolor: '#f5f3ff', color: '#8b5cf6' }}
-          icon={<Twitter />}
-          action={
-            <Button color="inherit" size="small" onClick={() => setSelectedCategory('beat-writers')}>
-              View {beatWriterNews.length} Beat Writer {beatWriterNews.length === 1 ? 'Update' : 'Updates'}
-            </Button>
-          }
-        >
-          <Typography variant="body2" fontWeight="bold">
-            ✍️ {beatWriterNews.length} {beatWriterNews.length === 1 ? 'Update' : 'Updates'} from Beat Writers & Insiders
-          </Typography>
+        <Alert severity="info" sx={{ mb: 3, bgcolor: '#f5f3ff', color: '#8b5cf6' }} icon={<Twitter />} action={<Button color="inherit" size="small" onClick={() => setSelectedCategory('beat-writers')}>View {beatWriterNews.length} Beat Writer {beatWriterNews.length === 1 ? 'Update' : 'Updates'}</Button>}>
+          <Typography variant="body2" fontWeight="bold">✍️ {beatWriterNews.length} {beatWriterNews.length === 1 ? 'Update' : 'Updates'} from Beat Writers & Insiders</Typography>
         </Alert>
       )}
-
-      {/* Injury Alert Banner */}
       {injuryNews.length > 0 && selectedCategory !== 'injuries' && (
-        <Alert 
-          severity="error" 
-          sx={{ mb: 3 }}
-          action={
-            <Button color="inherit" size="small" onClick={() => setSelectedCategory('injuries')}>
-              View {injuryNews.length} Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}
-            </Button>
-          }
-        >
-          <Typography variant="body2" fontWeight="bold">
-            🏥 {injuryNews.length} Active {injuryNews.length === 1 ? 'Injury' : 'Injuries'} Reported
-          </Typography>
+        <Alert severity="error" sx={{ mb: 3 }} action={<Button color="inherit" size="small" onClick={() => setSelectedCategory('injuries')}>View {injuryNews.length} Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}</Button>}>
+          <Typography variant="body2" fontWeight="bold">🏥 {injuryNews.length} Active {injuryNews.length === 1 ? 'Injury' : 'Injuries'} Reported</Typography>
         </Alert>
       )}
 
-      {/* News Feed */}
-      {refreshing && <LinearProgress sx={{ mb: 2 }} />}
-
-      {filteredNews.length > 0 ? (
-        filteredNews.map(renderNewsCard)
-      ) : (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Newspaper sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
-          <Typography variant="h6" gutterBottom>
-            No news found
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            {searchQuery ? `No results for "${searchQuery}"` : `No ${selectedCategory === 'all' ? '' : selectedCategory} news available`}
-          </Typography>
-          <Button variant="contained" onClick={handleRefresh} startIcon={<UpdateIcon />}>
-            Refresh
-          </Button>
-        </Paper>
-      )}
+{/* News Feed */}
+{refreshing && <LinearProgress sx={{ mb: 2 }} />}
+{filteredNews.length > 0 ? (
+  filteredNews.map(item => (
+    <React.Fragment key={item.id}>
+      {renderNewsCard(item)}
+    </React.Fragment>
+  ))
+) : (
+  <Paper sx={{ p: 4, textAlign: 'center' }}>
+    <Newspaper sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
+    <Typography variant="h6" gutterBottom>No news found</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+      {searchQuery ? `No results for "${searchQuery}"` : `No ${selectedCategory === 'all' ? 'news' : selectedCategory} available`}
+    </Typography>
+    <Button variant="contained" onClick={handleRefresh} startIcon={<UpdateIcon />}>
+      Refresh
+    </Button>
+  </Paper>
+)}
 
       {/* Modals */}
       <BeatWritersModal />

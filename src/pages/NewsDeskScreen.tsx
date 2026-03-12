@@ -1,5 +1,5 @@
 // src/pages/NewsDeskScreen.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -70,15 +70,56 @@ import {
   Notifications as NotificationsIcon,
   TrendingUp as TrendingIcon,
   Update as UpdateIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  Twitter,
+  LocalHospital,
+  MonitorHeart,
+  Healing,
+  Timeline
 } from '@mui/icons-material';
 import { Link, useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
-// Custom hooks
-import { useSportsWire } from '../hooks/useUnifiedAPI'; // ✅ Fixed import
-import { logEvent, logScreenView } from '../utils/analytics';
+// ============= API CLIENT (from SportsWireScreen) =============
+const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
 
+const apiClient = {
+  async get(endpoint: string) {
+    const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    console.log(`🌐 Fetching: ${url}`);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        mode: 'cors'
+      });
+      
+      if (!response.ok) {
+        console.warn(`HTTP error! status: ${response.status} for ${endpoint}`);
+        return { success: false };
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`Network error for ${endpoint}:`, error);
+      return { success: false };
+    }
+  },
+  
+  async getSportsWire(sport: string) {
+    return this.get(`/api/sports-wire?sport=${sport.toLowerCase()}`);
+  },
+  
+  async getEnhancedSportsWire(sport: string, includeBeatWriters = true, includeInjuries = true) {
+    return this.get(`/api/sports-wire/enhanced?sport=${sport.toLowerCase()}&include_beat_writers=${includeBeatWriters}&include_injuries=${includeInjuries}`);
+  }
+};
+
+// ============= CONSTANTS =============
 interface UpdateItem {
   id: string;
   title: string;
@@ -99,7 +140,7 @@ interface WinPost {
   date: string;
 }
 
-// MOCK_ARTICLES for fallback
+// MOCK_ARTICLES for fallback (kept in case API fails)
 const MOCK_ARTICLES: UpdateItem[] = [
   {
     id: '1',
@@ -145,169 +186,38 @@ const MOCK_ARTICLES: UpdateItem[] = [
   },
 ];
 
+const updateCategories = {
+  feature: { icon: <RocketIcon />, color: '#3b82f6', label: 'Feature', gradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)' },
+  update: { icon: <RefreshIcon />, color: '#10b981', label: 'Update', gradient: 'linear-gradient(135deg, #10b981, #047857)' },
+  fix: { icon: <BugIcon />, color: '#ef4444', label: 'Fix', gradient: 'linear-gradient(135deg, #ef4444, #dc2626)' },
+  announcement: { icon: <AnnouncementIcon />, color: '#f59e0b', label: 'Announcement', gradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
+  performance: { icon: <PerformanceIcon />, color: '#8b5cf6', label: 'Performance', gradient: 'linear-gradient(135deg, #8b5cf6, #7c3aed)' },
+  tip: { icon: <TipIcon />, color: '#ec4899', label: 'Tip', gradient: 'linear-gradient(135deg, #ec4899, #db2777)' },
+};
+
+const sportsOptions = [
+  { value: 'NFL', label: 'NFL', icon: <FootballIcon fontSize="small" /> },
+  { value: 'NBA', label: 'NBA', icon: <BasketballIcon fontSize="small" /> },
+  { value: 'NHL', label: 'NHL', icon: <HockeyIcon fontSize="small" /> },
+  { value: 'MLB', label: 'MLB', icon: <BaseballIcon fontSize="small" /> },
+  { value: 'NCAAB', label: 'NCAAB', icon: <SchoolIcon fontSize="small" /> },
+];
+
 const NewsDeskScreen = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   
+  // Sport selector (maps to API sport param)
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   
-  const { 
-    data: newsData, 
-    isLoading, 
-    error, 
-    refetch,
-    isRefetching 
-  } = useSportsWire(selectedSport, {
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    staleTime: 300000, // 5 minutes
-    cacheTime: 600000, // 10 minutes
-  });
+  // Data states
+  const [newsData, setNewsData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isRefetching, setIsRefetching] = useState(false);
   
-  // ENHANCED: Extract news from hook response - handles multiple API formats
-  const newsFromApi = useMemo(() => {
-    console.log('🔍 Processing newsData:', newsData);
-    
-    if (!newsData) {
-      console.log('No newsData yet');
-      return [];
-    }
-    
-    // Check if data is in different formats
-    // Format 1: Direct news array
-    if (newsData.news && Array.isArray(newsData.news)) {
-      console.log(`✅ Found news array: ${newsData.news.length} items`);
-      return newsData.news;
-    }
-    
-    // Format 2: Data array from scraper
-    if (newsData.data && Array.isArray(newsData.data)) {
-      console.log(`✅ Found data array: ${newsData.data.length} items`);
-      return newsData.data.map((item: any, index: number) => ({
-        ...item,
-        id: item.id || `data-${index}`,
-        publishedAt: item.publishedAt || item.timestamp || item.date || new Date().toISOString(),
-        source: item.source || { name: 'Sports Wire' },
-        title: item.title || item.headline || `Update ${index + 1}`,
-        description: item.description || item.summary || item.content || 'No description available'
-      }));
-    }
-    
-    // Format 3: Picks array
-    if (newsData.picks && Array.isArray(newsData.picks)) {
-      console.log(`✅ Found picks array: ${newsData.picks.length} items`);
-      return newsData.picks.map((pick: any, index: number) => ({
-        id: `pick-${index}`,
-        title: `Pick: ${pick.player} ${pick.stat || pick.stat_type || 'Performance'}`,
-        description: pick.analysis || `${pick.player} is projected for ${pick.projection} ${pick.stat || pick.stat_type || ''}`,
-        publishedAt: pick.last_updated || new Date().toISOString(),
-        source: { name: 'Daily Picks' },
-        url: `#pick-${index}`,
-        category: 'tip'
-      }));
-    }
-    
-    // Format 4: Selections array from prizepicks
-    if (newsData.selections && Array.isArray(newsData.selections)) {
-      console.log(`✅ Found selections array: ${newsData.selections.length} items`);
-      return newsData.selections.map((selection: any, index: number) => ({
-        id: `selection-${index}`,
-        title: `${selection.player} - ${selection.stat_type || 'Prop'}`,
-        description: `${selection.player} has a ${selection.confidence || 70}% chance of hitting ${selection.line} ${selection.stat_type || ''}`,
-        publishedAt: selection.last_updated || new Date().toISOString(),
-        source: { name: 'Player Props' },
-        url: `#selection-${index}`,
-        category: 'tip'
-      }));
-    }
-    
-    // Format 5: Analytics array
-    if (newsData.analytics && Array.isArray(newsData.analytics)) {
-      console.log(`✅ Found analytics array: ${newsData.analytics.length} items`);
-      return newsData.analytics.map((analytic: any, index: number) => ({
-        id: `analytic-${index}`,
-        title: analytic.title || `Analytics: ${analytic.metric || 'Data'}`,
-        description: analytic.analysis || `Trend: ${analytic.trend || 'neutral'} with ${analytic.change || 'no change'}`,
-        publishedAt: analytic.timestamp || new Date().toISOString(),
-        source: { name: 'Analytics' },
-        url: `#analytic-${index}`,
-        category: 'tip'
-      }));
-    }
-    
-    // Check if API returned success but no data structure we recognize
-    if (newsData.success === true) {
-      console.log('✅ API returned success but no recognized data format');
-      // Try to extract any array from the response
-      for (const key in newsData) {
-        if (Array.isArray(newsData[key]) && key !== 'endpoints') {
-          console.log(`Found unrecognized array in key "${key}": ${newsData[key].length} items`);
-          return newsData[key].slice(0, 10).map((item: any, index: number) => ({
-            id: item.id || `${key}-${index}`,
-            title: item.name || item.title || item.player || `Update ${index + 1}`,
-            description: item.description || item.analysis || JSON.stringify(item).substring(0, 100) + '...',
-            publishedAt: item.publishedAt || item.timestamp || item.date || new Date().toISOString(),
-            source: { name: key.charAt(0).toUpperCase() + key.slice(1) },
-            url: `#${key}-${index}`,
-            category: 'announcement'
-          }));
-        }
-      }
-    }
-    
-    // If we get here, generate mock data
-    console.log('⚠️ No valid news format found, generating mock data');
-    return generateMockNewsData(selectedSport);
-  }, [newsData, selectedSport]);
-  
-  // Helper function to generate mock news data
-  const generateMockNewsData = useCallback((sport: string) => {
-    const sportsMap = {
-      nba: {
-        name: 'NBA',
-        teams: ['Lakers', 'Warriors', 'Celtics', 'Bucks', 'Suns', 'Nuggets', 'Heat', 'Knicks'],
-        events: ['Game', 'Trade', 'Injury Update', 'Draft News', 'Playoff Race', 'All-Star']
-      },
-      nfl: {
-        name: 'NFL',
-        teams: ['Chiefs', '49ers', 'Ravens', 'Bills', 'Cowboys', 'Eagles', 'Packers', 'Dolphins'],
-        events: ['Game', 'Trade', 'Injury Report', 'Draft', 'Playoff Picture', 'Pro Bowl']
-      },
-      mlb: {
-        name: 'MLB',
-        teams: ['Dodgers', 'Yankees', 'Braves', 'Astros', 'Phillies', 'Rangers', 'Orioles', 'Mariners'],
-        events: ['Game', 'Trade', 'Injury', 'Standings', 'All-Star', 'Playoff Push']
-      },
-      nhl: {
-        name: 'NHL',
-        teams: ['Maple Leafs', 'Rangers', 'Golden Knights', 'Bruins', 'Avalanche', 'Oilers', 'Stars', 'Hurricanes'],
-        events: ['Game', 'Trade', 'Injury', 'Playoff Race', 'All-Star', 'Standings']
-      }
-    };
-    
-    const sportInfo = sportsMap[sport as keyof typeof sportsMap] || sportsMap.nba;
-    const categories: UpdateItem['category'][] = ['announcement', 'tip', 'update', 'feature', 'performance'];
-    
-    return Array.from({ length: 8 }, (_, i) => {
-      const team = sportInfo.teams[i % sportInfo.teams.length];
-      const event = sportInfo.events[i % sportInfo.events.length];
-      const hoursAgo = i * 2; // 0, 2, 4, 6... hours ago
-      
-      return {
-        id: `mock-${sport}-${i}`,
-        title: `${sportInfo.name}: ${team} ${event}`,
-        description: `Latest update from the ${sportInfo.name}. ${team} news and ${event.toLowerCase()} coverage.`,
-        publishedAt: new Date(Date.now() - hoursAgo * 3600000).toISOString(),
-        source: { name: `${sportInfo.name} News Network` },
-        url: `https://example.com/${sport}/news/${i}`,
-        urlToImage: `https://picsum.photos/400/300?random=${i}&sport=${sport}`,
-        category: categories[i % categories.length]
-      };
-    });
-  }, []);
-
-  // State management
+  // UI states
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchHistory, setShowSearchHistory] = useState(false);
@@ -326,134 +236,126 @@ const NewsDeskScreen = () => {
   const [postSport, setPostSport] = useState('NBA');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
-  const updateCategories = {
-    feature: { icon: <RocketIcon />, color: '#3b82f6', label: 'Feature', gradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)' },
-    update: { icon: <RefreshIcon />, color: '#10b981', label: 'Update', gradient: 'linear-gradient(135deg, #10b981, #047857)' },
-    fix: { icon: <BugIcon />, color: '#ef4444', label: 'Fix', gradient: 'linear-gradient(135deg, #ef4444, #dc2626)' },
-    announcement: { icon: <AnnouncementIcon />, color: '#f59e0b', label: 'Announcement', gradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
-    performance: { icon: <PerformanceIcon />, color: '#8b5cf6', label: 'Performance', gradient: 'linear-gradient(135deg, #8b5cf6, #7c3aed)' },
-    tip: { icon: <TipIcon />, color: '#ec4899', label: 'Tip', gradient: 'linear-gradient(135deg, #ec4899, #db2777)' },
-  };
-
-  const sportsOptions = [
-    { value: 'NFL', label: 'NFL', icon: <FootballIcon fontSize="small" /> },
-    { value: 'NBA', label: 'NBA', icon: <BasketballIcon fontSize="small" /> },
-    { value: 'NHL', label: 'NHL', icon: <HockeyIcon fontSize="small" /> },
-    { value: 'MLB', label: 'MLB', icon: <BaseballIcon fontSize="small" /> },
-    { value: 'NCAAB', label: 'NCAAB', icon: <SchoolIcon fontSize="small" /> },
-  ];
-
-  // Memoize formatTimeAgo to avoid recreating it on every render
-  const formatTimeAgo = useCallback((date: Date): string => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) {
-      return `${diffDays}d ago`;
-    } else if (diffHours > 0) {
-      return `${diffHours}h ago`;
-    } else if (diffMins > 0) {
-      return `${diffMins}m ago`;
-    } else {
-      return 'Just now';
+  // ============= FETCH REAL NEWS =============
+  const fetchNews = useCallback(async (sport: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // First try the enhanced endpoint
+      const data = await apiClient.getEnhancedSportsWire(sport, true, true);
+      console.log('📦 API Response:', data); // Debug log
+      if (data.success && data.news && data.news.length > 0) {
+        setNewsData(data);
+      } else {
+        // Fallback to basic endpoint
+        const basicData = await apiClient.getSportsWire(sport);
+        if (basicData.success && basicData.news) {
+          setNewsData(basicData);
+        } else {
+          // No real data – keep existing mock but maybe show a warning
+          setNewsData(null);
+          setError('Could not fetch live news. Showing sample updates.');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch news:', err);
+      setError('Failed to load news from API');
+      setNewsData(null);
+    } finally {
+      setIsLoading(false);
+      setIsRefetching(false);
     }
   }, []);
 
-  // Transform API news to UpdateItem format
+  // Initial fetch and when sport changes
+  useEffect(() => {
+    fetchNews(selectedSport);
+  }, [selectedSport, fetchNews]);
+
+  // ============= TRANSFORM API NEWS TO UPDATE ITEMS =============
   const transformApiNewsToUpdates = useCallback((apiNews: any[]): UpdateItem[] => {
-    if (!apiNews || apiNews.length === 0) {
-      console.log('No API news found, using mock articles');
-      return MOCK_ARTICLES;
-    }
-    
-    console.log(`✅ Using REAL news: ${apiNews.length} articles`);
-    
-    return apiNews.map((article: any, index: number) => {
-      const publishedAt = article.publishedAt ? new Date(article.publishedAt) : new Date();
-      const timeAgo = formatTimeAgo(publishedAt);
+    if (!apiNews || apiNews.length === 0) return [];
+
+    return apiNews.map((article: any) => {
+      // Map API categories to your UpdateItem categories
+      let category: UpdateItem['category'] = 'announcement'; // default
       
-      // Extract category from source or content
-      let category: UpdateItem['category'] = 'announcement';
-      if (article.source?.name?.includes('ESPN') || article.category === 'sports') {
-        category = 'announcement';
-      } else if (article.category === 'tip' || article.description?.includes('tip')) {
+      if (article.category === 'beat-writers') {
+        category = 'announcement'; // or 'tip' if you prefer
+      } else if (article.category === 'injury') {
+        category = 'update';
+      } else if (article.category === 'game-preview') {
         category = 'tip';
+      } else if (article.category === 'performance') {
+        category = 'performance';
+      } else if (article.category === 'fix' || article.category === 'bug') {
+        category = 'fix';
       } else if (article.category === 'feature') {
         category = 'feature';
-      } else if (article.category === 'update' || article.source?.name?.includes('Update')) {
-        category = 'update';
-      } else if (article.category === 'performance' || article.description?.includes('performance')) {
-        category = 'performance';
       }
       
+      // Format date
+      const publishedAt = article.publishedAt ? new Date(article.publishedAt) : new Date();
+      const timeAgo = formatDistanceToNow(publishedAt, { addSuffix: true });
+
       return {
-        id: article.id || `api-${index}`,
+        id: article.id || `api-${Date.now()}-${Math.random()}`,
         title: article.title || 'Sports Update',
         description: article.description || article.content || 'No description available',
         date: timeAgo,
-        category: category
+        category
       };
     });
-  }, [formatTimeAgo]);
+  }, []);
 
-  // Fetch winning posts data
+  // Extract raw news array from API response
+  const newsFromApi = useMemo(() => {
+    if (!newsData) return [];
+    if (newsData.news && Array.isArray(newsData.news)) {
+      return newsData.news;
+    }
+    if (newsData.data && Array.isArray(newsData.data)) {
+      return newsData.data;
+    }
+    return [];
+  }, [newsData]);
+
+  // Update the updates state when real data arrives
+  useEffect(() => {
+    if (newsFromApi.length > 0) {
+      const transformed = transformApiNewsToUpdates(newsFromApi);
+      console.log('🔄 Transformed updates:', transformed); // Debug log
+      setUpdates(transformed);
+      setFilteredUpdates(transformed);
+      // Mark them as unread
+      const newReadStatus: Record<string, boolean> = {};
+      transformed.forEach(u => { newReadStatus[u.id] = false; });
+      setReadStatus(prev => ({ ...prev, ...newReadStatus }));
+    } else if (!isLoading && !newsData) {
+      // Keep mock articles as fallback
+      setUpdates(MOCK_ARTICLES);
+      setFilteredUpdates(MOCK_ARTICLES);
+    }
+  }, [newsFromApi, transformApiNewsToUpdates, isLoading, newsData]);
+
+  // ============= WINNING POSTS (unchanged) =============
   const fetchWinningPosts = useCallback(() => {
     const winsData = getSampleWins();
     setWinningPosts(winsData);
     setFilteredWinningPosts(winsData);
   }, []);
 
-  // Initial data fetch
   useEffect(() => {
-    logScreenView('NewsDeskScreen');
     fetchWinningPosts();
     setLastRefresh(new Date());
-    
-    // Initialize read status
-    const initialReadStatus: Record<string, boolean> = {};
-    MOCK_ARTICLES.forEach(update => {
-      initialReadStatus[update.id] = Math.random() > 0.5;
-    });
-    setReadStatus(initialReadStatus);
   }, [fetchWinningPosts]);
 
-  // Update effect to transform API news when data arrives
-  useEffect(() => {
-    console.log('🔄 Processing newsFromApi:', newsFromApi.length, 'items');
-    
-    if (newsFromApi.length > 0) {
-      const transformedUpdates = transformApiNewsToUpdates(newsFromApi);
-      setUpdates(transformedUpdates);
-      setFilteredUpdates(transformedUpdates);
-      
-      // Update read status for new updates (only once per new update)
-      setReadStatus(prev => {
-        const updated = { ...prev };
-        transformedUpdates.forEach(update => {
-          if (!(update.id in updated)) {
-            updated[update.id] = false;
-          }
-        });
-        return updated;
-      });
-    } else {
-      // Keep using mock articles if no API data
-      console.log('Using mock articles as fallback');
-      setUpdates(MOCK_ARTICLES);
-      setFilteredUpdates(MOCK_ARTICLES);
-    }
-  }, [newsFromApi, transformApiNewsToUpdates]); // ✅ Removed readStatus from deps to avoid loops
-
-  // Filter updates based on search
+  // ============= SEARCH & FILTER =============
   useEffect(() => {
     if (!searchQuery.trim()) {
       setFilteredUpdates(updates);
       return;
     }
-    
     const searchLower = searchQuery.toLowerCase().trim();
     const filtered = updates.filter(update => 
       update.title.toLowerCase().includes(searchLower) ||
@@ -461,15 +363,13 @@ const NewsDeskScreen = () => {
       updateCategories[update.category]?.label.toLowerCase().includes(searchLower)
     );
     setFilteredUpdates(filtered);
-  }, [searchQuery, updates, updateCategories]);
+  }, [searchQuery, updates]);
 
-  // Filter winning posts based on search
   useEffect(() => {
     if (!searchQuery.trim()) {
       setFilteredWinningPosts(winningPosts);
       return;
     }
-    
     const searchLower = searchQuery.toLowerCase().trim();
     const filtered = winningPosts.filter(post =>
       post.title.toLowerCase().includes(searchLower) ||
@@ -482,7 +382,6 @@ const NewsDeskScreen = () => {
 
   const handleSearchSubmit = useCallback(() => {
     const query = searchInput.trim();
-    
     if (query) {
       setSearchQuery(query);
       setShowSearchHistory(false);
@@ -499,10 +398,10 @@ const NewsDeskScreen = () => {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    console.log('🔄 Manual refresh triggered');
-    refetch();
+    setIsRefetching(true);
+    fetchNews(selectedSport);
     setLastRefresh(new Date());
-  }, [refetch]);
+  }, [fetchNews, selectedSport]);
 
   const markAsRead = useCallback((id: string) => {
     setReadStatus(prev => ({ ...prev, [id]: true }));
@@ -523,10 +422,8 @@ const NewsDeskScreen = () => {
       setSnackbar({ open: true, message: 'Please provide a title and description', severity: 'error' });
       return;
     }
-
     try {
       setPosting(true);
-      
       const winData: WinPost = {
         id: `win-${Date.now()}`,
         title: postTitle.trim(),
@@ -538,18 +435,14 @@ const NewsDeskScreen = () => {
         comments: 0,
         date: 'Just now'
       };
-
       const newWinningPosts = [winData, ...winningPosts];
       setWinningPosts(newWinningPosts);
-
       setSnackbar({ open: true, message: 'Your winning result has been posted!', severity: 'success' });
-      
       setPostTitle('');
       setPostDescription('');
       setPostAmount('');
       setPostSport('NBA');
       setShowPostModal(false);
-      
     } catch (error) {
       setSnackbar({ open: true, message: 'Failed to post your win', severity: 'error' });
     } finally {
@@ -609,6 +502,7 @@ const NewsDeskScreen = () => {
     },
   ], []);
 
+  // ============= RENDER FUNCTIONS =============
   const renderHeader = useMemo(() => (
     <Box sx={{
       background: 'linear-gradient(135deg, #7c3aed, #8b5cf6)',
@@ -799,7 +693,7 @@ const NewsDeskScreen = () => {
         )}
       </Card>
     );
-  }, [readStatus, updateCategories, markAsRead]);
+  }, [readStatus, markAsRead]);
 
   const renderWinningPost = useCallback((post: WinPost) => (
     <Card key={post.id} sx={{ mb: 2 }}>
@@ -876,7 +770,8 @@ const NewsDeskScreen = () => {
     </Card>
   ), [getSportColor, likePost]);
 
-  if (isLoading && updates.length === MOCK_ARTICLES.length) {
+  // ============= LOADING / ERROR STATES =============
+  if (isLoading && updates.length === 0) {
     return (
       <Box sx={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
         {renderHeader}
@@ -897,12 +792,9 @@ const NewsDeskScreen = () => {
       <Container maxWidth="lg">
         {/* Error State */}
         {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
+          <Alert severity="warning" sx={{ mb: 3 }}>
             <Typography variant="body1" fontWeight="bold">
-              Failed to load news updates
-            </Typography>
-            <Typography variant="body2">
-              {error instanceof Error ? error.message : 'Unknown error'}
+              {error}
             </Typography>
             <Button 
               variant="outlined" 

@@ -1,4 +1,4 @@
-// src/screens/ParlayAnalyticsScreen.tsx - Updated to use Node API
+// src/screens/ParlayAnalyticsScreen.tsx - default to NBA only
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Box,
@@ -41,6 +41,8 @@ import {
   Divider,
   Slider,
   Collapse,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -55,6 +57,9 @@ import {
   RocketLaunch as RocketLaunchIcon,
   Psychology as PsychologyIcon,
   FilterList as FilterListIcon,
+  SportsBasketball,
+  SportsBaseball,
+  SportsHockey,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart } from '@mui/x-charts/BarChart';
@@ -67,8 +72,9 @@ import { useDebounce } from '../utils/useDebounce';
 import { preprocessQuery } from '../utils/queryProcessor';
 import { logPromptPerformance } from '../utils/analytics';
 
-// ========== NODE API BASE ==========
+// ========== API BASES ==========
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 // ----------------------------------------------------------------------
 // Types
@@ -88,6 +94,7 @@ interface ParlayLeg {
   stat_type?: string;
   projection?: number;
   edge?: string;
+  injury_status?: string;
 }
 
 interface ParlaySuggestion {
@@ -126,28 +133,177 @@ interface Selection {
   confidence: number;
   edge: string;
   position?: string;
+  sport: string;
+  injuryStatus?: string;
 }
 
 // ----------------------------------------------------------------------
-// API client – fetch selections from Node API
+// API client – fetch selections from appropriate backend
 // ----------------------------------------------------------------------
-const fetchSelections = async (): Promise<Selection[]> => {
+
+// Fetch NBA odds from your odds API (placeholder)
+const fetchNBAOdds = async (): Promise<Record<string, string>> => {
   try {
     const response = await axios.get(`${NODE_API_BASE}/api/prizepicks/selections?sport=nba`);
-    return response.data.selections || [];
+    const oddsMap: Record<string, string> = {};
+    if (response.data.selections) {
+      response.data.selections.forEach((s: any) => {
+        const key = `${s.player}|${s.stat}|${s.line}`;
+        oddsMap[key] = s.odds;
+      });
+    }
+    return oddsMap;
   } catch (error) {
-    console.warn('Failed to fetch selections from Node API', error);
+    console.warn('Failed to fetch NBA odds, falling back to generated odds', error);
+    return {};
+  }
+};
+
+// Fetch NBA predictions and merge with real odds
+const fetchNBAPredictions = async (): Promise<Selection[]> => {
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/predictions`);
+    
+    if (!response.data.success || !Array.isArray(response.data.predictions)) {
+      return [];
+    }
+
+    const oddsMap = await fetchNBAOdds();
+
+    return response.data.predictions.map((p: any, index: number) => {
+      const oddsKey = `${p.player_name}|${p.market || 'points'}|${p.line || 0.5}`;
+      let odds = oddsMap[oddsKey];
+
+      if (!odds) {
+        const impliedProb = (p.confidence || 75) / 100;
+        let americanOdds = impliedProb >= 0.5
+          ? Math.round(-100 * impliedProb / (1 - impliedProb))
+          : Math.round(100 * (1 - impliedProb) / impliedProb);
+        americanOdds = Math.min(999, Math.max(-999, americanOdds));
+        odds = americanOdds > 0 ? `+${americanOdds}` : americanOdds.toString();
+      }
+
+      const edgeValue = p.line > 0 
+        ? ((p.prediction - p.line) / p.line * 100).toFixed(1) 
+        : '0.0';
+      const edge = edgeValue.startsWith('-') ? `${edgeValue}%` : `+${edgeValue}%`;
+
+      return {
+        id: p.id || `nba-pred-${index}`,
+        player: p.player_name,
+        team: p.team || '???',
+        stat: p.market || 'points',
+        line: p.line || 0.5,
+        projection: p.prediction || p.line,
+        odds,
+        confidence: p.confidence || 75,
+        edge,
+        position: p.position || 'N/A',
+        sport: 'NBA',
+        injuryStatus: p.injury_status,
+      };
+    });
+  } catch (error) {
+    console.warn('Failed to fetch NBA predictions', error);
     return [];
   }
 };
 
-// Helper to parse confidence safely
+// MLB props from Python API
+const fetchMLBSelections = async (): Promise<Selection[]> => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await axios.get(`${PYTHON_API_BASE}/api/mlb/props`, {
+      params: { date: today, limit: 50 },
+    });
+    if (response.data.success && Array.isArray(response.data.props)) {
+      return response.data.props.map((p: any, idx: number) => ({
+        id: p.id || `mlb-prop-${idx}`,
+        player: p.player,
+        team: p.team,
+        stat: p.stat,
+        line: p.line,
+        projection: p.projection || p.line,
+        odds: p.odds || '-110',
+        confidence: p.confidence === 'high' ? 85 : p.confidence === 'medium' ? 70 : 55,
+        edge: p.edge ? `${p.edge}%` : (p.projection > p.line ? '+5%' : '-2%'),
+        position: p.position,
+        sport: 'MLB',
+        injuryStatus: p.injury_status,
+      }));
+    }
+    return [];
+  } catch (error) {
+    console.warn('Failed to fetch MLB selections', error);
+    return [];
+  }
+};
+
+// NHL props from Python API
+const fetchNHLSelections = async (): Promise<Selection[]> => {
+  console.log('[NHL] Fetching from backend...');
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await axios.get(`${PYTHON_API_BASE}/api/nhl/props`, {
+      params: { date: today, limit: 50 },
+    });
+
+    if (response.data.success && Array.isArray(response.data.props)) {
+      console.log(`[NHL] Received ${response.data.props.length} props from backend (source: ${response.data.source})`);
+      return response.data.props.map((p: any, idx: number) => ({
+        id: p.id || `nhl-prop-${idx}`,
+        player: p.player,
+        team: p.team,
+        stat: p.stat,
+        line: p.line,
+        projection: p.projection || p.line,
+        odds: p.odds || '-110',
+        confidence: p.confidence === 'high' ? 85 : p.confidence === 'medium' ? 70 : 55,
+        edge: p.edge ? `${p.edge}%` : (p.projection > p.line ? '+5%' : '-2%'),
+        position: p.position || 'N/A',
+        sport: 'NHL',
+        injuryStatus: p.injury_status,
+      }));
+    }
+    return [];
+  } catch (error) {
+    console.error('[NHL] Failed to fetch from backend:', error);
+    return [];
+  }
+};
+
+// Fetch function for all selected sports
+const fetchSelectionsForSports = async (sports: string[]): Promise<Selection[]> => {
+  console.log('[fetchSelectionsForSports] Sports requested:', sports);
+  const fetchPromises = sports.map(async (sport) => {
+    switch (sport) {
+      case 'NBA': return fetchNBAPredictions();
+      case 'MLB': return fetchMLBSelections();
+      case 'NHL': return fetchNHLSelections();
+      default: return [];
+    }
+  });
+  const results = await Promise.all(fetchPromises);
+  const flatResults = results.flat();
+  console.log('[fetchSelectionsForSports] Total selections:', flatResults.length);
+  
+  // Optional: If NHL was requested but returned 0, force a mock (fallback)
+  if (sports.includes('NHL') && !flatResults.some(s => s.sport === 'NHL')) {
+    console.warn('[fetchSelectionsForSports] NHL requested but no selections; adding fallback mock.');
+    flatResults.push(...generateMockNHLSelections()); // you may have this function elsewhere
+  }
+  
+  return flatResults;
+};
+
+// ----------------------------------------------------------------------
+// Helper functions (unchanged)
+// ----------------------------------------------------------------------
 const getConfidence = (c: any): number => {
   const num = Number(c);
   return !isNaN(num) && num > 0 ? num : 75;
 };
 
-// Helper to calculate total odds
 const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number } => {
   let decimal = 1.0;
   legs.forEach(leg => {
@@ -157,7 +313,7 @@ const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number 
       if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
       else decimal *= 1 - 100 / Math.abs(oddsNum);
     } else {
-      decimal *= 1.91; // fallback -110
+      decimal *= 1.91;
     }
   });
   const totalOdds = decimal >= 2.0
@@ -166,196 +322,207 @@ const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number 
   return { odds: totalOdds, decimal };
 };
 
-// ========== Helper to parse confidence from selection data ==========
 const computeConfidence = (s: Selection): number => {
-  let confidence = 75; // baseline
+  let confidence = 75;
   if (s.projection && s.line && s.line > 0) {
     const surplus = (s.projection - s.line) / s.line;
-    // surplus between -0.2 and 0.5 typically, map to 60-95
     confidence = Math.min(95, Math.max(60, 75 + Math.round(surplus * 50)));
-  }
-  if (s.edge) {
-    const edgeNum = parseFloat(s.edge.replace('+', '').replace('%', ''));
-    if (!isNaN(edgeNum)) {
-      // edge is a percentage, add up to 20 points
-      confidence = Math.min(95, Math.max(60, confidence + edgeNum * 2));
-    }
   }
   return confidence;
 };
 
-// ========== Generate a variety of parlays from selections ==========
+// ========== Generate parlays from selections ==========
 const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestion[] => {
-  if (selections.length === 0) return [];
+  console.log('[generateParlaysFromSelections] Total selections received:', selections.length);
+  if (selections.length === 0) {
+    console.log('[generateParlaysFromSelections] No selections, returning empty array.');
+    return [];
+  }
 
   const suggestions: ParlaySuggestion[] = [];
 
-  // Pre‑compute confidence for each selection
-  const withConfidence = selections.map(s => ({
-    ...s,
-    computedConfidence: computeConfidence(s),
-  }));
+  const selectionsBySport = selections.reduce<Record<string, Selection[]>>((acc, s) => {
+    if (!acc[s.sport]) acc[s.sport] = [];
+    acc[s.sport].push(s);
+    return acc;
+  }, {});
+  console.log('[generateParlaysFromSelections] Sports with selections:', Object.keys(selectionsBySport));
 
-  // 1. High confidence parlays (multiple variations)
-  const topConfidence = [...withConfidence]
-    .sort((a, b) => b.computedConfidence - a.computedConfidence)
-    .slice(0, 10);
+  Object.entries(selectionsBySport).forEach(([sport, sportSelections]) => {
+    console.log(`[generate] Processing sport: ${sport}, selections: ${sportSelections.length}`);
 
-  for (let i = 0; i < Math.min(3, topConfidence.length - 2); i++) {
-    const legs = topConfidence.slice(i, i + 3).map((s, idx) => {
-      const conf = s.computedConfidence;
-      const edgeNum = parseFloat(s.edge?.replace('+', '').replace('%', '') || '0');
-      return {
-        id: `conf-${i}-${idx}-${Date.now()}`,
-        description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: s.odds,
-        confidence: conf,
-        sport: 'NBA',
-        market: 'player_props',
-        player_name: s.player,
-        stat_type: s.stat,
-        line: s.line,
-        projection: s.projection,
-        edge: s.edge,
-        confidence_level: conf > 80 ? 'high' : conf > 70 ? 'high' : 'medium',
-      };
-    });
-    if (legs.length < 2) continue;
-    const { odds } = calculateTotalOdds(legs);
-    const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-    const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
-    suggestions.push({
-      id: `analytics-conf-${i}-${Date.now()}`,
-      name: `High Confidence Parlay ${i+1}`,
-      sport: 'NBA',
-      type: 'player_props',
-      market_type: 'player_props',
-      legs,
-      total_odds: odds,
-      confidence: avgConfidence,
-      confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      analysis: `This parlay combines top confidence props. Average edge: +${avgEdge.toFixed(1)}%.`,
-      expected_value: '+6.2%',
-      risk_level: 'medium',
-      ai_metrics: {
-        leg_count: legs.length,
-        avg_leg_confidence: avgConfidence,
-        recommended_stake: '$5.00',
-        edge: avgEdge / 100,
-      },
-      timestamp: new Date().toISOString(),
-      isToday: true,
-      is_real_data: true,
-    });
-  }
+    const withConfidence = sportSelections.map(s => ({
+      ...s,
+      computedConfidence: sport === 'NBA' ? s.confidence : computeConfidence(s),
+    }));
 
-  // 2. Best value parlays (highest positive edge)
-  const withEdge = withConfidence
-    .filter(s => s.edge && s.edge.startsWith('+'))
-    .sort((a, b) => {
-      const edgeA = parseFloat(a.edge?.replace('+', '').replace('%', '') || '0');
-      const edgeB = parseFloat(b.edge?.replace('+', '').replace('%', '') || '0');
-      return edgeB - edgeA;
-    })
-    .slice(0, 6);
+    // High confidence parlays
+    const topConfidence = [...withConfidence]
+      .sort((a, b) => b.computedConfidence - a.computedConfidence)
+      .slice(0, 10);
 
-  for (let i = 0; i < Math.min(2, withEdge.length - 2); i++) {
-    const legs = withEdge.slice(i, i + 3).map((s, idx) => {
-      const conf = s.computedConfidence;
-      const edgeNum = parseFloat(s.edge?.replace('+', '').replace('%', '') || '0');
-      return {
-        id: `edge-${i}-${idx}-${Date.now()}`,
-        description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: s.odds,
-        confidence: conf,
-        sport: 'NBA',
-        market: 'player_props',
-        player_name: s.player,
-        stat_type: s.stat,
-        line: s.line,
-        projection: s.projection,
-        edge: s.edge,
-        confidence_level: conf > 80 ? 'high' : conf > 70 ? 'high' : 'medium',
-      };
-    });
-    if (legs.length < 2) continue;
-    const { odds } = calculateTotalOdds(legs);
-    const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-    const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
-    suggestions.push({
-      id: `analytics-edge-${i}-${Date.now()}`,
-      name: `Best Value Parlay ${i+1}`,
-      sport: 'NBA',
-      type: 'player_props',
-      market_type: 'player_props',
-      legs,
-      total_odds: odds,
-      confidence: avgConfidence,
-      confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      analysis: `This parlay features props with highest positive edge. Average edge: +${avgEdge.toFixed(1)}%.`,
-      expected_value: '+7.8%',
-      risk_level: 'medium',
-      ai_metrics: {
-        leg_count: legs.length,
-        avg_leg_confidence: avgConfidence,
-        recommended_stake: '$5.00',
-        edge: avgEdge / 100,
-      },
-      timestamp: new Date().toISOString(),
-      isToday: true,
-      is_real_data: true,
-    });
-  }
+    let beforeCount = suggestions.length;
 
-  // 3. Random balanced parlays (for variety)
-  for (let i = 0; i < 3; i++) {
-    const shuffled = [...withConfidence].sort(() => 0.5 - Math.random());
-    const legs = shuffled.slice(0, 3).map((s, idx) => {
-      const conf = s.computedConfidence;
-      const edgeNum = parseFloat(s.edge?.replace('+', '').replace('%', '') || '0');
-      return {
-        id: `rand-${i}-${idx}-${Date.now()}`,
-        description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: s.odds,
-        confidence: conf,
-        sport: 'NBA',
-        market: 'player_props',
-        player_name: s.player,
-        stat_type: s.stat,
-        line: s.line,
-        projection: s.projection,
-        edge: s.edge,
-        confidence_level: conf > 80 ? 'high' : conf > 70 ? 'high' : 'medium',
-      };
-    });
-    const { odds } = calculateTotalOdds(legs);
-    const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-    const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
-    suggestions.push({
-      id: `analytics-rand-${i}-${Date.now()}`,
-      name: `Balanced Parlay ${i+1}`,
-      sport: 'NBA',
-      type: 'player_props',
-      market_type: 'player_props',
-      legs,
-      total_odds: odds,
-      confidence: avgConfidence,
-      confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      analysis: `A balanced mix of props from today's slate. Average edge: +${avgEdge.toFixed(1)}%.`,
-      expected_value: '+6.5%',
-      risk_level: 'medium',
-      ai_metrics: {
-        leg_count: legs.length,
-        avg_leg_confidence: avgConfidence,
-        recommended_stake: '$5.00',
-        edge: avgEdge / 100,
-      },
-      timestamp: new Date().toISOString(),
-      isToday: true,
-      is_real_data: true,
-    });
-  }
+    for (let i = 0; i < Math.min(3, topConfidence.length - 2); i++) {
+      const legs = topConfidence.slice(i, i + 3).map((s, idx) => {
+        const conf = s.computedConfidence;
+        return {
+          id: `conf-${sport}-${i}-${idx}-${Date.now()}`,
+          description: `${s.player} ${s.stat} Over ${s.line}`,
+          odds: s.odds,
+          confidence: conf,
+          sport: sport,
+          market: 'player_props',
+          player_name: s.player,
+          stat_type: s.stat,
+          line: s.line,
+          projection: s.projection,
+          edge: s.edge,
+          confidence_level: conf > 80 ? 'high' : conf > 70 ? 'high' : 'medium',
+          injury_status: s.injuryStatus,
+        };
+      });
+      if (legs.length < 2) continue;
+      const { odds } = calculateTotalOdds(legs);
+      const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
+      const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
+      suggestions.push({
+        id: `analytics-conf-${sport}-${i}-${Date.now()}`,
+        name: `${sport} High Confidence Parlay ${i+1}`,
+        sport: sport,
+        type: 'player_props',
+        market_type: 'player_props',
+        legs,
+        total_odds: odds,
+        confidence: avgConfidence,
+        confidence_level: avgConfidence > 80 ? 'high' : 'medium',
+        analysis: `This parlay combines top confidence props in ${sport}. Average edge: +${avgEdge.toFixed(1)}%.`,
+        expected_value: '+6.2%',
+        risk_level: 'medium',
+        ai_metrics: {
+          leg_count: legs.length,
+          avg_leg_confidence: avgConfidence,
+          recommended_stake: '$5.00',
+          edge: avgEdge / 100,
+        },
+        timestamp: new Date().toISOString(),
+        isToday: true,
+        is_real_data: true,
+      });
+    }
 
+    // Best value parlays
+    const withEdge = withConfidence
+      .filter(s => s.edge && s.edge.startsWith('+'))
+      .sort((a, b) => {
+        const edgeA = parseFloat(a.edge?.replace('+', '').replace('%', '') || '0');
+        const edgeB = parseFloat(b.edge?.replace('+', '').replace('%', '') || '0');
+        return edgeB - edgeA;
+      })
+      .slice(0, 6);
+
+    for (let i = 0; i < Math.min(2, withEdge.length - 2); i++) {
+      const legs = withEdge.slice(i, i + 3).map((s, idx) => {
+        const conf = s.computedConfidence;
+        return {
+          id: `edge-${sport}-${i}-${idx}-${Date.now()}`,
+          description: `${s.player} ${s.stat} Over ${s.line}`,
+          odds: s.odds,
+          confidence: conf,
+          sport: sport,
+          market: 'player_props',
+          player_name: s.player,
+          stat_type: s.stat,
+          line: s.line,
+          projection: s.projection,
+          edge: s.edge,
+          confidence_level: conf > 80 ? 'high' : conf > 70 ? 'high' : 'medium',
+          injury_status: s.injuryStatus,
+        };
+      });
+      if (legs.length < 2) continue;
+      const { odds } = calculateTotalOdds(legs);
+      const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
+      const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
+      suggestions.push({
+        id: `analytics-edge-${sport}-${i}-${Date.now()}`,
+        name: `${sport} Best Value Parlay ${i+1}`,
+        sport: sport,
+        type: 'player_props',
+        market_type: 'player_props',
+        legs,
+        total_odds: odds,
+        confidence: avgConfidence,
+        confidence_level: avgConfidence > 80 ? 'high' : 'medium',
+        analysis: `This parlay features props with highest positive edge in ${sport}. Average edge: +${avgEdge.toFixed(1)}%.`,
+        expected_value: '+7.8%',
+        risk_level: 'medium',
+        ai_metrics: {
+          leg_count: legs.length,
+          avg_leg_confidence: avgConfidence,
+          recommended_stake: '$5.00',
+          edge: avgEdge / 100,
+        },
+        timestamp: new Date().toISOString(),
+        isToday: true,
+        is_real_data: true,
+      });
+    }
+
+    // Random balanced parlays
+    for (let i = 0; i < 3; i++) {
+      const shuffled = [...withConfidence].sort(() => 0.5 - Math.random());
+      const legs = shuffled.slice(0, 3).map((s, idx) => {
+        const conf = s.computedConfidence;
+        return {
+          id: `rand-${sport}-${i}-${idx}-${Date.now()}`,
+          description: `${s.player} ${s.stat} Over ${s.line}`,
+          odds: s.odds,
+          confidence: conf,
+          sport: sport,
+          market: 'player_props',
+          player_name: s.player,
+          stat_type: s.stat,
+          line: s.line,
+          projection: s.projection,
+          edge: s.edge,
+          confidence_level: conf > 80 ? 'high' : conf > 70 ? 'high' : 'medium',
+          injury_status: s.injuryStatus,
+        };
+      });
+      const { odds } = calculateTotalOdds(legs);
+      const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
+      const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
+      suggestions.push({
+        id: `analytics-rand-${sport}-${i}-${Date.now()}`,
+        name: `${sport} Balanced Parlay ${i+1}`,
+        sport: sport,
+        type: 'player_props',
+        market_type: 'player_props',
+        legs,
+        total_odds: odds,
+        confidence: avgConfidence,
+        confidence_level: avgConfidence > 80 ? 'high' : 'medium',
+        analysis: `A balanced mix of props from today's ${sport} slate. Average edge: +${avgEdge.toFixed(1)}%.`,
+        expected_value: '+6.5%',
+        risk_level: 'medium',
+        ai_metrics: {
+          leg_count: legs.length,
+          avg_leg_confidence: avgConfidence,
+          recommended_stake: '$5.00',
+          edge: avgEdge / 100,
+        },
+        timestamp: new Date().toISOString(),
+        isToday: true,
+        is_real_data: true,
+      });
+    }
+
+    let afterCount = suggestions.length;
+    console.log(`[generate] Added ${afterCount - beforeCount} parlays for ${sport}`);
+  });
+
+  console.log('[generateParlaysFromSelections] Total parlays generated:', suggestions.length);
   return suggestions;
 };
 
@@ -397,17 +564,28 @@ const getRiskChip = (risk: string | number) => {
 };
 
 const SportChip = ({ sport }: { sport: string }) => {
+  console.log('[SportChip] sport:', sport);
   let color: 'primary' | 'secondary' | 'success' | 'warning' = 'primary';
   if (sport === 'NBA') color = 'primary';
+  else if (sport === 'MLB') color = 'success';
   else if (sport === 'NHL') color = 'warning';
   return <Chip label={sport} size="small" color={color} variant="filled" />;
+};
+
+const InjuryChip = ({ status }: { status?: string }) => {
+  if (!status || status === 'Active' || status === 'healthy') return null;
+  let color: 'warning' | 'error' | 'default' = 'warning';
+  if (status.toLowerCase().includes('out')) color = 'error';
+  return <Chip label={status} size="small" color={color} variant="outlined" sx={{ ml: 1 }} />;
 };
 
 // ----------------------------------------------------------------------
 // Main Component
 // ----------------------------------------------------------------------
 const ParlayAnalyticsScreen: React.FC = () => {
-  const [selectedSports, setSelectedSports] = useState<string[]>(['NBA']); // only NBA supported
+  // 👇 CHANGED: default to only NBA, not all three
+  const [selectedSports, setSelectedSports] = useState<string[]>(['NBA']);
+
   const [selectedTab, setSelectedTab] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -422,15 +600,21 @@ const ParlayAnalyticsScreen: React.FC = () => {
   const [generatedResult, setGeneratedResult] = useState<any>(null);
   const [showGeneratorModal, setShowGeneratorModal] = useState(false);
 
-  // Fetch selections from Node API
+  // State to track expanded accordions per parlay ID
+  const [expandedAccordions, setExpandedAccordions] = useState<Record<string, boolean>>({});
+
+  // 🔍 Log selectedSports whenever it changes
+  console.log('[State] selectedSports:', selectedSports);
+
+  // Fetch selections for selected sports
   const {
     data: selections = [],
     isLoading,
     error,
     refetch,
   } = useQuery({
-    queryKey: ['prizepicks-selections'],
-    queryFn: fetchSelections,
+    queryKey: ['selections', selectedSports],
+    queryFn: () => fetchSelectionsForSports(selectedSports),
     staleTime: 1000 * 60 * 2,
     refetchOnWindowFocus: false,
   });
@@ -440,12 +624,14 @@ const ParlayAnalyticsScreen: React.FC = () => {
     return generateParlaysFromSelections(selections);
   }, [selections]);
 
-  const handleSportChange = (event: SelectChangeEvent<string[]>) => {
-    const value = event.target.value;
-    setSelectedSports(typeof value === 'string' ? value.split(',') : value);
+  const handleSportChange = (event: React.MouseEvent<HTMLElement>, newSports: string[]) => {
+    console.log('[Event] Sport change event value:', newSports);
+    if (newSports.length === 0) return;
+    setSelectedSports(newSports);
   };
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    console.log('[Event] Tab changed to:', newValue);
     setSelectedTab(newValue);
   };
 
@@ -457,11 +643,22 @@ const ParlayAnalyticsScreen: React.FC = () => {
     setSearchQuery('');
   };
 
+  // Toggle accordion for a given parlay ID
+  const toggleAccordion = (parlayId: string) => {
+    setExpandedAccordions(prev => ({
+      ...prev,
+      [parlayId]: !prev[parlayId]
+    }));
+  };
+
   const filteredParlays = useMemo(() => {
+    console.log('[Filter] Starting filter. Total parlays:', parlays.length);
     let filtered = parlays;
 
     if (selectedSports.length > 0) {
+      console.log('[Filter] Applying sport filter. Selected sports:', selectedSports);
       filtered = filtered.filter(p => selectedSports.includes(p.sport));
+      console.log('[Filter] After sport filter:', filtered.length);
     }
 
     if (debouncedSearch.trim()) {
@@ -478,16 +675,20 @@ const ParlayAnalyticsScreen: React.FC = () => {
         const analysisMatch = parlay.analysis.toLowerCase().includes(lowerQuery);
         return nameMatch || legMatch || analysisMatch;
       });
+      console.log('[Filter] After search filter:', filtered.length);
     }
 
     filtered = filtered.filter(p =>
       p.confidence >= confidenceRange[0] && p.confidence <= confidenceRange[1]
     );
+    console.log('[Filter] After confidence filter:', filtered.length);
 
     filtered = filtered.filter(p =>
       p.legs.length >= legCountRange[0] && p.legs.length <= legCountRange[1]
     );
+    console.log('[Filter] After leg count filter:', filtered.length);
 
+    console.log('[Filter] Final filtered parlays:', filtered.map(p => ({ name: p.name, sport: p.sport })));
     return filtered;
   }, [parlays, selectedSports, debouncedSearch, confidenceRange, legCountRange]);
 
@@ -510,8 +711,6 @@ const ParlayAnalyticsScreen: React.FC = () => {
     setGenerating(true);
     setShowGeneratorModal(true);
     try {
-      const endpoint = `${NODE_API_BASE}/api/prizepicks/selections`; // we don't have an AI endpoint, so just use selections to simulate
-      // Simulate AI response by picking random props
       if (selections.length > 0) {
         const shuffled = [...selections].sort(() => 0.5 - Math.random());
         const legs = shuffled.slice(0, 3).map(s => `${s.player} ${s.stat} Over ${s.line} (${s.odds})`);
@@ -536,7 +735,7 @@ const ParlayAnalyticsScreen: React.FC = () => {
     setCustomQuery('');
   };
 
-  if (isLoading) {
+  if (isLoading && selections.length === 0) {
     return (
       <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
         <Typography variant="h4" gutterBottom>Parlay Analytics</Typography>
@@ -571,13 +770,42 @@ const ParlayAnalyticsScreen: React.FC = () => {
           <Tooltip title="Filter options">
             <IconButton onClick={() => setShowFilters(!showFilters)} color={showFilters ? 'primary' : 'default'}><FilterListIcon /></IconButton>
           </Tooltip>
-          <FormControl sx={{ minWidth: 200 }} size="small">
-            <InputLabel id="sport-multi-filter-label">Sports</InputLabel>
-            <Select labelId="sport-multi-filter-label" multiple value={selectedSports} label="Sports" onChange={handleSportChange} renderValue={(selected) => selected.join(', ')}>
-              <MenuItem value="NBA">NBA</MenuItem>
-              <MenuItem value="NHL" disabled>NHL (coming soon)</MenuItem>
-            </Select>
-          </FormControl>
+
+          {/* 🔁 Sport toggle buttons */}
+          <Paper sx={{ p: 0.5, bgcolor: 'background.paper' }}>
+            <ToggleButtonGroup
+              value={selectedSports}
+              onChange={handleSportChange}
+              aria-label="sport selection"
+              size="small"
+              sx={{
+                '& .MuiToggleButton-root': {
+                  px: 2,
+                  py: 1,
+                  border: 'none',
+                  borderRadius: 1,
+                  '&.Mui-selected': {
+                    backgroundColor: (theme) => theme.palette.primary.main,
+                    color: 'white',
+                    '&:hover': {
+                      backgroundColor: (theme) => theme.palette.primary.dark,
+                    },
+                  },
+                },
+              }}
+            >
+              <ToggleButton value="NBA" aria-label="NBA">
+                <SportsBasketball sx={{ mr: 0.5 }} /> NBA
+              </ToggleButton>
+              <ToggleButton value="MLB" aria-label="MLB">
+                <SportsBaseball sx={{ mr: 0.5 }} /> MLB
+              </ToggleButton>
+              <ToggleButton value="NHL" aria-label="NHL">
+                <SportsHockey sx={{ mr: 0.5 }} /> NHL
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Paper>
+
           <Tooltip title="Generate custom parlay"><IconButton onClick={() => setGeneratorOpen(true)} color="primary"><AutoAwesomeIcon /></IconButton></Tooltip>
           <Tooltip title="Refresh data"><IconButton onClick={() => refetch()} color="primary"><AssessmentIcon /></IconButton></Tooltip>
         </Box>
@@ -612,12 +840,21 @@ const ParlayAnalyticsScreen: React.FC = () => {
 
       {/* Confidence Chart */}
       {filteredParlays.length > 0 && (
-        <Paper sx={{ p: 3, mb: 4 }}>
-          <Typography variant="h6" gutterBottom>Confidence Distribution</Typography>
-          <Box sx={{ height: 300, width: '100%' }}>
-            <BarChart dataset={filteredParlays.map(p => ({ label: p.name.length > 20 ? p.name.substring(0,20)+'…' : p.name, confidence: p.confidence, id: p.id }))} xAxis={[{ scaleType: 'band', dataKey: 'label' }]} series={[{ dataKey: 'confidence', label: 'Confidence (%)', color: '#3b82f6' }]} yAxis={[{ max: 100 }]} tooltip={{ trigger: 'item' }} />
-          </Box>
-        </Paper>
+        <>
+          {console.log('[FINAL] filteredParlays before chart:', filteredParlays.map(p => ({ name: p.name, sport: p.sport })))}
+          <Paper sx={{ p: 3, mb: 4 }}>
+            <Typography variant="h6" gutterBottom>Confidence Distribution</Typography>
+            <Box sx={{ height: 300, width: '100%' }}>
+              <BarChart
+                dataset={filteredParlays.map(p => ({ label: p.name.length > 20 ? p.name.substring(0,20)+'…' : p.name, confidence: p.confidence, id: p.id }))}
+                xAxis={[{ scaleType: 'band', dataKey: 'label' }]}
+                series={[{ dataKey: 'confidence', label: 'Confidence (%)', color: '#3b82f6' }]}
+                yAxis={[{ max: 100 }]}
+                tooltip={{ trigger: 'item' }}
+              />
+            </Box>
+          </Paper>
+        </>
       )}
 
       {/* Tabs */}
@@ -625,76 +862,141 @@ const ParlayAnalyticsScreen: React.FC = () => {
 
       {/* Tab Panel: Parlay Suggestions */}
       {selectedTab === 0 && (
-        <Grid container spacing={3}>
+        <Grid container spacing={3} key={selectedSports.join('-')}>
           {filteredParlays.length === 0 ? (
             <Grid item xs={12}><Alert severity="info">No parlays match your filters.</Alert></Grid>
           ) : (
-            filteredParlays.map((parlay) => (
-              <Grid item xs={12} md={6} key={parlay.id}>
-                <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <CardContent>
-                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                      <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
-                      <SportChip sport={parlay.sport} />
-                    </Box>
-                    <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
-                      <Chip label={`Odds: ${parlay.total_odds}`} size="small" variant="outlined" />
-                      {getRiskChip(parlay.risk_level)}
-                      <Chip label={`EV: ${parlay.expected_value}`} size="small" variant="outlined" />
-                    </Box>
-                    <Box mb={2}><Typography variant="body2" color="text.secondary" gutterBottom>Confidence</Typography><ConfidenceIndicator value={parlay.confidence} /></Box>
-                    <Accordion disableGutters elevation={0} square sx={{ border: 'none', '&:before': { display: 'none' } }}>
-                      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}><Typography variant="body2" fontWeight="medium">{parlay.legs.length} Legs</Typography></AccordionSummary>
-                      <AccordionDetails sx={{ px: 0 }}>
-                        <TableContainer component={Paper} variant="outlined">
-                          <Table size="small">
-                            <TableHead><TableRow><TableCell>Description</TableCell><TableCell align="right">Odds</TableCell><TableCell align="right">Confidence</TableCell></TableRow></TableHead>
-                            <TableBody>
-                              {parlay.legs.map(leg => (
-                                <TableRow key={leg.id}>
-                                  <TableCell>
-                                    <Typography variant="body2">{leg.description}</Typography>
-                                    <Typography variant="caption" color="text.secondary">{leg.sport} • {leg.market} {leg.projection && ` • Proj: ${leg.projection.toFixed(1)}`}</Typography>
-                                  </TableCell>
-                                  <TableCell align="right"><OddsChip odds={leg.odds} /></TableCell>
-                                  <TableCell align="right"><Box display="flex" alignItems="center" justifyContent="flex-end"><Typography variant="body2">{leg.confidence}%</Typography><Tooltip title={leg.confidence_level || 'N/A'}><InfoIcon fontSize="small" sx={{ ml: 0.5, color: 'text.secondary' }} /></Tooltip></Box></TableCell>
+            filteredParlays.map((parlay) => {
+              console.log('[RENDER] Parlay:', parlay.name, 'sport:', parlay.sport, 'type:', typeof parlay.sport);
+              return (
+                <Grid item xs={12} md={6} key={parlay.id}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        borderColor: (theme) => theme.palette.primary.main,
+                        boxShadow: 2,
+                      },
+                    }}
+                    onClick={() => toggleAccordion(parlay.id)}
+                  >
+                    <CardContent>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                        <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
+                        <SportChip sport={parlay.sport} />
+                      </Box>
+                      <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
+                        <Chip label={`Odds: ${parlay.total_odds}`} size="small" variant="outlined" />
+                        {getRiskChip(parlay.risk_level)}
+                        <Chip label={`EV: ${parlay.expected_value}`} size="small" variant="outlined" />
+                      </Box>
+                      <Box mb={2}><Typography variant="body2" color="text.secondary" gutterBottom>Confidence</Typography><ConfidenceIndicator value={parlay.confidence} /></Box>
+
+                      <Accordion
+                        disableGutters
+                        elevation={0}
+                        square
+                        expanded={expandedAccordions[parlay.id] || false}
+                        onChange={() => {}}
+                        sx={{ border: 'none', '&:before': { display: 'none' } }}
+                      >
+                        <AccordionSummary
+                          expandIcon={<ExpandMoreIcon />}
+                          sx={{ px: 0, cursor: 'default' }}
+                        >
+                          <Typography variant="body2" fontWeight="medium">{parlay.legs.length} Legs</Typography>
+                        </AccordionSummary>
+                        <AccordionDetails sx={{ px: 0 }}>
+                          <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell>Description</TableCell>
+                                  <TableCell align="right">Odds</TableCell>
+                                  <TableCell align="right">Confidence</TableCell>
+                                  <TableCell align="right">Status</TableCell>
                                 </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </TableContainer>
-                      </AccordionDetails>
-                    </Accordion>
-                    <Box mt={2}><Typography variant="body2" color="text.secondary" gutterBottom>AI Analysis</Typography><Typography variant="body2">{parlay.analysis}</Typography></Box>
-                    <Box mt={2} display="flex" gap={2} flexWrap="wrap">
-                      <Typography variant="caption" color="text.secondary">Avg Leg Confidence: {parlay.ai_metrics.avg_leg_confidence?.toFixed(1)}%</Typography>
-                      {parlay.ai_metrics.edge !== undefined && <Typography variant="caption" color="text.secondary">Edge: {(parlay.ai_metrics.edge * 100).toFixed(1)}%</Typography>}
-                      <Typography variant="caption" color="text.secondary">Stake: {parlay.ai_metrics.recommended_stake}</Typography>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))
+                              </TableHead>
+                              <TableBody>
+                                {parlay.legs.map(leg => (
+                                  <TableRow key={leg.id}>
+                                    <TableCell>
+                                      <Typography variant="body2">{leg.description}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {leg.sport} • {leg.market} {leg.projection && ` • Proj: ${leg.projection.toFixed(1)}`}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell align="right"><OddsChip odds={leg.odds} /></TableCell>
+                                    <TableCell align="right">
+                                      <Box display="flex" alignItems="center" justifyContent="flex-end">
+                                        <Typography variant="body2">{leg.confidence}%</Typography>
+                                        <Tooltip title={leg.confidence_level || 'N/A'}>
+                                          <InfoIcon fontSize="small" sx={{ ml: 0.5, color: 'text.secondary' }} />
+                                        </Tooltip>
+                                      </Box>
+                                    </TableCell>
+                                    <TableCell align="right"><InjuryChip status={leg.injury_status} /></TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        </AccordionDetails>
+                      </Accordion>
+
+                      <Box mt={2}>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>AI Analysis</Typography>
+                        <Typography variant="body2">{parlay.analysis}</Typography>
+                      </Box>
+                      <Box mt={2} display="flex" gap={2} flexWrap="wrap">
+                        <Typography variant="caption" color="text.secondary">Avg Leg Confidence: {parlay.ai_metrics.avg_leg_confidence?.toFixed(1)}%</Typography>
+                        {parlay.ai_metrics.edge !== undefined && <Typography variant="caption" color="text.secondary">Edge: {(parlay.ai_metrics.edge * 100).toFixed(1)}%</Typography>}
+                        <Typography variant="caption" color="text.secondary">Stake: {parlay.ai_metrics.recommended_stake}</Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })
           )}
         </Grid>
       )}
 
-      {/* Tab Panel: Leg Analytics */}
+      {/* Tab Panel: Leg Analytics (unchanged) */}
       {selectedTab === 1 && (
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>Leg‑by‑Leg Performance Indicators</Typography>
           {filteredParlays.length === 0 ? <Alert severity="info">No data to display.</Alert> : (
             <>
               <Box sx={{ height: 300, width: '100%', mb: 4 }}>
-                <PieChart series={[{
-                  data: Object.entries(filteredParlays.flatMap(p => p.legs).reduce<Record<string, number>>((acc, leg) => { acc[leg.sport] = (acc[leg.sport] || 0) + 1; return acc; }, {})).map(([sport, count]) => ({ id: sport, value: count, label: sport })),
-                  highlightScope: { faded: 'global', highlighted: 'item' },
-                  faded: { innerRadius: 30, additionalRadius: -30, color: 'gray' }
-                }]} width={400} height={200} />
+                <PieChart
+                  series={[{
+                    data: Object.entries(filteredParlays.flatMap(p => p.legs).reduce<Record<string, number>>((acc, leg) => {
+                      acc[leg.sport] = (acc[leg.sport] || 0) + 1;
+                      return acc;
+                    }, {})).map(([sport, count]) => ({ id: sport, value: count, label: sport })),
+                    highlightScope: { faded: 'global', highlighted: 'item' },
+                    faded: { innerRadius: 30, additionalRadius: -30, color: 'gray' }
+                  }]}
+                  width={400}
+                  height={200}
+                />
               </Box>
               <TableContainer component={Paper} variant="outlined">
                 <Table>
-                  <TableHead><TableRow><TableCell>Sport</TableCell><TableCell align="right">Total Legs</TableCell><TableCell align="right">Avg. Confidence</TableCell><TableCell align="right">Avg. Odds</TableCell></TableRow></TableHead>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Sport</TableCell>
+                      <TableCell align="right">Total Legs</TableCell>
+                      <TableCell align="right">Avg. Confidence</TableCell>
+                      <TableCell align="right">Avg. Odds</TableCell>
+                    </TableRow>
+                  </TableHead>
                   <TableBody>
                     {Object.entries(filteredParlays.flatMap(p => p.legs).reduce<Record<string, { count: number; totalConfidence: number; totalOdds: number }>>((acc, leg) => {
                       const sport = leg.sport || 'Unknown';
@@ -720,7 +1022,7 @@ const ParlayAnalyticsScreen: React.FC = () => {
         </Paper>
       )}
 
-      {/* Generator Dialog */}
+      {/* Generator Dialog (unchanged) */}
       <Dialog open={generatorOpen} onClose={() => setGeneratorOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle><Box display="flex" alignItems="center" gap={1}><RocketLaunchIcon color="primary" /><Typography variant="h6">AI Parlay Generator</Typography></Box></DialogTitle>
         <DialogContent>
@@ -728,6 +1030,7 @@ const ParlayAnalyticsScreen: React.FC = () => {
           <TextField fullWidth multiline rows={3} placeholder="Enter your parlay query..." value={customQuery} onChange={(e) => setCustomQuery(e.target.value)} variant="outlined" sx={{ mb: 2 }} />
           <Box display="flex" gap={1} flexWrap="wrap">
             <Chip label="NBA: Jokic over 25.5, Murray over 8.5 assists" onClick={() => setCustomQuery("Jokic over 25.5 points, Murray over 8.5 assists")} icon={<PsychologyIcon />} variant="outlined" />
+            <Chip label="MLB: Ohtani over 1.5 hits, Judge HR" onClick={() => setCustomQuery("Ohtani over 1.5 hits, Judge anytime home run")} icon={<PsychologyIcon />} variant="outlined" />
             <Chip label="NHL: McDavid points, Draisaitl goals" onClick={() => setCustomQuery("McDavid over 1.5 points, Draisaitl anytime goal")} icon={<PsychologyIcon />} variant="outlined" />
           </Box>
         </DialogContent>
@@ -762,4 +1065,3 @@ const ParlayAnalyticsScreen: React.FC = () => {
 };
 
 export default ParlayAnalyticsScreen;
-

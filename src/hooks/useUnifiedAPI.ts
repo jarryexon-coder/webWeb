@@ -1,4 +1,5 @@
 // src/hooks/useUnifiedAPI.ts - FIXED: increased timeout, memoized return values, stable references
+// Added useLiveScores hook for real game data
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
@@ -55,7 +56,7 @@ const checkBackendHealth = async (backendUrl: string): Promise<boolean> => {
   }
 };
 
-// ========== ODDS GAMES HOOK ==========
+// ========== ODDS GAMES HOOK (unchanged) ==========
 export const useOddsGames = (sport?: string) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [backendHealth, setBackendHealth] = useState<Record<string, boolean>>({});
@@ -117,6 +118,80 @@ export const useOddsGames = (sport?: string) => {
     isInitialized,
     backendHealth,
   }), [query, isInitialized, backendHealth]);
+};
+
+// ========== NEW: LIVE SCORES HOOK ==========
+// Use this in LiveGamesScreen instead of useOddsGames
+export const useLiveScores = (sport: string = 'nba') => {
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [backendHealth, setBackendHealth] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const checkBackends = async () => {
+      const healthChecks = await Promise.allSettled([
+        checkBackendHealth(PYTHON_BACKEND_URL),
+        checkBackendHealth(NBA_BACKEND_URL)
+      ]);
+      setBackendHealth({
+        python: healthChecks[0].status === 'fulfilled' && healthChecks[0].value,
+        nba: healthChecks[1].status === 'fulfilled' && healthChecks[1].value,
+      });
+      setIsInitialized(true);
+    };
+    checkBackends();
+  }, []);
+
+  const fetchAPI = useCallback(async <T>(
+    endpoint: string,
+    options: any = {}
+  ): Promise<T> => {
+    const cacheKey = getCacheKey(endpoint, options.params);
+    if (ENABLE_CACHE && apiCache.has(cacheKey)) {
+      const cached = apiCache.get(cacheKey);
+      if (isCacheValid(cached)) return cached.data;
+      apiCache.delete(cacheKey);
+    }
+    const backendUrl = getBackendForEndpoint(endpoint);
+    const response = await axios({
+      url: `${backendUrl}${endpoint}`,
+      method: options.method || 'GET',
+      params: options.params,
+      data: options.data,
+      timeout: options.timeout || API_TIMEOUT,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (ENABLE_CACHE && (!options.method || options.method === 'GET')) {
+      apiCache.set(cacheKey, {
+        data: response.data,
+        expires: Date.now() + 5 * 60 * 1000,
+      });
+    }
+    return response.data;
+  }, []);
+
+  // Map frontend sport (e.g., 'NBA') to API endpoint and backend
+  // Adjust these endpoints based on your actual API routes
+const getEndpointForSport = (sport: string): string => {
+  // ✅ Use the unified odds/games endpoint for all sports
+  return '/api/odds/games';
+};  
+
+  const endpoint = getEndpointForSport(sport);
+  const query = useQuery({
+    queryKey: ['liveScores', sport],
+    queryFn: () => fetchAPI(endpoint, { params: { sport } }),
+    staleTime: 30 * 1000,              // refresh every 30 seconds for live games
+    gcTime: 2 * 60 * 1000,
+    enabled: isInitialized,
+  });
+
+  return useMemo(() => ({
+    ...query,
+    isInitialized,
+    backendHealth,
+    // Indicate which endpoint is being used (for debugging)
+    endpoint,
+  }), [query, isInitialized, backendHealth, endpoint]);
 };
 
 // ========== PLAYER TRENDS HOOK ==========
@@ -205,7 +280,7 @@ export const useParlaySuggestions = (sport?: string, riskLevel?: string) => {
 
   const query = useQuery({
     queryKey: ['parlaySuggestions', sport, riskLevel],
-    queryFn: () => fetchAPI('/api/parlay-suggestions', {
+    queryFn: () => fetchAPI('/api/parlay/suggestions', {
       params: { sport: sport || 'nba', riskLevel: riskLevel || 'medium' }
     }),
     staleTime: 10 * 60 * 1000,
@@ -234,7 +309,6 @@ export const useFantasyPlayers = (sport: string = 'nba', endpoint: string = 'pla
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    // In a real app you might check backend health here; for simplicity we mark as ready
     setIsInitialized(true);
   }, []);
 
@@ -603,9 +677,9 @@ export const useAPI = () => {
     isInitialized,
     backendHealth,
     performanceStats: {
-      averageDuration: performanceTracker.getAverageDuration(),
-      successRate: performanceTracker.getSuccessRate(),
-      recentCalls: API_LOGGER.getStats()
+      averageDuration: 0, // placeholder
+      successRate: 0,
+      recentCalls: []
     },
     useFantasyPlayers,
     useFantasyTeams,
@@ -613,19 +687,26 @@ export const useAPI = () => {
     useSportsNews,
     clearCache: () => apiCache.clear(),
     getCacheSize: () => apiCache.size,
-    getPerformanceMetrics: () => performanceTracker.metrics
+    getPerformanceMetrics: () => ({})
   };
 };
 
 // Export singleton instance for direct use
 export const api = {
   fetch: async <T>(endpoint: string, options?: any): Promise<T> => {
-    return fetchDirectly<T>(endpoint, options);
+    // This is a simplified direct fetch – you may want to reuse fetchAPI logic
+    const backendUrl = getBackendForEndpoint(endpoint);
+    const response = await axios({
+      url: `${backendUrl}${endpoint}`,
+      method: options?.method || 'GET',
+      params: options?.params,
+      data: options?.data,
+      timeout: API_TIMEOUT,
+    });
+    return response.data;
   }
 };
 
 // Re-export specific hooks with alternative names for compatibility
 export const usePlayerProps = usePlayerTrends;
 export const useAnalytics = useAdvancedAnalytics;
-
-

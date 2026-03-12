@@ -46,6 +46,29 @@ import { useNavigate } from 'react-router-dom';
 import { playerPropsApi } from '../services/playerProps';
 
 // ----------------------------------------------------------------------
+// Constants & helpers
+// ----------------------------------------------------------------------
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+
+// Map confidence strings (from Python API) to percentages
+const confidenceLevelToPercent = (level: string): number => {
+  switch (level?.toLowerCase()) {
+    case 'high': return 90;
+    case 'medium': return 70;
+    case 'low': return 50;
+    default: return 50;
+  }
+};
+
+// Parse odds strings like "-110" to number
+const parseOdds = (odds: string | number | undefined): number | undefined => {
+  if (odds === undefined || odds === null) return undefined;
+  if (typeof odds === 'number') return odds;
+  const parsed = parseInt(odds, 10);
+  return isNaN(parsed) ? undefined : parsed;
+};
+
+// ----------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------
 interface PlayerProp {
@@ -133,43 +156,90 @@ const PlayerPropsScreen: React.FC = () => {
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0);
   const [sortBy, setSortBy] = useState<string>('confidence');
 
-const {
-  data,
-  isLoading,
-  error,
-  refetch,
-  isError,
-} = useQuery({
-  queryKey: ['playerProps', selectedSport],
-  queryFn: async () => {
-    const rawData = await playerPropsApi.getProps(selectedSport);
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isError,
+  } = useQuery({
+    queryKey: ['playerProps', selectedSport],
+    queryFn: async () => {
+      // For MLB and NHL, use the Python API
+      if (selectedSport === 'mlb' || selectedSport === 'nhl') {
+        const url = `${PYTHON_API_BASE}/api/${selectedSport}/props`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const rawData = await response.json();
 
-    // If the API returns an array directly
-    if (Array.isArray(rawData)) {
-      return rawData.map(prop => ({
-        ...prop,
-        player: prop.player_name || prop.player || 'Unknown',
-        market: prop.prop_type || prop.market || '—',   // 👈 add market from prop_type
-        confidence: prop.confidence || 50,               // 👈 default confidence
-      }));
-    }
-    
-    // If the API returns an object with a 'props' array
-    if (rawData && Array.isArray(rawData.props)) {
-      return rawData.props.map(prop => ({
-        ...prop,
-        player: prop.player_name || prop.player || 'Unknown',
-        market: prop.prop_type || prop.market || '—',   // 👈 add market
-        confidence: prop.confidence || 50,               // 👈 default confidence
-      }));
-    }
-    
-    return [];
-  },
-  staleTime: 1000 * 60 * 2,
-  refetchOnWindowFocus: false,
-  retry: 1,
-});
+        // The Python API returns { props: [...] } or directly an array
+        let propsArray = rawData.props || rawData;
+        if (!Array.isArray(propsArray)) {
+          console.warn('Unexpected response format:', rawData);
+          return [];
+        }
+
+        // Transform each prop to the shape expected by the screen
+        return propsArray.map((prop: any): PlayerProp => {
+          // Build game string if opponent is provided
+          const game = prop.opponent && prop.team
+            ? `${prop.team} vs ${prop.opponent}`
+            : prop.game || 'N/A';
+
+          return {
+            id: prop.id || `prop-${Math.random()}`,
+            player: prop.player || prop.player_name || 'Unknown',
+            team: prop.team || '',
+            market: prop.stat || prop.prop_type || prop.market || '—',
+            line: prop.line ?? 0,
+            over_odds: parseOdds(prop.over_odds) ?? 0,
+            under_odds: parseOdds(prop.under_odds) ?? 0,
+            confidence: prop.confidence !== undefined
+              ? (typeof prop.confidence === 'string'
+                  ? confidenceLevelToPercent(prop.confidence)
+                  : prop.confidence)
+              : 50,
+            player_id: prop.player_id,
+            position: prop.position || '',
+            last_updated: prop.last_updated || new Date().toISOString(),
+            sport: prop.sport || selectedSport.toUpperCase(),
+            is_real_data: prop.is_real_data === true,
+            game,
+            game_time: prop.game_time || prop.date || undefined,
+          };
+        });
+      }
+
+      // For all other sports (NBA, NFL, etc.) use the existing API service
+      const rawData = await playerPropsApi.getProps(selectedSport);
+      console.log('🧪 First prop raw:', rawData.props?.[0] || rawData[0]);
+
+      // If the API returns an array directly
+      if (Array.isArray(rawData)) {
+        return rawData.map(prop => ({
+          ...prop,
+          player: prop.player_name || prop.player || 'Unknown',
+          market: prop.prop_type || prop.market || '—',
+          confidence: prop.confidence || 50,
+        }));
+      }
+
+      // If the API returns an object with a 'props' array
+      if (rawData && Array.isArray(rawData.props)) {
+        return rawData.props.map(prop => ({
+          ...prop,
+          player: prop.player_name || prop.player || 'Unknown',
+          market: prop.prop_type || prop.market || '—',
+          confidence: prop.confidence || 50,
+        }));
+      }
+
+      return [];
+    },
+    staleTime: 1000 * 60 * 2,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
 
   const props = data || [];
 
@@ -216,13 +286,11 @@ const {
   const handleConfidenceChange = (_event: Event, value: number | number[]) =>
     setConfidenceThreshold(value as number);
 
-  // ===== FIXED: handleRowClick now receives the whole prop and passes it in state =====
   const handleRowClick = (prop: PlayerProp) => {
     console.log('🚀 Navigating to props-details with prop:', prop);
     console.log('   prop.id =', prop.id);
     navigate(`/props-details/${prop.id}`, { state: { prop } });
   };
-  // ===============================================================================
 
   if (isLoading) {
     return (
@@ -451,7 +519,6 @@ const {
                 <TableRow
                   key={prop.id}
                   hover
-                  // ===== FIXED: pass the whole prop object to handleRowClick =====
                   onClick={() => handleRowClick(prop)}
                   sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#333' } }}
                 >

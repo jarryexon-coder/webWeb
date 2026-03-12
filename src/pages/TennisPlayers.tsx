@@ -38,7 +38,6 @@ import {
   Star as ProspectIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import tennisApi from '../services/tennis';
 
 // ----------------------------------------------------------------------
 // Types
@@ -73,10 +72,10 @@ interface TennisApiResponse {
 }
 
 // ----------------------------------------------------------------------
-// Mock data
+// Mock data (WTA and fallback ATP)
 // ----------------------------------------------------------------------
 const getMockTennisPlayers = (): TennisPlayer[] => [
-  // ATP
+  // ATP (mock – used only as fallback if API fails)
   {
     id: 'atp1',
     name: 'Novak Djokovic',
@@ -133,7 +132,7 @@ const getMockTennisPlayers = (): TennisPlayer[] => [
     tour: 'ATP',
     is_prospect: false,
   },
-  // WTA
+  // WTA (always mock until WTA endpoints become available)
   {
     id: 'wta1',
     name: 'Iga Swiatek',
@@ -221,49 +220,80 @@ function arePlayersComplete(players: any[]): players is TennisPlayer[] {
 }
 
 // ----------------------------------------------------------------------
-// API function with fallback
+// API function with fallback – now using /api/atp/rankings for ATP
 // ----------------------------------------------------------------------
 const fetchTennisPlayers = async (tour?: string): Promise<TennisApiResponse> => {
   try {
-    const response = await tennisApi.getPlayers(tour as 'ATP' | 'WTA' | undefined);
+    let atpPlayers: TennisPlayer[] = [];
+    let wtaPlayers: TennisPlayer[] = [];
 
-    // Handle different response shapes
-    if (Array.isArray(response)) {
-      // Response is array of players
-      if (arePlayersComplete(response)) {
-        return {
-          success: true,
-          data: {
-            players: response,
-            last_updated: new Date().toISOString(),
-            is_real_data: true,
-          },
-        };
-      }
-    } else if (response?.data && Array.isArray(response.data.players)) {
-      // Response has data.players
-      if (arePlayersComplete(response.data.players)) {
-        return response as TennisApiResponse;
-      }
-    } else if (response?.players && Array.isArray(response.players)) {
-      // Response has players directly
-      if (arePlayersComplete(response.players)) {
-        return {
-          success: true,
-          data: {
-            players: response.players,
-            last_updated: response.last_updated || new Date().toISOString(),
-            is_real_data: response.is_real_data ?? true,
-          },
-        };
+    // 1. Fetch ATP real data if needed (tour = 'ATP' or 'all')
+    if (!tour || tour === 'ATP' || tour === 'all') {
+      const baseUrl = import.meta.env.VITE_API_BASE_PYTHON || 'https://python-api-fresh-production.up.railway.app';
+      const atpUrl = `${baseUrl}/api/atp/rankings?per_page=100`;      
+      const response = await fetch(atpUrl);
+      if (response.ok) {
+        const json = await response.json();
+        if (json.success && json.data && Array.isArray(json.data.data)) {
+          const rankings = json.data.data; // array of ranking entries
+          atpPlayers = rankings.map((entry: any) => {
+            const player = entry.player;
+            // Determine hand (plays field: "Right-Handed", "Left-Handed", "Ambidextrous")
+            let hand: 'left' | 'right' | 'ambidextrous' = 'right';
+            if (player.plays) {
+              if (player.plays.toLowerCase().includes('left')) hand = 'left';
+              else if (player.plays.toLowerCase().includes('ambidextrous')) hand = 'ambidextrous';
+            }
+            return {
+              id: String(player.id),
+              name: player.full_name || `${player.first_name} ${player.last_name}`,
+              country: player.country || 'Unknown',
+              country_code: player.country_code || '???',
+              atp_rank: entry.rank,
+              points: entry.points,
+              age: player.age || 0,
+              turned_pro: player.turned_pro || 0,
+              height_cm: player.height_cm,
+              hand,
+              tour: 'ATP',
+              is_prospect: entry.rank <= 100 && player.age <= 21, // simple prospect definition
+            };
+          });
+        }
+      } else {
+        console.warn('ATP API returned non-OK status, using mock ATP');
       }
     }
 
-    // If we reach here, data is incomplete or unexpected
-    console.warn('Tennis API returned incomplete/unexpected data, using mock');
+    // 2. Use mock WTA data if needed (tour = 'WTA' or 'all')
+    if (!tour || tour === 'WTA' || tour === 'all') {
+      // For now, always use mock for WTA (can be replaced later with a real endpoint)
+      const mockAll = getMockTennisPlayers();
+      wtaPlayers = mockAll.filter(p => p.tour === 'WTA');
+    }
+
+    // 3. Combine based on requested tour
+    let combined: TennisPlayer[] = [];
+    if (tour === 'ATP') combined = atpPlayers;
+    else if (tour === 'WTA') combined = wtaPlayers;
+    else combined = [...atpPlayers, ...wtaPlayers];
+
+    // 4. If we got no ATP players from API, fall back to mock ATP
+    if (combined.length === 0) {
+      console.warn('No players retrieved from API, using full mock data');
+      return {
+        success: true,
+        data: getMockTennisData(),
+      };
+    }
+
     return {
       success: true,
-      data: getMockTennisData(),
+      data: {
+        players: combined,
+        last_updated: new Date().toISOString(),
+        is_real_data: atpPlayers.length > 0, // true if we have any real ATP data
+      },
     };
   } catch (error) {
     console.error('Error fetching tennis players:', error);

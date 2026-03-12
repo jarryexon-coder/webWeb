@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+// pages/AIParlaySuggestionsScreen.tsx - Updated with real MLB/NHL data (same as ParlayArchitectScreen)
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Container,
   Typography,
@@ -49,6 +50,7 @@ import axios from 'axios';
 // ==============================
 
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 interface ParlayLeg {
   id: string;
@@ -104,27 +106,178 @@ interface Selection {
   confidence: number;
   edge: string;
   position?: string;
+  sport: string;
 }
 
 // ==============================
-// Fetch real props from Node API
+// Fetch real props from APIs
 // ==============================
 
-const fetchSelections = async (): Promise<Selection[]> => {
+// NBA props from Node API (same as ParlayArchitect)
+const fetchNBASelections = async (): Promise<Selection[]> => {
   try {
     const response = await axios.get(`${NODE_API_BASE}/api/prizepicks/selections?sport=nba`);
-    return response.data.selections || [];
+    return (response.data.selections || []).map((s: any) => ({
+      ...s,
+      sport: 'NBA',
+    }));
   } catch (error) {
-    console.warn('Failed to fetch selections from Node API', error);
+    console.warn('Failed to fetch NBA selections', error);
     return [];
   }
 };
 
+// MLB props from Python API (same as ParlayArchitect's fetchMLBProps)
+const fetchMLBSelections = async (): Promise<Selection[]> => {
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
+      params: { sport: 'mlb', realtime: 'true', limit: 100 }
+    });
+
+    const players = response.data?.data?.players || [];
+    if (!players.length) {
+      console.warn('No MLB players returned from Python API');
+      return [];
+    }
+
+    const selections: Selection[] = [];
+
+    players.forEach((player: any) => {
+      const isPitcher = player.position === 'P';
+      const gamesPlayed = player.games_played || 1;
+
+      // Helper to create a selection
+      const makeSelection = (stat: string, line: number, proj: number, odds = '-110') => {
+        const edge = proj > line ? `+${(((proj - line) / line) * 100).toFixed(1)}%` : `${(((proj - line) / line) * 100).toFixed(1)}%`;
+        selections.push({
+          id: `mlb-${player.id || player.name}-${stat}`,
+          player: player.name,
+          team: player.team,
+          stat,
+          line,
+          projection: proj,
+          odds,
+          confidence: 70 + Math.floor(Math.random() * 15), // can be improved
+          edge,
+          position: player.position,
+          sport: 'MLB',
+        });
+      };
+
+      if (isPitcher) {
+        if (player.strikeouts !== undefined) {
+          makeSelection('Strikeouts', 5.5, player.strikeouts / gamesPlayed);
+        }
+        // add other pitcher props if needed
+      } else {
+        if (player.hits !== undefined) {
+          makeSelection('Hits', 0.5, player.hits / gamesPlayed);
+        }
+        if (player.home_runs !== undefined) {
+          makeSelection('Home Runs', 0.5, player.home_runs / gamesPlayed);
+        }
+        if (player.rbi !== undefined) {
+          makeSelection('RBI', 0.5, player.rbi / gamesPlayed);
+        }
+        // stolen bases, etc.
+      }
+    });
+
+    return selections;
+  } catch (error) {
+    console.warn('Failed to fetch MLB selections', error);
+    return [];
+  }
+};
+
+// NHL props from Python API (same as ParlayArchitect's fetchNHLProps)
+const fetchNHLSelections = async (): Promise<Selection[]> => {
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
+      params: { sport: 'nhl', realtime: 'true', limit: 100 }
+    });
+
+    const players = response.data?.data?.players || [];
+    if (!players.length) {
+      console.warn('No NHL players returned from Python API');
+      return [];
+    }
+
+    const selections: Selection[] = [];
+
+    players.forEach((player: any) => {
+      const isGoalie = player.position === 'G';
+      const gamesPlayed = player.games_played || 1;
+
+      const makeSelection = (stat: string, line: number, proj: number, odds = '-110') => {
+        const edge = proj > line ? `+${(((proj - line) / line) * 100).toFixed(1)}%` : `${(((proj - line) / line) * 100).toFixed(1)}%`;
+        selections.push({
+          id: `nhl-${player.id || player.name}-${stat}`,
+          player: player.name,
+          team: player.team,
+          stat,
+          line,
+          projection: proj,
+          odds,
+          confidence: 70 + Math.floor(Math.random() * 15),
+          edge,
+          position: player.position,
+          sport: 'NHL',
+        });
+      };
+
+      if (isGoalie) {
+        if (player.saves !== undefined) {
+          makeSelection('saves', 25.5, player.saves / gamesPlayed);
+        }
+      } else {
+        if (player.goals !== undefined) {
+          makeSelection('goals', 0.5, player.goals / gamesPlayed);
+        }
+        if (player.assists !== undefined) {
+          makeSelection('assists', 0.5, player.assists / gamesPlayed);
+        }
+        if (player.points !== undefined) {
+          makeSelection('points', 0.5, player.points / gamesPlayed);
+        }
+        if (player.shots !== undefined) {
+          makeSelection('shots', 2.5, player.shots / gamesPlayed);
+        }
+        if (player.hits !== undefined) {
+          makeSelection('hits', 1.5, player.hits / gamesPlayed);
+        }
+      }
+    });
+
+    return selections;
+  } catch (error) {
+    console.warn('Failed to fetch NHL selections', error);
+    return [];
+  }
+};
+
+// Generic fetch function based on sport
+const fetchSelectionsBySport = async (sport: string): Promise<Selection[]> => {
+  switch (sport) {
+    case 'NBA':
+      return fetchNBASelections();
+    case 'MLB':
+      return fetchMLBSelections();
+    case 'NHL':
+      return fetchNHLSelections();
+    default:
+      return [];
+  }
+};
+
 // ==============================
-// Generate AI parlay suggestions from selections
+// Generate AI parlay suggestions from selections (sport-agnostic)
 // ==============================
 
-const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggestion[] => {
+const generateAIParlaysFromSelections = (
+  selections: Selection[],
+  sport: string
+): ParlaySuggestion[] => {
   if (selections.length === 0) return [];
 
   const suggestions: ParlaySuggestion[] = [];
@@ -139,7 +292,6 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
         if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
         else decimal *= 1 - 100 / Math.abs(oddsNum);
       } else {
-        // fallback
         decimal *= 1.91; // -110 approx
       }
     });
@@ -155,6 +307,9 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
     return !isNaN(num) && num > 0 ? num : 75;
   };
 
+  // Sport-specific naming
+  const sportDisplay = sport.toUpperCase();
+
   // 1. High Confidence Parlay (top 3 by confidence)
   const topConfidence = [...selections]
     .sort((a, b) => getConfidence(b.confidence) - getConfidence(a.confidence))
@@ -167,7 +322,7 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
         description: `${s.player} ${s.stat} Over ${s.line}`,
         odds: s.odds,
         confidence: conf,
-        sport: 'NBA',
+        sport: sportDisplay,
         market: 'player_props',
         player_name: s.player,
         stat_type: s.stat,
@@ -180,16 +335,16 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
     const { odds } = calculateTotalOdds(legs);
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
     suggestions.push({
-      id: `ai-conf-${Date.now()}`,
-      name: 'High Confidence Parlay',
-      sport: 'NBA',
+      id: `ai-conf-${sport}-${Date.now()}`,
+      name: `High Confidence ${sportDisplay} Parlay`,
+      sport: sportDisplay,
       type: 'player_props',
       market_type: 'player_props',
       legs,
       total_odds: odds,
       confidence: avgConfidence,
       confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      analysis: 'This parlay combines the highest confidence player props from today\'s slate.',
+      analysis: `This parlay combines the highest confidence player props from today's ${sportDisplay} slate.`,
       expected_value: '+6.2%',
       risk_level: 'medium',
       ai_metrics: {
@@ -222,7 +377,7 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
         description: `${s.player} ${s.stat} Over ${s.line}`,
         odds: s.odds,
         confidence: conf,
-        sport: 'NBA',
+        sport: sportDisplay,
         market: 'player_props',
         player_name: s.player,
         stat_type: s.stat,
@@ -235,16 +390,16 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
     const { odds } = calculateTotalOdds(legs);
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
     suggestions.push({
-      id: `ai-edge-${Date.now()}`,
-      name: 'Best Value Parlay',
-      sport: 'NBA',
+      id: `ai-edge-${sport}-${Date.now()}`,
+      name: `Best Value ${sportDisplay} Parlay`,
+      sport: sportDisplay,
       type: 'player_props',
       market_type: 'player_props',
       legs,
       total_odds: odds,
       confidence: avgConfidence,
       confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      analysis: 'This parlay features props with the highest positive edge, indicating strong value.',
+      analysis: `This parlay features props with the highest positive edge, indicating strong value in ${sportDisplay}.`,
       expected_value: '+7.8%',
       risk_level: 'medium',
       ai_metrics: {
@@ -274,7 +429,7 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
         description: `${s.player} ${s.stat} Over ${s.line}`,
         odds: s.odds,
         confidence: conf,
-        sport: 'NBA',
+        sport: sportDisplay,
         market: 'player_props',
         player_name: s.player,
         stat_type: s.stat,
@@ -287,16 +442,16 @@ const generateAIParlaysFromSelections = (selections: Selection[]): ParlaySuggest
     const { odds } = calculateTotalOdds(legs);
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
     suggestions.push({
-      id: `ai-bal-${Date.now()}`,
-      name: 'Balanced Mix Parlay',
-      sport: 'NBA',
+      id: `ai-bal-${sport}-${Date.now()}`,
+      name: `Balanced Mix ${sportDisplay} Parlay`,
+      sport: sportDisplay,
       type: 'player_props',
       market_type: 'player_props',
       legs,
       total_odds: odds,
       confidence: avgConfidence,
       confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      analysis: 'A balanced mix of props combining solid projections and value.',
+      analysis: `A balanced mix of ${sportDisplay} props combining solid projections and value.`,
       expected_value: '+6.5%',
       risk_level: 'medium',
       ai_metrics: {
@@ -333,7 +488,6 @@ const OddsChip = ({ odds }: { odds: string }) => {
 };
 
 const ConfidenceIndicator = ({ value }: { value: number }) => {
-  // Guard against NaN
   const safeValue = !isNaN(value) && value > 0 ? value : 75;
   let color: 'success' | 'warning' | 'error' = 'success';
   if (safeValue < 60) color = 'error';
@@ -382,19 +536,19 @@ const SportChip = ({ sport }: { sport: string }) => {
 // ==============================
 
 const AIParlaySuggestionsScreen: React.FC = () => {
-  const [selectedSport, setSelectedSport] = useState<string>('all');
+  const [selectedSport, setSelectedSport] = useState<string>('NBA');
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0);
   const [sortBy, setSortBy] = useState<string>('confidence');
 
-  // Fetch real selections from Node API
+  // Fetch selections based on selected sport
   const {
     data: selections = [],
     isLoading,
     error,
     refetch,
   } = useQuery({
-    queryKey: ['prizepicks-selections'],
-    queryFn: fetchSelections,
+    queryKey: ['selections', selectedSport],
+    queryFn: () => fetchSelectionsBySport(selectedSport),
     staleTime: 1000 * 60 * 2, // 2 minutes
     refetchOnWindowFocus: false,
   });
@@ -402,20 +556,12 @@ const AIParlaySuggestionsScreen: React.FC = () => {
   // Generate AI parlays from selections
   const allParlays = useMemo(() => {
     if (selections.length === 0) return [];
-    return generateAIParlaysFromSelections(selections);
-  }, [selections]);
+    return generateAIParlaysFromSelections(selections, selectedSport);
+  }, [selections, selectedSport]);
 
   // Filter and sort based on user selections
   const filteredParlays = useMemo(() => {
     let filtered = [...allParlays];
-
-    // Filter by sport (only NBA for now)
-    if (selectedSport !== 'all') {
-      filtered = filtered.filter(p => p.sport === selectedSport);
-    } else {
-      // default to NBA only since we only generate NBA parlays
-      filtered = filtered.filter(p => p.sport === 'NBA');
-    }
 
     // Apply confidence threshold
     if (confidenceThreshold > 0) {
@@ -431,7 +577,7 @@ const AIParlaySuggestionsScreen: React.FC = () => {
     });
 
     return filtered;
-  }, [allParlays, selectedSport, confidenceThreshold, sortBy]);
+  }, [allParlays, confidenceThreshold, sortBy]);
 
   // AI summary analytics
   const aiSummary = useMemo(() => {
@@ -460,7 +606,7 @@ const AIParlaySuggestionsScreen: React.FC = () => {
     setConfidenceThreshold(value as number);
   };
 
-  if (isLoading) {
+  if (isLoading && selections.length === 0) {
     return (
       <Container maxWidth="xl" sx={{ py: 4 }}>
         <Typography variant="h4" gutterBottom>
@@ -518,11 +664,10 @@ const AIParlaySuggestionsScreen: React.FC = () => {
               label="Sport"
               onChange={handleSportChange}
             >
-              <MenuItem value="all">All Sports</MenuItem>
               <MenuItem value="NBA">NBA</MenuItem>
+              <MenuItem value="MLB">MLB</MenuItem>
+              <MenuItem value="NHL">NHL</MenuItem>
               <MenuItem value="NFL" disabled>NFL (coming soon)</MenuItem>
-              <MenuItem value="MLB" disabled>MLB (coming soon)</MenuItem>
-              <MenuItem value="NHL" disabled>NHL (coming soon)</MenuItem>
             </Select>
           </FormControl>
           <Tooltip title="Refresh AI picks">

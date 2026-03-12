@@ -1,3 +1,4 @@
+// src/pages/GolfPlayers.tsx
 import React, { useMemo, useState } from 'react';
 import {
   Container,
@@ -42,22 +43,22 @@ import { useQuery } from '@tanstack/react-query';
 import golfApi from '../services/golf';
 
 // ----------------------------------------------------------------------
-// Types
+// Types – make many fields optional to accommodate real API data
 // ----------------------------------------------------------------------
 
 interface GolfPlayer {
-  id: string;
+  id: string | number;
   name: string;
   country: string;
   country_code: string;
-  world_ranking: number;
-  points_avg: number;
-  events_played: number;
-  wins: number;
-  top10s: number;
-  earnings_usd: number;
-  age: number;
-  turned_pro: number;
+  world_ranking?: number | null;      // OWGR from API
+  points_avg?: number | null;          // Not in API
+  events_played?: number | null;       // Not in API
+  wins?: number | null;                // Not in API
+  top10s?: number | null;              // Not in API
+  earnings_usd?: number | null;        // Not in API
+  age?: number | null;                 // Can be computed from birth_date
+  turned_pro?: number | null;          // Available in API
 }
 
 interface GolfApiResponse {
@@ -68,7 +69,7 @@ interface GolfApiResponse {
     is_real_data: boolean;
   };
   message?: string;
-  // If the API returns an array directly
+  // direct array fallback
   [key: string]: any;
 }
 
@@ -89,7 +90,7 @@ const CountryChip = ({ code, name }: { code?: string; name?: string }) => {
   );
 };
 
-const RankingBar = ({ rank }: { rank?: number }) => {
+const RankingBar = ({ rank }: { rank?: number | null }) => {
   if (rank == null) return <Typography variant="body2">—</Typography>;
   let color: 'success' | 'warning' | 'error' = 'success';
   if (rank > 50) color = 'error';
@@ -110,7 +111,7 @@ const RankingBar = ({ rank }: { rank?: number }) => {
 };
 
 // ----------------------------------------------------------------------
-// Mock data fallback (comprehensive)
+// Mock data fallback (full stats)
 // ----------------------------------------------------------------------
 const getMockGolfPlayers = (): GolfPlayer[] => [
   {
@@ -195,40 +196,30 @@ const getMockApiResponse = (): GolfApiResponse => ({
 });
 
 // ----------------------------------------------------------------------
-// Helper to validate a player object has all required fields
+// Validation – only require that fields exist (allow null)
 // ----------------------------------------------------------------------
 const requiredFields: (keyof GolfPlayer)[] = [
-  'points_avg',
-  'events_played',
-  'top10s',
-  'earnings_usd',
-  'age',
-  'world_ranking',
-  'wins',
+  'id',
+  'name',
   'country',
   'country_code',
-  'name',
+  'world_ranking', // may be null – that's okay
 ];
 
-function isPlayerComplete(player: any): player is GolfPlayer {
-  return requiredFields.every(field => player[field] != null);
-}
-
-function arePlayersComplete(players: any[]): players is GolfPlayer[] {
-  return players.length > 0 && players.every(isPlayerComplete);
+function isPlayerMinimallyComplete(player: any): player is GolfPlayer {
+  return requiredFields.every(field => player[field] !== undefined);
 }
 
 // ----------------------------------------------------------------------
-// API function with fallback and validation
+// API function with fallback and mapping
 // ----------------------------------------------------------------------
 const fetchGolfPlayers = async (): Promise<GolfApiResponse> => {
   try {
-    // Attempt to call the real API
     const response = await golfApi.getPlayers();
 
-    // CASE 1: Response is an array of players
+    // CASE: API returns an array directly
     if (Array.isArray(response)) {
-      if (arePlayersComplete(response)) {
+      if (response.every(isPlayerMinimallyComplete)) {
         return {
           success: true,
           data: {
@@ -238,46 +229,55 @@ const fetchGolfPlayers = async (): Promise<GolfApiResponse> => {
           },
         };
       } else {
-        console.warn('API returned incomplete player data – using mock data');
+        console.warn('API returned incomplete player array – using mock');
         return getMockApiResponse();
       }
     }
 
-    // CASE 2: Response has a data.players array
+    // CASE: Standard response with data.players
     if (response?.data && Array.isArray(response.data.players)) {
-      if (arePlayersComplete(response.data.players)) {
+      const players = response.data.players;
+      const isReal = response.data.is_real_data ?? false;
+
+      if (isReal) {
+        // Real data may be missing stats – that's fine, we'll display placeholders
         return {
           success: true,
           data: {
-            players: response.data.players,
+            players: players.map(p => ({
+              ...p,
+              // Ensure missing numeric stats are null to avoid 0 confusion
+              points_avg: p.points_avg ?? null,
+              events_played: p.events_played ?? null,
+              wins: p.wins ?? null,
+              top10s: p.top10s ?? null,
+              earnings_usd: p.earnings_usd ?? null,
+              age: p.age ?? null,
+              turned_pro: p.turned_pro ?? null,
+            })),
             last_updated: response.data.last_updated || new Date().toISOString(),
-            is_real_data: response.data.is_real_data ?? true,
+            is_real_data: true,
           },
         };
       } else {
-        console.warn('API returned incomplete player data (data.players) – using mock');
-        return getMockApiResponse();
+        // Mock data from backend should be complete, but validate minimally
+        if (players.every(isPlayerMinimallyComplete)) {
+          return {
+            success: true,
+            data: {
+              players,
+              last_updated: response.data.last_updated || new Date().toISOString(),
+              is_real_data: false,
+            },
+          };
+        } else {
+          console.warn('Backend mock data incomplete – using local mock');
+          return getMockApiResponse();
+        }
       }
     }
 
-    // CASE 3: Response has a players array directly (unlikely, but handle)
-    if (response?.players && Array.isArray(response.players)) {
-      if (arePlayersComplete(response.players)) {
-        return {
-          success: true,
-          data: {
-            players: response.players,
-            last_updated: response.last_updated || new Date().toISOString(),
-            is_real_data: response.is_real_data ?? true,
-          },
-        };
-      } else {
-        console.warn('API returned incomplete player data (players) – using mock');
-        return getMockApiResponse();
-      }
-    }
-
-    // If we reach here, the response format is unexpected
+    // Unexpected format – use local mock
     console.warn('Unexpected API response format – using mock data');
     return getMockApiResponse();
   } catch (error) {
@@ -287,7 +287,7 @@ const fetchGolfPlayers = async (): Promise<GolfApiResponse> => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component (unchanged except for the fetch integration)
+// Main Component
 // ----------------------------------------------------------------------
 
 const GolfPlayers: React.FC = () => {
@@ -371,7 +371,6 @@ const GolfPlayers: React.FC = () => {
     );
   }
 
-  // Show error only if both API failed AND we have no players
   if ((error || apiResponse?.success === false) && players.length === 0) {
     return (
       <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
@@ -501,24 +500,34 @@ const GolfPlayers: React.FC = () => {
                       <CountryChip code={player.country_code} name={player.country} />
                     </TableCell>
                     <TableCell align="center">
-                      {player.points_avg?.toFixed(2) ?? '0.00'}
+                      {player.points_avg != null ? player.points_avg.toFixed(2) : '—'}
                     </TableCell>
-                    <TableCell align="center">{player.events_played ?? 0}</TableCell>
                     <TableCell align="center">
-                      <Chip
-                        label={player.wins ?? 0}
-                        size="small"
-                        color={(player.wins ?? 0) > 0 ? 'success' : 'default'}
-                      />
+                      {player.events_played ?? '—'}
                     </TableCell>
-                    <TableCell align="center">{player.top10s ?? 0}</TableCell>
                     <TableCell align="center">
-                      <Box display="flex" alignItems="center" gap={0.5}>
-                        <EarningsIcon fontSize="small" />
-                        ${((player.earnings_usd ?? 0) / 1e6).toFixed(1)}M
-                      </Box>
+                      {player.wins != null ? (
+                        <Chip
+                          label={player.wins}
+                          size="small"
+                          color={player.wins > 0 ? 'success' : 'default'}
+                        />
+                      ) : '—'}
                     </TableCell>
-                    <TableCell align="center">{player.age ?? '—'}</TableCell>
+                    <TableCell align="center">
+                      {player.top10s ?? '—'}
+                    </TableCell>
+                    <TableCell align="center">
+                      {player.earnings_usd != null ? (
+                        <Box display="flex" alignItems="center" gap={0.5}>
+                          <EarningsIcon fontSize="small" />
+                          ${(player.earnings_usd / 1e6).toFixed(1)}M
+                        </Box>
+                      ) : '—'}
+                    </TableCell>
+                    <TableCell align="center">
+                      {player.age ?? '—'}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -555,19 +564,21 @@ const GolfPlayers: React.FC = () => {
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2">Points Avg</Typography>
                         <Typography variant="body2" fontWeight="bold">
-                          {player.points_avg?.toFixed(2) ?? '0.00'}
+                          {player.points_avg != null ? player.points_avg.toFixed(2) : '—'}
                         </Typography>
                       </Box>
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2">Wins</Typography>
                         <Typography variant="body2" fontWeight="bold">
-                          {player.wins ?? 0}
+                          {player.wins ?? '—'}
                         </Typography>
                       </Box>
                       <Box display="flex" justifyContent="space-between">
                         <Typography variant="body2">Earnings</Typography>
                         <Typography variant="body2" fontWeight="bold">
-                          ${((player.earnings_usd ?? 0) / 1e6).toFixed(1)}M
+                          {player.earnings_usd != null
+                            ? `$${(player.earnings_usd / 1e6).toFixed(1)}M`
+                            : '—'}
                         </Typography>
                       </Box>
                     </CardContent>
@@ -604,13 +615,13 @@ const GolfPlayers: React.FC = () => {
                     <TableCell align="center">
                       <CountryChip code={player.country_code} name={player.country} />
                     </TableCell>
-                    <TableCell align="center">{player.wins ?? 0}</TableCell>
-                    <TableCell align="center">{player.top10s ?? 0}</TableCell>
-                    <TableCell align="center">{player.events_played ?? 0}</TableCell>
+                    <TableCell align="center">{player.wins ?? '—'}</TableCell>
+                    <TableCell align="center">{player.top10s ?? '—'}</TableCell>
+                    <TableCell align="center">{player.events_played ?? '—'}</TableCell>
                     <TableCell align="center">
-                      {player.events_played && player.events_played > 0
-                        ? (((player.wins ?? 0) / player.events_played) * 100).toFixed(1)
-                        : '0.0'}%
+                      {player.wins && player.events_played && player.events_played > 0
+                        ? ((player.wins / player.events_played) * 100).toFixed(1)
+                        : '—'}%
                     </TableCell>
                   </TableRow>
                 ))}
@@ -644,13 +655,15 @@ const GolfPlayers: React.FC = () => {
                       <CountryChip code={player.country_code} name={player.country} />
                     </TableCell>
                     <TableCell align="center">
-                      <Box display="flex" alignItems="center" gap={0.5}>
-                        <EarningsIcon fontSize="small" />
-                        ${((player.earnings_usd ?? 0) / 1e6).toFixed(1)}M
-                      </Box>
+                      {player.earnings_usd != null ? (
+                        <Box display="flex" alignItems="center" gap={0.5}>
+                          <EarningsIcon fontSize="small" />
+                          ${(player.earnings_usd / 1e6).toFixed(1)}M
+                        </Box>
+                      ) : '—'}
                     </TableCell>
-                    <TableCell align="center">{player.wins ?? 0}</TableCell>
-                    <TableCell align="center">{player.events_played ?? 0}</TableCell>
+                    <TableCell align="center">{player.wins ?? '—'}</TableCell>
+                    <TableCell align="center">{player.events_played ?? '—'}</TableCell>
                   </TableRow>
                 ))}
             </TableBody>
