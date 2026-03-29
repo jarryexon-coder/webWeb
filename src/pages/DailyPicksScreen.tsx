@@ -1,4 +1,4 @@
-// src/pages/DailyPicksScreen.tsx – Final version with edge fix, winner prompts, daily usage limit, Firebase Auth, and visual enhancements
+// src/pages/DailyPicksScreen.tsx – Complete with Stripe subscription and generator credits integration
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Box,
@@ -23,7 +23,6 @@ import {
   CircularProgress,
   Divider,
   Tooltip,
-  Collapse,
   Tabs,
   Tab,
   Slider,
@@ -52,7 +51,6 @@ import {
   AutoAwesome,
   Schedule,
   ExpandMore,
-  BugReport,
   SportsSoccer,
   Gamepad,
   Loop,
@@ -60,10 +58,14 @@ import {
   CheckCircleOutline,
   FilterList,
   SmartToy,
+  CloudSync,
+  History,
+  Event,
+  CreditCard,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useDailyPicks } from '../hooks/useunifiedAPI';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
 // ============================================
 // CUSTOM DEBOUNCE UTILITY
@@ -95,7 +97,7 @@ interface Pick {
   confidence: number;
   odds?: number | string;
   edge?: string;
-  edge_percentage?: number; // signed: positive = good side, negative = bad side
+  edge_percentage?: number;
   analysis: string;
   timestamp: string;
   category: string;
@@ -110,6 +112,13 @@ interface Pick {
   type?: 'Over' | 'Under';
   data_source?: string;
   is_mock?: boolean;
+  last_updated?: string;
+  opponent?: string;
+  stat_type?: string;
+  description?: string;
+  is_live?: boolean;
+  is_boosted?: boolean;
+  game_date?: string;
 }
 
 interface ParlayLeg {
@@ -147,10 +156,12 @@ interface MarketType {
 // ============================================
 // CONSTANTS
 // ============================================
-const DAILY_LIMIT = 2;
+const POLLING_INTERVAL = 60000;
+const RATE_LIMIT_BACKOFF = 30000;
+const MAX_VISIBLE_CARDS_PER_SPORT = 3;
 
-const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';      // Node backend (NBA, etc.)
-const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app'; // Python backend (MLB, NHL, user limits)
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 const SPORT_ICONS = {
   nba: SportsBasketball,
@@ -200,6 +211,7 @@ const CATEGORY_COLORS = {
   'High Upside': '#8b5cf6',
   'AI Generated': '#ec4899',
   'Premium Pick': '#f59e0b',
+  'Game Pick': '#8b5cf6',
 };
 
 const CONFIDENCE_COLORS = {
@@ -210,92 +222,10 @@ const CONFIDENCE_COLORS = {
 };
 
 // ============================================
-// USEFUL_PROMPTS (categorized for quick chips)
-// ============================================
-const USEFUL_PROMPTS = [
-  {
-    category: 'Player Props',
-    prompts: [
-      'Top scorers tonight',
-      'Players with most assists',
-      'Best rebounders',
-      'High steals projections',
-      'Block leaders',
-    ],
-  },
-  {
-    category: 'Over/Under Trends',
-    prompts: [
-      'Best over bets',
-      'Value under props',
-      'High line overs',
-      'Low line unders',
-      'Players exceeding projections',
-    ],
-  },
-  {
-    category: 'Matchup Based',
-    prompts: [
-      'Players vs weak defenses',
-      'Guards vs poor perimeter D',
-      'Big men vs small lineups',
-      'Players in high pace games',
-      'Stars in favorable matchups',
-    ],
-  },
-  {
-    category: 'Advanced Metrics',
-    prompts: [
-      'Highest usage rate players',
-      'Best efficiency ratings',
-      'Players with positive edge',
-      'Correlated props',
-      'Same game parlay ideas',
-    ],
-  },
-  {
-    category: 'Prediction Analysis',
-    prompts: [
-      'Predict next game outcomes',
-      'AI betting recommendations',
-      'Value picks for tonight',
-      'Player prop predictions',
-      'Over/under analysis',
-    ],
-  },
-];
-
-// ============================================
-// UNIVERSAL_PROMPTS (flat list for dropdown)
-// ============================================
-const UNIVERSAL_PROMPTS = [
-  'Top performers tonight',
-  'Best over bets',
-  'Value under props',
-  'Players with highest projections',
-  'Most consistent players',
-  'High upside picks',
-  'Safe plays with high confidence',
-  'Players in favorable matchups',
-  'Players vs weak defenses',
-  'Recent hot streaks',
-  'Players due for regression',
-  'Best value based on odds',
-  'Highest edge percentages',
-  'Low-owned tournament plays',
-  'Correlated props',
-  'Same game parlay ideas',
-  'Players with positive matchup history',
-  'Rookies to watch',
-  'Veterans in bounce-back spots',
-  'Best per-dollar value',
-];
-
-// ============================================
-// WINNER_PROMPTS (15 prompts for game winners)
+// WINNER_PROMPTS
 // ============================================
 const WINNER_PROMPTS = [
-  'Today’s biggest favorites',
+  'Today\'s biggest favorites',
   'Upset predictions for tonight',
   'Best moneyline bets',
   'Teams on winning streaks',
@@ -305,12 +235,36 @@ const WINNER_PROMPTS = [
   'Best value on the moneyline',
   'Parlay of the day (winners)',
   'Teams in bounce‑back spots',
-  'Undervalued road teams',
-  'Teams with rest advantage',
-  'Weather impact (outdoor sports)',
-  'Head‑to‑head dominance',
-  'Lock of the day (winner)',
+  'Top scorers tonight',
+  'Best rebounders',
+  'Players with most assists',
+  'High steals projections',
+  'Block leaders',
 ];
+
+// ============================================
+// KEYWORD MAP
+// ============================================
+const KEYWORD_MAP: Record<string, string[]> = {
+  'scorers': ['points', 'scoring', 'score', 'pts', 'point', 'ppg'],
+  'points': ['points', 'scoring', 'score', 'pts', 'point', 'ppg'],
+  'scoring': ['points', 'scorers', 'score', 'pts', 'point'],
+  'moneyline': ['moneyline', 'ml', 'win', 'winner', 'victory', 'favorite', 'underdog'],
+  'over': ['over', 'overs', 'greater', 'higher', 'more than', 'above'],
+  'under': ['under', 'unders', 'less', 'lower', 'fewer than', 'below'],
+  'rebounds': ['rebounds', 'reb', 'boards', 'glass', 'rebounding'],
+  'assists': ['assists', 'ast', 'dimes', 'passing', 'playmaker'],
+  'threes': ['three', '3pt', '3-point', 'three pointers', 'threes', '3pm'],
+  'blocks': ['blocks', 'blk', 'rejections', 'shot blocker'],
+  'steals': ['steals', 'stl', 'thieves', 'steal', 'deflections'],
+  'underdogs': ['underdog', 'dogs', 'unlikely', 'surprising', 'value'],
+  'favorites': ['favorite', 'favs', 'expected', 'projected', 'chalk'],
+  'best': ['best', 'top', 'elite', 'premium', 'highest', 'leading'],
+  'value': ['value', 'edge', 'positive', 'good odds', 'plus edge'],
+  'upset': ['upset', 'underdog', 'surprise', 'upset alert'],
+  'lock': ['lock', 'sure thing', 'safe bet', 'high confidence'],
+  'streak': ['streak', 'winning streak', 'hot streak', 'losing streak'],
+};
 
 // ============================================
 // HELPER FUNCTIONS
@@ -322,21 +276,10 @@ const getRecommendationColor = (confidence: number): string => {
   return CONFIDENCE_COLORS.default;
 };
 
-// Team name mappings for better keyword matching
-const TEAM_MAPPINGS: Record<string, string[]> = {
-  lakers: ['lakers', 'la lakers', 'los angeles lakers', 'lal'],
-  warriors: ['warriors', 'golden state', 'gsw'],
-  celtics: ['celtics', 'boston', 'bos'],
-  bucks: ['bucks', 'milwaukee', 'mil'],
-  suns: ['suns', 'phoenix', 'phx'],
-  nuggets: ['nuggets', 'denver', 'den'],
-  mavericks: ['mavericks', 'dallas', 'dal'],
-  heat: ['heat', 'miami', 'mia'],
-  sixers: ['sixers', 'philadelphia', 'phi'],
-  knicks: ['knicks', 'new york', 'nyk'],
+const getTodayString = (): string => {
+  return new Date().toISOString().split('T')[0];
 };
 
-// Player-to-team mapping (add more as needed)
 const PLAYER_TEAM_MAP: Record<string, string> = {
   'james harden': 'LA Clippers',
   'jared mccain': 'Dallas Mavericks',
@@ -359,16 +302,220 @@ const getPlayerTeam = (playerName: string): string => {
 };
 
 // ============================================
-// MAP NODE API SELECTION TO PICK (with signed edge per side)
+// generateGamePicksFromPlayerProps
+// ============================================
+const generateGamePicksFromPlayerProps = (prompt: string, playerPicks: Pick[], sport: string): Pick[] => {
+  const lowerPrompt = prompt.toLowerCase();
+  const gamePicks: Pick[] = [];
+  
+  const generatedGames = new Set<string>();
+  const gameMap = new Map<string, { 
+    team: string, 
+    opponent: string, 
+    teamPicks: Pick[], 
+    opponentPicks: Pick[],
+    teamPlayers: Set<string>,
+    opponentPlayers: Set<string>
+  }>();
+  
+  playerPicks.forEach(pick => {
+    if (pick.team && pick.opponent && pick.team !== pick.opponent && pick.team !== 'TBD' && pick.opponent !== 'TBD') {
+      const teams = [pick.team, pick.opponent].sort();
+      const gameKey = `${teams[0]}-vs-${teams[1]}`;
+      
+      if (!gameMap.has(gameKey)) {
+        gameMap.set(gameKey, { 
+          team: teams[0], 
+          opponent: teams[1], 
+          teamPicks: [], 
+          opponentPicks: [],
+          teamPlayers: new Set<string>(),
+          opponentPlayers: new Set<string>()
+        });
+      }
+      
+      const game = gameMap.get(gameKey)!;
+      if (pick.team === game.team) {
+        game.teamPicks.push(pick);
+        game.teamPlayers.add(pick.player);
+      } else if (pick.team === game.opponent) {
+        game.opponentPicks.push(pick);
+        game.opponentPlayers.add(pick.player);
+      }
+    }
+  });
+
+  const allPicks = playerPicks.filter(p => p.projection && p.line && p.line > 0);
+  const leagueAvgRatio = allPicks.length > 0 
+    ? allPicks.reduce((sum, p) => sum + (p.projection! / p.line!), 0) / allPicks.length 
+    : 1.0;
+  
+  const leagueAvgProjection = allPicks.length > 0
+    ? allPicks.reduce((sum, p) => sum + p.projection!, 0) / allPicks.length
+    : 10;
+    
+  const leagueAvgLine = allPicks.length > 0
+    ? allPicks.reduce((sum, p) => sum + p.line!, 0) / allPicks.length
+    : 10;
+
+  gameMap.forEach((game, key) => {
+    if (generatedGames.has(key)) return;
+    generatedGames.add(key);
+    
+    const teamData = game.teamPicks;
+    const opponentData = game.opponentPicks;
+    
+    let teamValidPicks = 0;
+    let teamScore = 0;
+    let teamTotalProjection = 0;
+    let teamTotalLine = 0;
+    let teamPlayersAboveLine = 0;
+    let teamPlayersBelowLine = 0;
+    
+    teamData.forEach(pick => {
+      if (pick.projection && pick.line && pick.line > 0) {
+        const ratio = pick.projection / pick.line;
+        teamScore += ratio;
+        teamTotalProjection += pick.projection;
+        teamTotalLine += pick.line;
+        teamValidPicks++;
+        
+        if (ratio > 1.05) teamPlayersAboveLine++;
+        if (ratio < 0.95) teamPlayersBelowLine++;
+      }
+    });
+
+    let opponentValidPicks = 0;
+    let opponentScore = 0;
+    let opponentTotalProjection = 0;
+    let opponentTotalLine = 0;
+    let opponentPlayersAboveLine = 0;
+    let opponentPlayersBelowLine = 0;
+    
+    if (opponentData.length >= 3) {
+      opponentData.forEach(pick => {
+        if (pick.projection && pick.line && pick.line > 0) {
+          const ratio = pick.projection / pick.line;
+          opponentScore += ratio;
+          opponentTotalProjection += pick.projection;
+          opponentTotalLine += pick.line;
+          opponentValidPicks++;
+          
+          if (ratio > 1.05) opponentPlayersAboveLine++;
+          if (ratio < 0.95) opponentPlayersBelowLine++;
+        }
+      });
+    } else {
+      const homeAdjustment = Math.random() > 0.5 ? 1.02 : 0.98;
+      opponentValidPicks = Math.max(5, teamValidPicks);
+      opponentScore = leagueAvgRatio * homeAdjustment * opponentValidPicks;
+      opponentTotalProjection = leagueAvgProjection * homeAdjustment * opponentValidPicks;
+      opponentTotalLine = leagueAvgLine * opponentValidPicks;
+      opponentPlayersAboveLine = Math.round(opponentValidPicks * 0.4);
+      opponentPlayersBelowLine = Math.round(opponentValidPicks * 0.3);
+    }
+
+    const MIN_PLAYER_PROPS = 3;
+    if (teamValidPicks < MIN_PLAYER_PROPS || opponentValidPicks < MIN_PLAYER_PROPS) {
+      return;
+    }
+
+    const teamAvgRatio = teamScore / teamValidPicks;
+    const opponentAvgRatio = opponentScore / opponentValidPicks;
+    const scoreDifference = Math.abs(teamAvgRatio - opponentAvgRatio);
+    
+    const teamInjuryImpact = teamValidPicks < 8 ? (8 - teamValidPicks) * 2 : 0;
+    const opponentInjuryImpact = opponentValidPicks < 8 ? (8 - opponentValidPicks) * 2 : 0;
+    
+    const dataQualityBonus = Math.min(20, (teamValidPicks + opponentValidPicks) * 1.2);
+    const projectionAdvantage = Math.abs(
+      (teamTotalProjection / teamValidPicks) - (opponentTotalProjection / opponentValidPicks)
+    ) / Math.max(teamTotalLine / teamValidPicks, opponentTotalLine / opponentValidPicks) * 25;
+    
+    let confidence = Math.min(88, Math.round(
+      (scoreDifference * 40) + 48 + dataQualityBonus + projectionAdvantage -
+      (teamInjuryImpact * 0.5) + (opponentInjuryImpact * 0.3)
+    ));
+    confidence = Math.max(58, Math.min(88, confidence));
+    
+    const teamIsFavorite = teamAvgRatio > opponentAvgRatio;
+    const favorite = teamIsFavorite ? game.team : game.opponent;
+    
+    let odds = '';
+    let edgePercentage = 0;
+    if (teamIsFavorite) {
+      const oddsValue = Math.round(160 - (scoreDifference * 60) - (confidence - 50) * 1.5);
+      odds = `-${Math.max(115, Math.min(220, oddsValue))}`;
+      edgePercentage = Math.round(scoreDifference * 50 + (confidence - 50) * 0.8);
+    } else {
+      const oddsValue = Math.round(140 + (scoreDifference * 80) + (85 - confidence) * 2);
+      odds = `+${Math.max(130, Math.min(300, oddsValue))}`;
+      edgePercentage = Math.round(scoreDifference * 45 + (85 - confidence) * 1.2);
+    }
+
+    const isMoneylinePrompt = lowerPrompt.includes('moneyline') || lowerPrompt.includes('winner');
+    if (isMoneylinePrompt) {
+      const analysis = `${favorite} has the advantage based on player projections. ` +
+        `${game.team} at ${Math.round(teamAvgRatio * 100)}% efficiency ` +
+        `(${teamPlayersAboveLine} players above line, ${teamPlayersBelowLine} below). ` +
+        `${game.opponent} at ${Math.round(opponentAvgRatio * 100)}% efficiency ` +
+        `(${opponentPlayersAboveLine} above, ${opponentPlayersBelowLine} below).`;
+      
+      const gamePick: Pick = {
+        id: `game-${Date.now()}-${Math.random()}`,
+        player: `${game.team} vs ${game.opponent}`,
+        team: game.team,
+        opponent: game.opponent,
+        sport: sport.toUpperCase(),
+        stat: `Moneyline - ${favorite}`,
+        line: 1,
+        projection: teamIsFavorite ? 1.25 : 0.85,
+        confidence: confidence,
+        odds: odds,
+        edge: `${edgePercentage > 0 ? '+' : ''}${edgePercentage}%`,
+        edge_percentage: teamIsFavorite ? edgePercentage : -edgePercentage,
+        analysis: analysis,
+        timestamp: new Date().toLocaleString(),
+        category: 'Game Pick',
+        probability: `${confidence}%`,
+        roi: edgePercentage > 0 ? `+${Math.abs(edgePercentage)}%` : `${edgePercentage}%`,
+        units: (Math.random() * 2 + 1).toFixed(1),
+        requiresPremium: false,
+        value: `${Math.abs(edgePercentage)}% edge`,
+        bookmaker: 'AI Generated',
+        generatedFrom: prompt,
+        isToday: true,
+        type: 'Over',
+        is_mock: opponentData.length < 3,
+        data_source: opponentData.length >= 3 ? 'Full Data' : 'Partial + League Averages',
+        last_updated: new Date().toISOString(),
+        game_date: getTodayString(),
+      };
+      gamePicks.push(gamePick);
+    }
+  });
+
+  gamePicks.sort((a, b) => b.confidence - a.confidence);
+  return gamePicks.slice(0, 4);
+};
+
+// ============================================
+// MAP NODE API SELECTION TO PICK
 // ============================================
 const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick => {
   let confidenceValue = 70;
-  if (sel.confidence === 'high') confidenceValue = 85;
-  else if (sel.confidence === 'medium') confidenceValue = 70;
-  else if (sel.confidence === 'low') confidenceValue = 55;
-  else if (typeof sel.confidence === 'number') confidenceValue = sel.confidence;
+  if (typeof sel.confidence === 'number') {
+    confidenceValue = sel.confidence;
+  } else if (sel.confidence === 'high') {
+    confidenceValue = 85;
+  } else if (sel.confidence === 'medium') {
+    confidenceValue = 70;
+  } else if (sel.confidence === 'low') {
+    confidenceValue = 55;
+  }
+  
+  confidenceValue = Math.min(100, Math.max(0, confidenceValue));
 
-  // Safe number parsing
   const proj = typeof sel.projection === 'number' ? sel.projection : parseFloat(sel.projection);
   const lineVal = typeof sel.line === 'number' ? sel.line : parseFloat(sel.line);
   const hasValidNumbers = !isNaN(proj) && !isNaN(lineVal) && lineVal !== 0;
@@ -383,12 +530,12 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
     signedEdgePercent = Math.round(signedEdgePercent * 10) / 10;
   }
 
-  // Build display edge string
-  let displayEdgeStr = sel.edge; // fallback from API
-  if (signedEdgePercent !== undefined) {
+  let displayEdgeStr = sel.edge;
+  if (signedEdgePercent !== undefined && !displayEdgeStr) {
     displayEdgeStr = signedEdgePercent > 0 ? `+${signedEdgePercent}%` : `${signedEdgePercent}%`;
-  } else if (hasValidNumbers && !sel.type) {
-    // no type but numbers exist – show absolute edge
+  } else if (displayEdgeStr && !displayEdgeStr.includes('%')) {
+    displayEdgeStr = `${parseFloat(displayEdgeStr).toFixed(1)}%`;
+  } else if (!displayEdgeStr && hasValidNumbers && !sel.type) {
     const absEdge = ((Math.abs(proj - lineVal)) / lineVal) * 100;
     displayEdgeStr = `${Math.round(absEdge * 10) / 10}% (no side)`;
   }
@@ -400,43 +547,100 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
       ? 'Value Bet'
       : confidenceValue >= 60
       ? 'Lock Pick'
-      : 'High Upside';
+      : 'High Upset';
 
-  // Round line and projection to 1 decimal for display
   const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
   const roundedProjection = proj ? Math.round(proj * 10) / 10 : undefined;
 
+  const playerName = sel.player || sel.player_name || sel.name || 'Unknown';
+  let statType = sel.stat || sel.stat_type || sel.market;
+  const team = sel.team || getPlayerTeam(playerName);
+  const opponent = sel.opponent || null;
+  const odds = sel.odds || sel.price;
+  const timestamp = sel.timestamp || new Date().toISOString();
+  
+  let gameDate = sel.game_date || timestamp.split('T')[0];
+  if (gameDate) {
+    gameDate = gameDate.split('T')[0];
+  }
+  
+  const today = getTodayString();
+  const isTodayGame = gameDate === today;
+
+  let statDisplay = '';
+  if (statType) {
+    let formattedStat = String(statType).toLowerCase();
+    if (formattedStat === 'pts' || formattedStat === 'points') formattedStat = 'Points';
+    else if (formattedStat === 'reb' || formattedStat === 'rebounds') formattedStat = 'Rebounds';
+    else if (formattedStat === 'ast' || formattedStat === 'assists') formattedStat = 'Assists';
+    else if (formattedStat === 'stl' || formattedStat === 'steals') formattedStat = 'Steals';
+    else if (formattedStat === 'blk' || formattedStat === 'blocks') formattedStat = 'Blocks';
+    else if (formattedStat === '3pm' || formattedStat === 'threes') formattedStat = '3-Pointers Made';
+    else {
+      formattedStat = formattedStat.charAt(0).toUpperCase() + formattedStat.slice(1);
+    }
+    
+    if (sel.type && roundedLine) {
+      statDisplay = `${formattedStat} ${sel.type} ${roundedLine}`;
+    } else if (sel.type) {
+      statDisplay = `${formattedStat} ${sel.type}`;
+    } else if (roundedLine) {
+      statDisplay = `${formattedStat} to ${roundedLine}`;
+    } else {
+      statDisplay = formattedStat;
+    }
+  } else {
+    statDisplay = sel.description || sel.stat_line || 'Performance';
+  }
+
+  let analysis = sel.analysis;
+  if (!analysis) {
+    if (signedEdgePercent !== undefined && Math.abs(signedEdgePercent) > 0) {
+      const edgeText = signedEdgePercent > 0 ? 'positive' : 'negative';
+      analysis = `${playerName} ${sel.type || 'is projected'} for ${roundedProjection} ${statType || 'points'} vs line of ${roundedLine}. This represents a ${Math.abs(signedEdgePercent).toFixed(1)}% ${edgeText} edge based on recent performance and matchup data.`;
+    } else {
+      analysis = `AI‑generated pick based on matchup data. ${playerName} is projected for ${roundedProjection} ${statType || 'performance'} vs line of ${roundedLine}.`;
+    }
+  }
+
   return {
     id: sel.id || `node-${Date.now()}-${Math.random()}`,
-    player: sel.player || 'Unknown',
-    team: sel.team || getPlayerTeam(sel.player || ''),
+    player: playerName,
+    team: team,
     sport: sport.toUpperCase(),
-    stat: sel.stat ? (sel.type ? `${sel.stat} ${sel.type} ${roundedLine}` : sel.stat) : undefined,
+    stat: statDisplay,
     line: roundedLine,
     projection: roundedProjection,
     confidence: confidenceValue,
-    odds: sel.odds,
+    odds: odds,
     edge: displayEdgeStr,
     edge_percentage: signedEdgePercent,
-    analysis: sel.analysis || 'AI‑generated pick based on matchup data.',
-    timestamp: sel.timestamp ? new Date(sel.timestamp).toLocaleString() : 'Just now',
+    analysis: analysis,
+    timestamp: new Date(timestamp).toLocaleString(),
     category,
-    probability: `${confidenceValue}%`,
-    roi: sel.roi || `+${Math.floor(Math.random() * 20) + 10}%`,
+    probability: `${Math.round(confidenceValue)}%`,
+    roi: sel.roi || (signedEdgePercent ? `${signedEdgePercent > 0 ? '+' : ''}${Math.abs(signedEdgePercent).toFixed(1)}%` : '+15%'),
     units: (Math.random() * 2 + 1).toFixed(1),
     requiresPremium: false,
     value: displayEdgeStr,
-    bookmaker: sel.bookmaker,
+    bookmaker: sel.bookmaker || 'AI Generated',
     generatedFrom: prompt,
-    isToday: true,
+    isToday: isTodayGame,
     type: sel.type,
-    is_mock: sel.source === 'mock',
+    is_mock: sel.source === 'mock' || sel.is_mock || sel.source === 'realistic-fallback',
     data_source: sel.source || 'Node API',
+    last_updated: sel.last_updated || timestamp,
+    opponent: opponent,
+    stat_type: statType,
+    description: sel.description,
+    is_live: sel.is_live || false,
+    is_boosted: sel.is_boosted || false,
+    game_date: gameDate,
   };
 };
 
 // ============================================
-// MLB/NHL mapping functions (similar edge fixes applied)
+// MLB/NHL mapping functions
 // ============================================
 const mapMLBPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pick => {
   const odds = side === 'Over' ? prop.over_odds : prop.under_odds;
@@ -478,6 +682,16 @@ const mapMLBPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pi
   const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
   const roundedProjection = proj ? Math.round(proj * 10) / 10 : undefined;
 
+  let gameDate = null;
+  if (prop.game_date) {
+    gameDate = new Date(prop.game_date).toISOString().split('T')[0];
+  } else if (prop.commence_time) {
+    gameDate = new Date(prop.commence_time).toISOString().split('T')[0];
+  }
+
+  const today = getTodayString();
+  const isTodayGame = gameDate === today;
+
   return {
     id: prop.id || `mlb-${Date.now()}-${Math.random()}-${side}`,
     player: prop.player,
@@ -500,10 +714,12 @@ const mapMLBPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pi
     value: displayEdgeStr,
     bookmaker: prop.bookmaker || 'Tank01',
     generatedFrom: 'MLB API',
-    isToday: true,
+    isToday: isTodayGame,
     type: side,
     is_mock: source === 'mock',
     data_source: source,
+    last_updated: prop.last_updated || prop.timestamp,
+    game_date: gameDate,
   };
 };
 
@@ -547,6 +763,16 @@ const mapNHLPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pi
   const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
   const roundedProjection = proj ? Math.round(proj * 10) / 10 : undefined;
 
+  let gameDate = null;
+  if (prop.game_date) {
+    gameDate = new Date(prop.game_date).toISOString().split('T')[0];
+  } else if (prop.commence_time) {
+    gameDate = new Date(prop.commence_time).toISOString().split('T')[0];
+  }
+
+  const today = getTodayString();
+  const isTodayGame = gameDate === today;
+
   return {
     id: prop.id || `nhl-${Date.now()}-${Math.random()}-${side}`,
     player: prop.player,
@@ -569,15 +795,17 @@ const mapNHLPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pi
     value: displayEdgeStr,
     bookmaker: prop.bookmaker || 'The Odds API',
     generatedFrom: 'NHL API',
-    isToday: true,
+    isToday: isTodayGame,
     type: side,
     is_mock: source === 'mock',
     data_source: source,
+    last_updated: prop.last_updated || prop.timestamp,
+    game_date: gameDate,
   };
 };
 
 // ============================================
-// DEDUPLICATE PICKS – KEEP ONLY THE BEST SIDE PER PLAYER+STAT+LINE
+// DEDUPLICATE PICKS
 // ============================================
 const deduplicatePicks = (picks: Pick[]): Pick[] => {
   const map = new Map<string, Pick>();
@@ -588,7 +816,6 @@ const deduplicatePicks = (picks: Pick[]): Pick[] => {
     if (!existing) {
       map.set(key, pick);
     } else {
-      // Keep the one with higher signed edge (positive is better)
       const existingEdge = existing.edge_percentage ?? -Infinity;
       const newEdge = pick.edge_percentage ?? -Infinity;
       if (newEdge > existingEdge) {
@@ -629,6 +856,10 @@ const PickCard = memo(
           : `${pick.edge_percentage}%`
         : pick.edge || 'N/A';
 
+    const lastUpdated = pick.last_updated 
+      ? new Date(pick.last_updated).toLocaleTimeString() 
+      : null;
+
     return (
       <Card
         sx={{
@@ -645,11 +876,30 @@ const PickCard = memo(
             transition: 'all 0.2s',
             bgcolor: 'white',
           },
+          position: 'relative',
         }}
         onClick={() => onTrack(pick)}
       >
+        {pick.is_live && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 10,
+              right: 10,
+              bgcolor: '#ef4444',
+              color: 'white',
+              px: 1,
+              py: 0.5,
+              borderRadius: 1,
+              fontSize: '0.75rem',
+              fontWeight: 'bold',
+            }}
+          >
+            LIVE
+          </Box>
+        )}
+        
         <CardContent>
-          {/* Header */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Box>
               <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -662,7 +912,7 @@ const PickCard = memo(
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
                 <Typography variant="body2" color="text.secondary">
-                  {pick.team}
+                  {pick.team} {pick.opponent ? `vs ${pick.opponent}` : ''}
                 </Typography>
                 <Chip
                   label={pick.sport}
@@ -695,11 +945,26 @@ const PickCard = memo(
                     }}
                   />
                 )}
+                {pick.is_boosted && (
+                  <Chip
+                    label="BOOSTED"
+                    size="small"
+                    sx={{ bgcolor: '#f59e0b20', color: '#f59e0b', fontWeight: 'bold' }}
+                  />
+                )}
                 {pick.is_mock && (
                   <Chip
                     label="Mock"
                     size="small"
                     sx={{ bgcolor: '#ff980020', color: '#ff9800', fontWeight: 'bold' }}
+                  />
+                )}
+                {pick.game_date && pick.game_date !== getTodayString() && (
+                  <Chip
+                    icon={<Event sx={{ fontSize: 14 }} />}
+                    label={new Date(pick.game_date).toLocaleDateString()}
+                    size="small"
+                    sx={{ bgcolor: '#f59e0b20', color: '#f59e0b', fontWeight: 'bold' }}
                   />
                 )}
               </Box>
@@ -711,16 +976,20 @@ const PickCard = memo(
             </Box>
           </Box>
 
-          {/* Pick Details */}
-          <Typography
-            variant="subtitle1"
-            fontWeight="bold"
-            sx={{ color: isPremiumLocked ? 'text.secondary' : '#f59e0b', mb: 2 }}
-          >
-            {pick.stat}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+            <Typography
+              variant="subtitle1"
+              fontWeight="bold"
+              sx={{ 
+                color: isPremiumLocked ? 'text.secondary' : '#f59e0b',
+                fontSize: '1.1rem',
+                fontFamily: 'monospace'
+              }}
+            >
+              {pick.stat}
+            </Typography>
+          </Box>
 
-          {/* Key Stats */}
           <Paper sx={{ p: 2, mb: 2, bgcolor: 'grey.50' }}>
             <Grid container spacing={2}>
               {pick.projection && (
@@ -772,7 +1041,6 @@ const PickCard = memo(
             </Grid>
           </Paper>
 
-          {/* Analysis */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
             <Analytics sx={{ color: '#f59e0b', mr: 1, mt: 0.5 }} />
             <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
@@ -780,7 +1048,6 @@ const PickCard = memo(
             </Typography>
           </Box>
 
-          {/* Generated Info */}
           {pick.generatedFrom && (
             <Alert severity="info" sx={{ mb: 2 }}>
               <Typography variant="caption">
@@ -789,11 +1056,17 @@ const PickCard = memo(
             </Alert>
           )}
 
-          {/* Footer */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="caption" color="text.secondary">
-              {pick.timestamp}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                {pick.timestamp}
+              </Typography>
+              {lastUpdated && (
+                <Tooltip title={`Last updated: ${lastUpdated}`}>
+                  <History sx={{ fontSize: 14, color: 'text.secondary', opacity: 0.5 }} />
+                </Tooltip>
+              )}
+            </Box>
             <Button
               variant="contained"
               startIcon={<BookmarkBorder />}
@@ -820,7 +1093,7 @@ const ConfidenceBadge = ({ confidence }: { confidence: number }) => {
   const color = getRecommendationColor(confidence);
   return (
     <Chip
-      label={`${confidence}% Confidence`}
+      label={`${Math.round(confidence)}% Confidence`}
       size="small"
       sx={{
         bgcolor: `${color}20`,
@@ -833,24 +1106,18 @@ const ConfidenceBadge = ({ confidence }: { confidence: number }) => {
 };
 
 // ============================================
-// MAIN COMPONENT
+// MAIN CONTENT COMPONENT
 // ============================================
-const DailyPicksScreen = () => {
+const DailyPicksContent: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth(); // Get current user from Firebase
+  const { user, getIdToken } = useAuth();
 
-  // Tab state
-  const [tabIndex, setTabIndex] = useState(0); // 0 = All Picks, 1 = AI Generator
-
-  // Main picks state (all picks from API)
+  const [tabIndex, setTabIndex] = useState(0);
   const [picks, setPicks] = useState<Pick[]>([]);
-  // Generated picks (separate)
   const [generatedPicks, setGeneratedPicks] = useState<Pick[]>([]);
-
-  // Parlays (unchanged)
   const [parlays, setParlays] = useState<Parlay[]>([]);
+  const [rawSelections, setRawSelections] = useState<any[]>([]);
 
-  // UI states
   const [selectedSport, setSelectedSport] = useState('nba');
   const [selectedMarket, setSelectedMarket] = useState('standard');
   const [searchQuery, setSearchQuery] = useState('');
@@ -859,201 +1126,198 @@ const DailyPicksScreen = () => {
   const [error, setError] = useState<string | null>(null);
   const [dataFreshness, setDataFreshness] = useState<string | null>(null);
   const [dataSources, setDataSources] = useState<string[]>([]);
+  const [pollingEnabled, setPollingEnabled] = useState(true);
+  const [rateLimited, setRateLimited] = useState(false);
 
-  // Filters
   const [filterStat, setFilterStat] = useState<string>('all');
   const [filterConfidence, setFilterConfidence] = useState<string>('all');
   const [filterEdge, setFilterEdge] = useState<number>(0);
 
-  // Pagination
-  const [displayCount, setDisplayCount] = useState(50);
-  const PAGE_SIZE = 50;
+  const [displayCount, setDisplayCount] = useState(MAX_VISIBLE_CARDS_PER_SPORT);
 
-  // Other UI
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [showGeneratingModal, setShowGeneratingModal] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
-  const [selectedPrompt, setSelectedPrompt] = useState('');
   const [selectedWinnerPrompt, setSelectedWinnerPrompt] = useState('');
   const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
+  const [generatorCredits, setGeneratorCredits] = useState(0);
+  const [plan, setPlan] = useState('free');
+  const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [selectedPick, setSelectedPick] = useState<Pick | null>(null);
   const [selectedParlay, setSelectedParlay] = useState<Parlay | null>(null);
   const [showPickDetail, setShowPickDetail] = useState(false);
   const [showParlayModal, setShowParlayModal] = useState(false);
-  const [selectedPromptCategory, setSelectedPromptCategory] = useState('Player Props');
 
-  // ===== USAGE LIMIT STATE =====
-  const [generationsRemaining, setGenerationsRemaining] = useState(DAILY_LIMIT); // daily limit
-  const [lastGenerationDate, setLastGenerationDate] = useState<string | null>(null);
+  const pollingIntervalRef = React.useRef<NodeJS.Timeout>();
 
   const { error: apiError } = useDailyPicks();
 
-  // ===== FETCH REMAINING GENERATIONS ON MOUNT =====
+  // ===== CHECK SUBSCRIPTION AND CREDITS STATUS =====
   useEffect(() => {
-    if (user) {
-      fetchRemainingGenerations();
-    }
-  }, [user]);
+    const fetchSubscriptionAndCredits = async () => {
+      if (!user || !user.uid) return;
+      
+      try {
+        const token = await getIdToken();
+        
+        // Fetch subscription
+        const subResponse = await fetch(`${PYTHON_API_BASE}/api/subscriptions/my-subscription`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const subData = await subResponse.json();
+        
+        if (subData.success && subData.subscription) {
+          setHasPremiumAccess(subData.subscription.status === 'active');
+          setPlan(subData.subscription.plan_id || 'free');
+          setSubscriptionStatus(subData.subscription.status);
+        }
+        
+        // Fetch generator credits (from user profile)
+        const profileResponse = await fetch(`${PYTHON_API_BASE}/api/user/profile`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const profileData = await profileResponse.json();
+        
+        if (profileData.credits !== undefined) {
+          setGeneratorCredits(profileData.credits);
+        }
+        
+      } catch (error) {
+        console.error('Failed to fetch subscription status:', error);
+        setHasPremiumAccess(false);
+        setGeneratorCredits(0);
+      }
+    };
+    
+    fetchSubscriptionAndCredits();
+  }, [user, getIdToken]);
 
-  const fetchRemainingGenerations = async () => {
-    if (!user) return;
-    try {
-      const res = await fetch(`${PYTHON_API_BASE}/api/user/generations/${user.uid}`);
-      const data = await res.json();
-      setGenerationsRemaining(data.remaining);
-    } catch (err) {
-      console.error('Failed to fetch generation limit', err);
-    }
-  };
-
-  // Optional: daily reset check locally (if backend doesn't handle it)
+  // ===== SETUP REAL-TIME POLLING =====
   useEffect(() => {
-    const checkDailyReset = () => {
-      if (lastGenerationDate) {
-        const last = new Date(lastGenerationDate);
-        const now = new Date();
-        const diffHours = (now.getTime() - last.getTime()) / (1000 * 60 * 60);
-        if (diffHours >= 24) {
-          setGenerationsRemaining(DAILY_LIMIT);
-          setLastGenerationDate(null);
+    let mounted = true;
+    let backoffTimeout: NodeJS.Timeout;
+
+    const fetchRealTimeData = async () => {
+      if (!selectedSport || !mounted || !pollingEnabled || rateLimited) return;
+
+      try {
+        const timestamp = Date.now();
+        const today = getTodayString();
+        
+        let data;
+        let selections;
+
+        if (selectedSport === 'mlb') {
+          const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200&_t=${timestamp}`;
+          const response = await fetch(endpoint);
+          if (!response.ok) throw new Error(`MLB API failed with status ${response.status}`);
+          data = await response.json();
+          selections = data.props || [];
+          setDataSources([data.source || 'MLB API']);
+        } else if (selectedSport === 'nhl') {
+          const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200&_t=${timestamp}`;
+          const response = await fetch(endpoint);
+          if (!response.ok) throw new Error(`NHL API failed with status ${response.status}`);
+          data = await response.json();
+          selections = data.props || [];
+          setDataSources([data.source || 'NHL API']);
+        } else {
+          const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&date=${today}&_t=${timestamp}`;
+          const response = await fetch(endpoint);
+          
+          if (response.status === 429) {
+            setRateLimited(true);
+            setError('Rate limited by API. Waiting 30 seconds before retrying...');
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+            }
+            backoffTimeout = setTimeout(() => {
+              setRateLimited(false);
+              setError(null);
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+              }
+              pollingIntervalRef.current = setInterval(fetchRealTimeData, POLLING_INTERVAL);
+            }, RATE_LIMIT_BACKOFF);
+            return;
+          }
+          
+          if (!response.ok) throw new Error(`Node API failed with status ${response.status}`);
+          data = await response.json();
+          selections = data.selections || [];
+          setDataSources([data.source || 'Node API', 'The Odds API', 'Tank01']);
+        }
+
+        setRawSelections(selections);
+
+        let newPicks: Pick[] = [];
+        if (selectedSport === 'mlb') {
+          selections.forEach((prop: any) => {
+            newPicks.push(mapMLBPropToPick(prop, 'Over', data.source || 'api'));
+            newPicks.push(mapMLBPropToPick(prop, 'Under', data.source || 'api'));
+          });
+        } else if (selectedSport === 'nhl') {
+          selections.forEach((prop: any) => {
+            newPicks.push(mapNHLPropToPick(prop, 'Over', data.source || 'api'));
+            newPicks.push(mapNHLPropToPick(prop, 'Under', data.source || 'api'));
+          });
+        } else {
+          newPicks = selections.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport));
+        }
+
+        const deduped = deduplicatePicks(newPicks);
+        
+        const todayPicks = deduped.filter(pick => {
+          if (pick.isToday === true) return true;
+          if (pick.game_date) {
+            const pickDate = pick.game_date.split('T')[0];
+            return pickDate === today;
+          }
+          return true;
+        });
+        
+        const sortedPicks = [...todayPicks].sort((a, b) => b.confidence - a.confidence);
+        const limitedPicks = sortedPicks.slice(0, MAX_VISIBLE_CARDS_PER_SPORT);
+        
+        if (mounted) {
+          setPicks(limitedPicks);
+          setDataFreshness(data.timestamp || new Date().toISOString());
+          setError(null);
+          setLastRefresh(new Date());
+        }
+      } catch (err) {
+        console.error('Real-time fetch failed:', err);
+        if (mounted) {
+          setError('Failed to fetch real-time data');
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+          setRefreshing(false);
         }
       }
     };
-    checkDailyReset();
-  }, [lastGenerationDate]);
 
-  // Fetch picks on mount/sport change
-  useEffect(() => {
-    fetchPicks();
-  }, [selectedSport, selectedMarket]);
+    fetchRealTimeData();
+    pollingIntervalRef.current = setInterval(fetchRealTimeData, POLLING_INTERVAL);
+
+    return () => {
+      mounted = false;
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+      if (backoffTimeout) clearTimeout(backoffTimeout);
+    };
+  }, [selectedSport, pollingEnabled, rateLimited]);
 
   useEffect(() => {
-    setDisplayCount(PAGE_SIZE);
+    setDisplayCount(MAX_VISIBLE_CARDS_PER_SPORT);
   }, [selectedSport, searchQuery, filterStat, filterConfidence, filterEdge]);
-
-  // ============================================
-  // MLB‑specific fetch and mapping
-  // ============================================
-  const fetchMLBPicks = async (): Promise<Pick[]> => {
-    try {
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=100`;
-      console.log('⚾ Fetching MLB props from Python backend:', endpoint);
-      const response = await fetch(endpoint);
-      if (!response.ok) throw new Error(`MLB API failed with status ${response.status}`);
-      const data = await response.json();
-      console.log('✅ MLB props response:', data);
-
-      const props = data.props || [];
-      const source = data.source || 'mock';
-      if (props.length === 0) {
-        console.log('⚠️ No MLB props returned');
-        return [];
-      }
-
-      const picks: Pick[] = [];
-      props.forEach((prop: any) => {
-        picks.push(mapMLBPropToPick(prop, 'Over', source));
-        picks.push(mapMLBPropToPick(prop, 'Under', source));
-      });
-
-      setDataFreshness(new Date().toISOString());
-      setDataSources([source === 'mock' ? 'MLB Mock' : 'Tank01 (Python)']);
-      return picks;
-    } catch (err) {
-      console.error('Error fetching MLB props:', err);
-      return [];
-    }
-  };
-
-  // ============================================
-  // NHL‑specific fetch and mapping
-  // ============================================
-  const fetchNHLProps = async (): Promise<Pick[]> => {
-    try {
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=100`;
-      console.log('🏒 Fetching NHL props from Python backend:', endpoint);
-      const response = await fetch(endpoint);
-      if (!response.ok) throw new Error(`NHL API failed with status ${response.status}`);
-      const data = await response.json();
-      console.log('✅ NHL props response:', data);
-
-      const props = data.props || [];
-      const source = data.source || 'mock';
-      if (props.length === 0) {
-        console.log('⚠️ No NHL props returned');
-        return [];
-      }
-
-      const picks: Pick[] = [];
-      props.forEach((prop: any) => {
-        picks.push(mapNHLPropToPick(prop, 'Over', source));
-        picks.push(mapNHLPropToPick(prop, 'Under', source));
-      });
-
-      setDataFreshness(new Date().toISOString());
-      setDataSources([source === 'mock' ? 'NHL Mock' : 'The Odds API (Python)']);
-      return picks;
-    } catch (err) {
-      console.error('Error fetching NHL props:', err);
-      return [];
-    }
-  };
-
-  // ============================================
-  // Main fetch function
-  // ============================================
-  const fetchPicks = async (refresh = false) => {
-    try {
-      setLoading(true);
-      setError(null);
-      let picksData: Pick[] = [];
-
-      if (selectedSport === 'mlb') {
-        picksData = await fetchMLBPicks();
-      } else if (selectedSport === 'nhl') {
-        picksData = await fetchNHLProps();
-      } else {
-        const timestamp = Date.now();
-        const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&_t=${timestamp}`;
-        console.log('📡 Fetching picks from Node API:', endpoint);
-        const response = await fetch(endpoint);
-        if (!response.ok) throw new Error(`API failed with status ${response.status}`);
-        const data = await response.json();
-        console.log('✅ Node API response:', data);
-        const selections = data?.selections || [];
-        console.log(`📊 Received ${selections.length} selections from Node API`);
-        if (selections.length > 0) {
-          picksData = selections.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport));
-          setDataFreshness(new Date().toISOString());
-          setDataSources([data.source || 'Node API', 'The Odds API', 'Tank01']);
-        } else {
-          setError('No picks received from API');
-        }
-      }
-
-      if (picksData.length > 0) {
-        const deduped = deduplicatePicks(picksData);
-        console.log(`📊 After deduplication: ${deduped.length} unique picks`);
-        setPicks(deduped);
-      } else {
-        setPicks([]);
-      }
-
-      setParlays(generateSampleParlays());
-      setLastRefresh(new Date());
-    } catch (err) {
-      setError('Network error. Please try again.');
-      console.error('Error fetching picks:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
 
   const generateSampleParlays = (): Parlay[] => [
     {
@@ -1091,7 +1355,6 @@ const DailyPicksScreen = () => {
     debouncedSetSearch(e.target.value);
   };
 
-  // Filtered main picks
   const filteredPicks = useMemo(() => {
     let filtered = [...picks];
     if (selectedSport !== 'All') {
@@ -1146,13 +1409,76 @@ const DailyPicksScreen = () => {
 
   const displayedPicks = useMemo(() => filteredPicks.slice(0, displayCount), [filteredPicks, displayCount]);
 
-  const handleLoadMore = () => setDisplayCount((prev) => prev + PAGE_SIZE);
+  const handleLoadMore = () => {
+    setTabIndex(1);
+  };
+  
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchPicks(true);
-    setLastRefresh(new Date());
-    setDisplayCount(PAGE_SIZE);
-  }, []);
+    setPollingEnabled(false);
+    
+    const timestamp = Date.now();
+    const today = getTodayString();
+    try {
+      let endpoint;
+      if (selectedSport === 'mlb') {
+        endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200&_t=${timestamp}`;
+      } else if (selectedSport === 'nhl') {
+        endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200&_t=${timestamp}`;
+      } else {
+        endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&date=${today}&_t=${timestamp}`;
+      }
+      
+      const response = await fetch(endpoint);
+      if (response.status === 429) {
+        setError('Rate limited. Please wait a moment before refreshing.');
+        setRefreshing(false);
+        setPollingEnabled(true);
+        return;
+      }
+      
+      const data = await response.json();
+      const selections = data.selections || data.props || [];
+      setRawSelections(selections);
+      
+      let newPicks: Pick[] = [];
+      if (selectedSport === 'mlb') {
+        selections.forEach((prop: any) => {
+          newPicks.push(mapMLBPropToPick(prop, 'Over', data.source || 'api'));
+          newPicks.push(mapMLBPropToPick(prop, 'Under', data.source || 'api'));
+        });
+      } else if (selectedSport === 'nhl') {
+        selections.forEach((prop: any) => {
+          newPicks.push(mapNHLPropToPick(prop, 'Over', data.source || 'api'));
+          newPicks.push(mapNHLPropToPick(prop, 'Under', data.source || 'api'));
+        });
+      } else {
+        newPicks = selections.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport));
+      }
+      
+      const deduped = deduplicatePicks(newPicks);
+      const todayPicks = deduped.filter(pick => {
+        if (pick.isToday === true) return true;
+        if (pick.game_date) {
+          const pickDate = pick.game_date.split('T')[0];
+          return pickDate === today;
+        }
+        return true;
+      });
+      
+      const sortedPicks = [...todayPicks].sort((a, b) => b.confidence - a.confidence);
+      const limitedPicks = sortedPicks.slice(0, MAX_VISIBLE_CARDS_PER_SPORT);
+      
+      setPicks(limitedPicks);
+      setDataFreshness(data.timestamp || new Date().toISOString());
+      setLastRefresh(new Date());
+    } catch (err) {
+      console.error('Refresh failed:', err);
+    } finally {
+      setRefreshing(false);
+      setPollingEnabled(true);
+    }
+  }, [selectedSport]);
 
   const formatOdds = (odds: number | string | undefined): string => {
     if (!odds) return '';
@@ -1187,97 +1513,129 @@ const DailyPicksScreen = () => {
     console.log('Added to bet slip:', item);
   };
 
-  // ============================================
-  // Helper to fetch raw selections for any sport
-  // ============================================
-  const fetchRawSelections = async (sport: string): Promise<any[]> => {
-    if (sport === 'mlb') {
-      const today = new Date().toISOString().split('T')[0];
-      const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200`;
-      const res = await fetch(endpoint);
-      if (!res.ok) throw new Error(`MLB API failed with status ${res.status}`);
-      const data = await res.json();
-      return data.props || [];
-    } else if (sport === 'nhl') {
-      const today = new Date().toISOString().split('T')[0];
-      const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200`;
-      const res = await fetch(endpoint);
-      if (!res.ok) throw new Error(`NHL API failed with status ${res.status}`);
-      const data = await res.json();
-      return data.props || [];
-    } else {
-      const timestamp = Date.now();
-      const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${sport}&_t=${timestamp}`;
-      const res = await fetch(endpoint);
-      if (!res.ok) throw new Error(`Node API failed with status ${res.status}`);
-      const data = await res.json();
-      return data.selections || [];
-    }
-  };
-
-  // ===== Sync remaining generations with backend after use =====
-  const syncGenerationCountWithBackend = async () => {
-    if (!user) return;
+  // ===== STRIPE CHECKOUT FUNCTIONS =====
+  const handleSubscriptionCheckout = async (planId: string, interval: string = 'month') => {
     try {
-      const res = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+      const token = await getIdToken();
+      const response = await fetch(`${PYTHON_API_BASE}/api/subscriptions/create-checkout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.uid }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planId, interval }),
       });
-      const data = await res.json();
-      setGenerationsRemaining(data.remaining);
-    } catch (err) {
-      console.error('Failed to sync generation count', err);
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError('Failed to create checkout session');
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      setError('Failed to start checkout process');
     }
   };
 
-  // ===== Handle purchase of extra generations =====
-  const handlePurchaseGenerations = async (quantity: number) => {
-    if (!user) return;
+  const handleCreditsCheckout = async (credits: number) => {
     try {
-      const res = await fetch(`${PYTHON_API_BASE}/api/user/generations/purchase`, {
+      const token = await getIdToken();
+      const response = await fetch(`${PYTHON_API_BASE}/api/generator/credits/checkout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.uid, quantity }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ credits }),
       });
-      const data = await res.json();
-      setGenerationsRemaining(data.remaining);
-      setShowUpgradeModal(false);
-    } catch (err) {
-      console.error('Purchase failed', err);
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError('Failed to create credits checkout session');
+      }
+    } catch (error) {
+      console.error('Credits checkout error:', error);
+      setError('Failed to start credits checkout');
     }
   };
 
-  // ============================================
-  // GENERATE CUSTOM PICKS – with usage limit
-  // ============================================
+  // ===== GENERATE CUSTOM PICKS WITH CREDITS =====
   const handleGenerateCustomPicks = async () => {
     if (!customPrompt.trim()) return;
-
-    // ----- Usage check -----
-    if (generationsRemaining <= 0) {
-      setShowUpgradeModal(true);
+    
+    if (!hasPremiumAccess && generatorCredits < 1) {
+      setShowCreditsModal(true);
       return;
     }
 
     setGenerating(true);
     setShowGeneratingModal(true);
-    console.log('🚀 Generating picks for prompt:', customPrompt);
 
-    const MAX_RESULTS = 3; // Limit to 3 picks per generation
-
-    // Detect side preference from prompt
+    const MAX_RESULTS = 3;
     const lowerPrompt = customPrompt.toLowerCase();
-    const preferOver = lowerPrompt.includes('over') || lowerPrompt.includes('high');
-    const preferUnder = lowerPrompt.includes('under') || lowerPrompt.includes('low');
+
+    const gamePrompts = WINNER_PROMPTS.slice(0, 10);
+    const isGamePrompt = gamePrompts.some(p => p.toLowerCase() === lowerPrompt) ||
+                        lowerPrompt.includes('moneyline') || 
+                        lowerPrompt.includes('winner') || 
+                        lowerPrompt.includes('win') ||
+                        lowerPrompt.includes('bounce') ||
+                        lowerPrompt.includes('underdog') ||
+                        lowerPrompt.includes('upset') ||
+                        lowerPrompt.includes('team') ||
+                        lowerPrompt.includes('game');
 
     try {
-      // Fetch raw data for the current sport
-      const rawItems = await fetchRawSelections(selectedSport);
-      console.log(`📊 Received ${rawItems.length} raw items for ${selectedSport}`);
+      // Use a credit if not premium
+      if (!hasPremiumAccess && generatorCredits > 0) {
+        const token = await getIdToken();
+        await fetch(`${PYTHON_API_BASE}/api/generator/use`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            pickType: isGamePrompt ? 'game' : 'player_prop',
+            pickData: { prompt: customPrompt, sport: selectedSport }
+          }),
+        });
+        setGeneratorCredits(prev => prev - 1);
+      }
+
+      const timestamp = Date.now();
+      const today = getTodayString();
+      let rawItems: any[] = [];
+      
+      if (selectedSport === 'mlb') {
+        const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200&_t=${timestamp}`;
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        rawItems = data.props || [];
+      } else if (selectedSport === 'nhl') {
+        const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200&_t=${timestamp}`;
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        rawItems = data.props || [];
+      } else {
+        const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&date=${today}&_t=${timestamp}`;
+        const res = await fetch(endpoint);
+        
+        if (res.status === 429) {
+          setError('Rate limited. Please wait a moment before generating.');
+          setGenerating(false);
+          setShowGeneratingModal(false);
+          return;
+        }
+        
+        const data = await res.json();
+        rawItems = data.selections || [];
+      }
 
       if (rawItems.length === 0) {
-        // Fallback mock pick (still returns 1)
         const mockPick: Pick = {
           id: `gen-${Date.now()}-mock`,
           player: 'Mock Player',
@@ -1303,154 +1661,102 @@ const DailyPicksScreen = () => {
           isToday: true,
           is_mock: true,
           data_source: 'mock',
+          last_updated: new Date().toISOString(),
+          game_date: today,
         };
         setGeneratedPicks([mockPick]);
-        setCustomPrompt('');
-        setSelectedPrompt('');
-        setSelectedWinnerPrompt('');
-        // Decrement counter after generation (even if fallback)
-        await syncGenerationCountWithBackend();
-        setLastGenerationDate(new Date().toISOString());
-        setTimeout(() => {
-          setGenerating(false);
-          setShowGeneratingModal(false);
-        }, 1500);
-        return;
-      }
-
-      // ---------- KEYWORD EXTRACTION ----------
-      const stopWords = new Set([
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-        'with', 'by', 'about', 'as', 'of', 'from', 'top', 'this', 'that',
-        'these', 'those', 'it', 'its', 'my', 'your', 'our', 'their', 'what',
-        'which', 'who', 'whom', 'whose', 'when', 'where', 'why', 'how',
-        'all', 'any', 'both', 'each', 'few', 'more', 'most', 'some', 'such',
-        'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
-        's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'month', 'day',
-        'week', 'year', 'today', 'yesterday', 'tomorrow', 'predictions', 'prop',
-        'props', 'player', 'players', 'game', 'games', 'stats', 'stat',
-      ]);
-
-      const SYNONYM_MAP: Record<string, string[]> = {
-        scorers: ['points', 'scoring'],
-        rebounders: ['rebounds', 'rebounding'],
-        assists: ['assists', 'assist'],
-        threes: ['three pointers', '3pt', 'three point'],
-        blocks: ['blocks', 'blocked'],
-        steals: ['steals', 'steal'],
-        stats: ['points', 'rebounds', 'assists', 'steals', 'blocks'],
-      };
-
-      let keywords = customPrompt
-        .toLowerCase()
-        .split(/\W+/)
-        .filter((word) => word.length > 2 && !stopWords.has(word));
-
-      const expandedKeywords = new Set<string>();
-      keywords.forEach((kw) => {
-        expandedKeywords.add(kw);
-        if (TEAM_MAPPINGS[kw]) TEAM_MAPPINGS[kw].forEach((alias) => expandedKeywords.add(alias));
-        if (SYNONYM_MAP[kw]) SYNONYM_MAP[kw].forEach((syn) => expandedKeywords.add(syn));
-      });
-      keywords = Array.from(expandedKeywords);
-      console.log('🔍 Expanded keywords:', keywords);
-      if (keywords.length === 0) keywords.push(selectedSport, 'player');
-
-      // Score each raw item
-      const scoredItems = rawItems.map((item: any) => {
-        const searchable = [
-          item.player,
-          item.stat,
-          item.stat_type,
-          item.team,
-          item.opponent,
-          item.analysis,
-        ]
-          .filter(Boolean)
-          .map((s) => String(s).toLowerCase());
-
-        let score = 0;
-        keywords.forEach((keyword) => {
-          searchable.forEach((field) => {
-            if (field && field.includes(keyword)) score += 1;
+      } else {
+        let playerPicks: Pick[] = [];
+        if (selectedSport === 'mlb') {
+          rawItems.forEach((prop: any) => {
+            playerPicks.push(mapMLBPropToPick(prop, 'Over', prop.source || 'api'));
+            playerPicks.push(mapMLBPropToPick(prop, 'Under', prop.source || 'api'));
           });
-        });
-
-        if (preferOver && item.type === 'Over') score += 10;
-        if (preferUnder && item.type === 'Under') score += 10;
-
-        return { item, score };
-      });
-
-      scoredItems.sort((a, b) => b.score - a.score);
-      console.log('🔍 Top 5 scores:', scoredItems.slice(0, 5).map((s) => s.score));
-
-      const highestScore = scoredItems[0]?.score || 0;
-      let itemsToShow;
-      let analysisNote;
-
-      if (highestScore === 0) {
-        let sortedByConfidence = [...rawItems];
-        if (preferOver) {
-          sortedByConfidence = sortedByConfidence.filter((s) => s.type === 'Over');
-        } else if (preferUnder) {
-          sortedByConfidence = sortedByConfidence.filter((s) => s.type === 'Under');
+        } else if (selectedSport === 'nhl') {
+          rawItems.forEach((prop: any) => {
+            playerPicks.push(mapNHLPropToPick(prop, 'Over', prop.source || 'api'));
+            playerPicks.push(mapNHLPropToPick(prop, 'Under', prop.source || 'api'));
+          });
+        } else {
+          playerPicks = rawItems.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport, customPrompt));
         }
-        sortedByConfidence.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-        itemsToShow = sortedByConfidence.slice(0, 20);
-        analysisNote = `⚠️ No picks matched "${customPrompt}". Showing top value ${preferOver ? 'Over' : preferUnder ? 'Under' : ''} picks by confidence.`;
-      } else {
-        itemsToShow = scoredItems.slice(0, 20).map((item) => item.item);
-        analysisNote = `✅ Showing top ${itemsToShow.length} picks most relevant to "${customPrompt}".`;
+
+        const todayPlayerPicks = playerPicks.filter(pick => {
+          if (pick.game_date) {
+            const pickDate = pick.game_date.split('T')[0];
+            return pickDate === today;
+          }
+          if (pick.isToday) return true;
+          return false;
+        });
+
+        let finalPicks: Pick[] = [];
+
+        if (isGamePrompt) {
+          const gamePicks = generateGamePicksFromPlayerProps(customPrompt, todayPlayerPicks, selectedSport);
+          if (gamePicks.length > 0) {
+            finalPicks = gamePicks;
+          } else {
+            finalPicks = todayPlayerPicks;
+          }
+        } else {
+          const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']);
+          let keywords = customPrompt
+            .toLowerCase()
+            .split(/\W+/)
+            .filter(word => word.length > 2 && !stopWords.has(word));
+
+          const expandedKeywords = new Set<string>();
+          keywords.forEach(kw => {
+            expandedKeywords.add(kw);
+            if (KEYWORD_MAP[kw]) {
+              KEYWORD_MAP[kw].forEach(syn => expandedKeywords.add(syn));
+            }
+          });
+          keywords = Array.from(expandedKeywords);
+
+          const scoredPicks = todayPlayerPicks.map(pick => {
+            const searchable = [
+              pick.player?.toLowerCase(),
+              pick.stat?.toLowerCase(),
+              pick.team?.toLowerCase(),
+              pick.opponent?.toLowerCase(),
+            ].filter(Boolean).join(' ');
+
+            let score = 0;
+            keywords.forEach(keyword => {
+              if (searchable.includes(keyword)) score += 1;
+            });
+
+            if (pick.last_updated) {
+              const minutesOld = (Date.now() - new Date(pick.last_updated).getTime()) / (1000 * 60);
+              if (minutesOld < 5) score += 2;
+            }
+
+            return { pick, score };
+          });
+
+          scoredPicks.sort((a, b) => b.score - a.score);
+
+          const topPicks = scoredPicks
+            .filter(s => s.score > 0)
+            .slice(0, 20)
+            .map(s => s.pick);
+
+          finalPicks = topPicks.length > 0 ? topPicks : todayPlayerPicks.slice(0, 20);
+        }
+
+        const deduped = deduplicatePicks(finalPicks);
+        const limitedPicks = deduped.slice(0, MAX_RESULTS);
+        
+        setGeneratedPicks(limitedPicks);
       }
 
-      console.log(`🔍 Top selection score: ${highestScore}, showing ${itemsToShow.length} picks`);
-
-      // Convert raw items to Pick objects
-      let newPicks: Pick[] = [];
-      if (selectedSport === 'mlb') {
-        itemsToShow.forEach((prop: any) => {
-          newPicks.push(mapMLBPropToPick(prop, 'Over', prop.source || 'api'));
-          newPicks.push(mapMLBPropToPick(prop, 'Under', prop.source || 'api'));
-        });
-      } else if (selectedSport === 'nhl') {
-        itemsToShow.forEach((prop: any) => {
-          newPicks.push(mapNHLPropToPick(prop, 'Over', prop.source || 'api'));
-          newPicks.push(mapNHLPropToPick(prop, 'Under', prop.source || 'api'));
-        });
-      } else {
-        newPicks = itemsToShow.map((sel: any, index: number) => {
-          const pick = mapNodeSelectionToPick(sel, selectedSport, customPrompt);
-          if (index === 0 && analysisNote) pick.analysis = `${analysisNote}\n\n${pick.analysis}`;
-          return pick;
-        });
-      }
-
-      if ((selectedSport === 'mlb' || selectedSport === 'nhl') && newPicks.length > 0 && analysisNote) {
-        newPicks[0].analysis = `${analysisNote}\n\n${newPicks[0].analysis}`;
-      }
-
-      console.log(`📦 Mapped ${newPicks.length} new picks`);
-
-      const dedupedNewPicks = deduplicatePicks(newPicks);
-      console.log(`📊 After dedup: ${dedupedNewPicks.length} unique picks`);
-
-      const limitedPicks = dedupedNewPicks.slice(0, MAX_RESULTS);
-      setGeneratedPicks(limitedPicks);
       setCustomPrompt('');
-      setSelectedPrompt('');
       setSelectedWinnerPrompt('');
 
-      // ----- Decrement usage after successful generation -----
-      await syncGenerationCountWithBackend();
-      setLastGenerationDate(new Date().toISOString());
-
-      setTimeout(() => {
-        setGenerating(false);
-        setShowGeneratingModal(false);
-      }, 1500);
     } catch (error) {
-      console.error('❌ Error generating picks:', error);
+      console.error('Error generating picks:', error);
       const fallbackPick: Pick = {
         id: `gen-${Date.now()}-fallback`,
         player: 'Fallback Player',
@@ -1476,13 +1782,17 @@ const DailyPicksScreen = () => {
         isToday: true,
         is_mock: true,
         data_source: 'mock',
+        last_updated: new Date().toISOString(),
+        game_date: getTodayString(),
       };
       setGeneratedPicks([fallbackPick]);
+    } finally {
       setCustomPrompt('');
-      setSelectedPrompt('');
       setSelectedWinnerPrompt('');
-      setGenerating(false);
-      setShowGeneratingModal(false);
+      setTimeout(() => {
+        setGenerating(false);
+        setShowGeneratingModal(false);
+      }, 1500);
     }
   };
 
@@ -1496,15 +1806,16 @@ const DailyPicksScreen = () => {
     const diffMinutes = Math.floor((now.getTime() - freshnessDate.getTime()) / 60000);
     return (
       <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
           {diffMinutes < 5 ? (
             <CheckCircleOutline sx={{ color: '#10b981', mr: 1 }} />
           ) : (
             <Schedule sx={{ color: '#f59e0b', mr: 1 }} />
           )}
           <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
-            Data updated {diffMinutes} minutes ago
+            Data updated {diffMinutes} minutes ago {diffMinutes < 1 ? '(live)' : ''}
           </Typography>
+          <Chip label={`${picks.length} picks today`} size="small" sx={{ bgcolor: 'grey.200' }} />
           {dataSources.length > 0 && (
             <Box sx={{ display: 'flex', gap: 0.5 }}>
               {dataSources.map((source) => (
@@ -1526,95 +1837,6 @@ const DailyPicksScreen = () => {
       </Paper>
     );
   };
-
-  const DebugPanel = () => (
-    <Collapse in={showDebugPanel}>
-      <Paper sx={{ p: 2, mb: 4, bgcolor: '#1e293b', color: 'white', borderRadius: 2 }}>
-        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-          <Box display="flex" alignItems="center" gap={1}>
-            <BugReport fontSize="small" />
-            <Typography variant="h6">Debug Panel</Typography>
-          </Box>
-          <Chip label="Dev Mode" size="small" sx={{ bgcolor: '#ef4444', color: 'white' }} />
-        </Box>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
-              Component Stats
-            </Typography>
-            <Box sx={{ pl: 2 }}>
-              <Typography variant="body2">• Standard Picks: {picks.length}</Typography>
-              <Typography variant="body2">• Generated Picks: {generatedPicks.length}</Typography>
-              <Typography variant="body2">• Parlays: {parlays.length}</Typography>
-              <Typography variant="body2">• Selected Market: {selectedMarket}</Typography>
-              <Typography variant="body2">• Selected Sport: {selectedSport}</Typography>
-              <Typography variant="body2">
-                • Last Refresh: {lastRefresh ? new Date(lastRefresh).toLocaleTimeString() : 'Never'}
-              </Typography>
-              <Typography variant="body2">• Loading: {loading ? 'Yes' : 'No'}</Typography>
-              <Typography variant="body2">• Filter Stat: {filterStat}</Typography>
-              <Typography variant="body2">• Filter Confidence: {filterConfidence}</Typography>
-              <Typography variant="body2">• Filter Edge Min: {filterEdge}%</Typography>
-              <Typography variant="body2">
-                • Displayed Picks: {displayedPicks.length} / {filteredPicks.length}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Typography variant="subtitle2" color="#94a3b8" gutterBottom>
-              API Status
-            </Typography>
-            <Box sx={{ pl: 2 }}>
-              <Typography variant="body2">
-                • Daily Picks API: {apiError ? '❌ Error' : '✅ Connected'}
-              </Typography>
-              <Typography variant="body2">• Data Sources: {dataSources.join(', ') || 'unknown'}</Typography>
-              <Typography variant="body2">
-                • Freshness: {dataFreshness ? new Date(dataFreshness).toLocaleTimeString() : 'N/A'}
-              </Typography>
-              <Typography variant="body2">• Generations Remaining: {generationsRemaining}</Typography>
-            </Box>
-            <Box mt={2}>
-              <Button
-                size="small"
-                variant="outlined"
-                sx={{ color: 'white', borderColor: '#64748b', mr: 1 }}
-                onClick={handleRefresh}
-              >
-                Force Refresh
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                sx={{ color: 'white', borderColor: '#64748b' }}
-                onClick={() =>
-                  console.log('Debug state:', {
-                    picks,
-                    parlays,
-                    selectedMarket,
-                    selectedSport,
-                    dataFreshness,
-                    filterStat,
-                    filterConfidence,
-                    filterEdge,
-                    generationsRemaining,
-                  })
-                }
-              >
-                Log State
-              </Button>
-            </Box>
-          </Grid>
-        </Grid>
-        {apiError && (
-          <Alert severity="error" sx={{ mt: 2, bgcolor: '#7f1d1d' }}>
-            <AlertTitle>API Error</AlertTitle>
-            {String(apiError)}
-          </Alert>
-        )}
-      </Paper>
-    </Collapse>
-  );
 
   const renderSportSelector = () => (
     <Paper sx={{ p: 2, mb: 3, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
@@ -1985,7 +2207,7 @@ const DailyPicksScreen = () => {
               <Box>
                 <Typography variant="h6">{selectedPick.player}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {selectedPick.team} • {selectedPick.sport}{' '}
+                  {selectedPick.team} {selectedPick.opponent ? `vs ${selectedPick.opponent}` : ''} • {selectedPick.sport}{' '}
                   {selectedPick.position && `• ${selectedPick.position}`}
                 </Typography>
               </Box>
@@ -2072,6 +2294,13 @@ const DailyPicksScreen = () => {
                         </Grid>
                       )}
                     </Grid>
+                    {selectedPick.last_updated && (
+                      <Box sx={{ mt: 2 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Last updated: {new Date(selectedPick.last_updated).toLocaleString()}
+                        </Typography>
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -2121,7 +2350,7 @@ const DailyPicksScreen = () => {
           <Box sx={{ width: `${Math.min(score, 100)}%`, height: 8, bgcolor: getLevelColor(level) }} />
         </Box>
         <Typography variant="caption" fontWeight="bold" color={getLevelColor(level)}>
-          {score}%
+          {Math.round(score)}%
         </Typography>
       </Box>
     );
@@ -2133,7 +2362,6 @@ const DailyPicksScreen = () => {
   if (loading && !refreshing && picks.length === 0) {
     return (
       <>
-        {/* Background layer */}
         <Box
           sx={{
             position: 'fixed',
@@ -2170,7 +2398,6 @@ const DailyPicksScreen = () => {
 
   return (
     <>
-      {/* Background layer */}
       <Box
         sx={{
           position: 'fixed',
@@ -2195,7 +2422,6 @@ const DailyPicksScreen = () => {
       />
 
       <Container maxWidth="lg">
-        {/* Header with semi‑transparency */}
         <Paper
           sx={{
             background: 'linear-gradient(135deg, rgba(59,130,246,0.9) 0%, rgba(29,78,216,0.9) 100%)',
@@ -2216,25 +2442,16 @@ const DailyPicksScreen = () => {
               >
                 Back
               </Button>
-              <Button
-                startIcon={<BugReport />}
-                onClick={() => setShowDebugPanel(!showDebugPanel)}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.3)',
-                  bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent',
-                }}
-                variant="outlined"
-                size="small"
-              >
-                {showDebugPanel ? 'Hide Debug' : 'Debug'}
-              </Button>
+              <Tooltip title="Data updates every 60 seconds">
+                <CloudSync sx={{ color: 'white', opacity: 0.7, ml: 1 }} />
+              </Tooltip>
             </Box>
             {lastRefresh && (
               <Chip
                 label={`Last updated: ${lastRefresh.toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',
+                  second: '2-digit',
                 })}`}
                 size="small"
                 sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
@@ -2251,25 +2468,20 @@ const DailyPicksScreen = () => {
                 Daily Picks
               </Typography>
               <Typography variant="h6" sx={{ opacity: 0.9 }}>
-                AI-curated selections with highest probability of success
+                AI-curated selections with real-time updates every 60 seconds
+              </Typography>
+              <Typography variant="body2" sx={{ opacity: 0.8, mt: 1 }}>
+                Showing top {MAX_VISIBLE_CARDS_PER_SPORT} picks per sport.
+                {hasPremiumAccess ? ' Premium active!' : generatorCredits > 0 ? ` You have ${generatorCredits} generator credits.` : ' Upgrade for unlimited picks!'}
               </Typography>
             </Box>
           </Box>
         </Paper>
 
-        {/* Debug Panel */}
-        <DebugPanel />
-
-        {/* Sport Selector */}
         {renderSportSelector()}
-
-        {/* Market Type Selector */}
         {renderMarketSelector()}
-
-        {/* Freshness Indicator */}
         {renderFreshnessIndicator()}
 
-        {/* Action Bar (only shown in All Picks tab) */}
         {tabIndex === 0 && (
           <Paper sx={{ p: 2, mb: 4, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
             <Grid container spacing={2} alignItems="center">
@@ -2297,20 +2509,17 @@ const DailyPicksScreen = () => {
           </Paper>
         )}
 
-        {/* Tabs */}
         <Paper sx={{ mb: 4, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
           <Tabs value={tabIndex} onChange={(_, newValue) => setTabIndex(newValue)} centered>
-            <Tab label="All Picks" icon={<BarChart />} iconPosition="start" />
+            <Tab label={`All Picks (${picks.length}/${MAX_VISIBLE_CARDS_PER_SPORT})`} icon={<BarChart />} iconPosition="start" />
             <Tab label="AI Generator" icon={<SmartToy />} iconPosition="start" />
           </Tabs>
         </Paper>
 
-        {/* Tab 0: All Picks */}
         {tabIndex === 0 && (
           <>
             {renderFilterBar()}
 
-            {/* Parlays Section (if not standard market) */}
             {selectedMarket !== 'standard' && filteredParlays.length > 0 && (
               <Box sx={{ mb: 4 }}>
                 <Typography variant="h5" fontWeight="bold" gutterBottom>
@@ -2327,7 +2536,6 @@ const DailyPicksScreen = () => {
               </Box>
             )}
 
-            {/* Standard Picks */}
             <Box sx={{ mb: 4 }}>
               <Typography variant="h5" fontWeight="bold" gutterBottom>
                 ⭐ Top Value Picks {filteredPicks.length > 0 && `(${filteredPicks.length})`}
@@ -2347,72 +2555,84 @@ const DailyPicksScreen = () => {
                       hasPremiumAccess={hasPremiumAccess}
                     />
                   ))}
-                  {displayedPicks.length < filteredPicks.length && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                      <Button variant="outlined" onClick={handleLoadMore}>
-                        Load More ({filteredPicks.length - displayedPicks.length} remaining)
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    <AlertTitle>Want more picks?</AlertTitle>
+                    Switch to the <strong>AI Generator</strong> tab to generate additional picks. 
+                    {!hasPremiumAccess && generatorCredits === 0 && ' Premium users get unlimited generations!'}
+                    {!hasPremiumAccess && generatorCredits > 0 && ` You have ${generatorCredits} credits remaining.`}
+                  </Alert>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 2 }}>
+                    <Button 
+                      variant="contained" 
+                      onClick={() => setTabIndex(1)}
+                      startIcon={<SmartToy />}
+                      sx={{ bgcolor: '#8b5cf6' }}
+                    >
+                      Generate More Picks
+                    </Button>
+                    {!hasPremiumAccess && (
+                      <Button 
+                        variant="outlined" 
+                        onClick={() => setShowCreditsModal(true)}
+                        startIcon={<CreditCard />}
+                      >
+                        Buy Credits
                       </Button>
-                    </Box>
-                  )}
+                    )}
+                  </Box>
                 </>
               ) : (
                 <Alert severity="info">
                   <AlertTitle>No Picks Found</AlertTitle>
-                  No picks match the current filters. Try adjusting your filters or sport selection.
+                  No picks match the current filters. Try adjusting your filters or use the AI Generator to create custom picks.
                 </Alert>
               )}
             </Box>
           </>
         )}
 
-        {/* Tab 1: AI Generator */}
         {tabIndex === 1 && (
           <Box sx={{ mb: 4 }}>
-            {/* Generator Input */}
             <Paper sx={{ p: 3, mb: 4, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)' }}>
               <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <AutoAwesome color="primary" />
                 Generate Custom Picks
               </Typography>
 
-              {/* Remaining generations indicator */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Generations left today: <strong>{generationsRemaining}</strong>
-                </Typography>
-                {generationsRemaining === 0 && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => setShowUpgradeModal(true)}
-                    sx={{ borderColor: '#f59e0b', color: '#f59e0b' }}
-                  >
-                    Buy more
-                  </Button>
-                )}
-              </Box>
+              {!hasPremiumAccess && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <AlertTitle>Free Tier - {generatorCredits} Credits Remaining</AlertTitle>
+                  Each generation uses 1 credit. Premium users get unlimited generations!
+                  <Box sx={{ mt: 1 }}>
+                    <Button 
+                      size="small" 
+                      onClick={() => setShowCreditsModal(true)}
+                      variant="outlined"
+                      startIcon={<CreditCard />}
+                    >
+                      Buy More Credits
+                    </Button>
+                    <Button 
+                      size="small" 
+                      sx={{ ml: 1 }}
+                      onClick={() => setShowUpgradeModal(true)}
+                      variant="contained"
+                    >
+                      Upgrade to Premium
+                    </Button>
+                  </Box>
+                </Alert>
+              )}
 
-              {/* Dropdowns + input row */}
+              {hasPremiumAccess && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  <AlertTitle>Premium Active</AlertTitle>
+                  You have unlimited access to AI pick generation!
+                </Alert>
+              )}
+
               <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-                {/* Props Prompt Dropdown */}
-                <FormControl size="small" sx={{ minWidth: 200 }}>
-                  <Select
-                    value={selectedPrompt}
-                    onChange={(e) => {
-                      setSelectedPrompt(e.target.value);
-                      setCustomPrompt(e.target.value);
-                    }}
-                    displayEmpty
-                  >
-                    <MenuItem value=""><em>Props prompts</em></MenuItem>
-                    {UNIVERSAL_PROMPTS.map(prompt => (
-                      <MenuItem key={prompt} value={prompt}>{prompt}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                {/* Winner Prompts Dropdown */}
-                <FormControl size="small" sx={{ minWidth: 200 }}>
+                <FormControl size="small" sx={{ minWidth: 350 }}>
                   <Select
                     value={selectedWinnerPrompt}
                     onChange={(e) => {
@@ -2420,10 +2640,35 @@ const DailyPicksScreen = () => {
                       setCustomPrompt(e.target.value);
                     }}
                     displayEmpty
+                    renderValue={(selected) => {
+                      if (!selected) {
+                        return <em style={{ color: '#9ca3af' }}>Select a prompt (10 game + 5 player props)...</em>;
+                      }
+                      return selected;
+                    }}
                   >
-                    <MenuItem value=""><em>Winner prompts</em></MenuItem>
-                    {WINNER_PROMPTS.map(prompt => (
-                      <MenuItem key={prompt} value={prompt}>{prompt}</MenuItem>
+                    <MenuItem value=""><em>Select a prompt...</em></MenuItem>
+                    <MenuItem disabled sx={{ opacity: 0.7 }}>
+                      <Typography variant="caption" color="text.secondary">───── GAME PROMPTS (10) ─────</Typography>
+                    </MenuItem>
+                    {WINNER_PROMPTS.slice(0, 10).map(prompt => (
+                      <MenuItem key={prompt} value={prompt} sx={{ pl: 4 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <SportsBasketball sx={{ fontSize: 16, color: '#f59e0b' }} />
+                          {prompt}
+                        </Box>
+                      </MenuItem>
+                    ))}
+                    <MenuItem disabled sx={{ opacity: 0.7 }}>
+                      <Typography variant="caption" color="text.secondary">───── PLAYER PROPS (5) ─────</Typography>
+                    </MenuItem>
+                    {WINNER_PROMPTS.slice(10).map(prompt => (
+                      <MenuItem key={prompt} value={prompt} sx={{ pl: 4 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <TrendingUp sx={{ fontSize: 16, color: '#10b981' }} />
+                          {prompt}
+                        </Box>
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
@@ -2439,36 +2684,20 @@ const DailyPicksScreen = () => {
                 <Button
                   variant="contained"
                   onClick={handleGenerateCustomPicks}
-                  disabled={!customPrompt.trim() || generating || generationsRemaining <= 0}
-                  sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' } }}
+                  disabled={!customPrompt.trim() || generating || (!hasPremiumAccess && generatorCredits === 0)}
+                  sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, minWidth: 120 }}
                 >
-                  {generating ? 'Generating...' : 'Generate'}
+                  {generating ? 'Generating...' : (hasPremiumAccess ? 'Generate' : generatorCredits > 0 ? `Generate (${generatorCredits} left)` : 'No Credits')}
                 </Button>
               </Box>
-
-              {/* Quick Prompts */}
-              <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
-                Quick prompts
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                {USEFUL_PROMPTS.flatMap((cat) => cat.prompts)
-                  .slice(0, 8)
-                  .map((prompt) => (
-                    <Chip
-                      key={prompt}
-                      label={prompt}
-                      onClick={() => {
-                        setCustomPrompt(prompt);
-                        setTimeout(() => handleGenerateCustomPicks(), 100);
-                      }}
-                      icon={<Search />}
-                      sx={{ cursor: 'pointer' }}
-                    />
-                  ))}
-              </Box>
+              
+              {!hasPremiumAccess && generatorCredits === 0 && (
+                <Typography variant="caption" color="error" sx={{ display: 'block', mt: 2 }}>
+                  ⚠️ You have no generator credits remaining. Purchase credits or upgrade to premium to continue generating picks.
+                </Typography>
+              )}
             </Paper>
 
-            {/* Generated Picks */}
             <Typography variant="h6" gutterBottom>
               Generated Picks {generatedPicks.length > 0 && `(${generatedPicks.length})`}
             </Typography>
@@ -2485,34 +2714,38 @@ const DailyPicksScreen = () => {
             ) : (
               <Alert severity="info">
                 <AlertTitle>No generated picks yet</AlertTitle>
-                Enter a prompt above and click Generate to create AI-powered picks.
+                {hasPremiumAccess 
+                  ? 'Select a prompt above and click Generate to create AI-powered picks from real-time data.'
+                  : generatorCredits > 0 
+                    ? `You have ${generatorCredits} credits remaining. Select a prompt and click Generate to create AI-powered picks.`
+                    : 'Purchase credits or upgrade to premium to unlock AI pick generation!'}
               </Alert>
             )}
           </Box>
         )}
 
-        {/* Modals */}
         <ParlayDetailsModal />
         <PickDetailModal />
-
-        {/* Upgrade Modal – with purchase options */}
+        
+        {/* Upgrade Modal - Subscription Plans */}
         <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
           <DialogTitle>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Lock sx={{ color: '#f59e0b' }} />
-              <Typography variant="h6">Need More Generations?</Typography>
+              <Typography variant="h6">Upgrade to Premium</Typography>
             </Box>
           </DialogTitle>
           <DialogContent>
             <Typography paragraph>
-              You've used your {DAILY_LIMIT} daily generations. Upgrade or purchase extra to keep generating.
+              Get access to unlimited picks, advanced AI models, and premium features.
             </Typography>
             <Box sx={{ my: 3 }}>
               {[
-                'Unlimited daily generations',
-                'Premium picks & analysis',
-                'Advanced AI models',
-                'No daily limits',
+                'Unlimited daily picks',
+                'Unlimited AI generations',
+                'Premium AI analysis',
+                'Advanced betting insights',
+                'Real-time data updates',
                 'Same game parlay recommendations',
                 'Correlation scores & teaser analysis',
               ].map((feature) => (
@@ -2524,49 +2757,53 @@ const DailyPicksScreen = () => {
             </Box>
             <Grid container spacing={2}>
               <Grid item xs={6}>
-                <Card variant="outlined">
-                  <CardContent>
+                <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleSubscriptionCheckout('starter', 'month')}>
+                  <CardContent sx={{ textAlign: 'center' }}>
                     <Typography variant="h6" color="#10b981" gutterBottom>
-                      Extra Generations
+                      Starter
                     </Typography>
                     <Typography variant="h4" fontWeight="bold">
-                      $3.99
+                      $5.99
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      +5 generations
+                      /month
                     </Typography>
                     <Button
                       fullWidth
                       variant="contained"
                       sx={{ mt: 2, bgcolor: '#10b981' }}
-                      onClick={() => handlePurchaseGenerations(5)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSubscriptionCheckout('starter', 'month');
+                      }}
                     >
-                      Purchase
+                      Choose Starter
                     </Button>
                   </CardContent>
                 </Card>
               </Grid>
               <Grid item xs={6}>
-                <Card variant="outlined" sx={{ borderColor: '#f59e0b', borderWidth: 2 }}>
-                  <CardContent>
+                <Card variant="outlined" sx={{ borderColor: '#f59e0b', borderWidth: 2, cursor: 'pointer' }} onClick={() => handleSubscriptionCheckout('generator', 'month')}>
+                  <CardContent sx={{ textAlign: 'center' }}>
                     <Typography variant="h6" color="#f59e0b" gutterBottom>
-                      Full Access
+                      Generator
                     </Typography>
                     <Typography variant="h4" fontWeight="bold">
-                      $14.99/mo
+                      $39.99
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Unlimited everything
+                      /month
                     </Typography>
                     <Button
                       fullWidth
                       variant="contained"
                       sx={{ mt: 2, bgcolor: '#f59e0b' }}
-                      onClick={() => {
-                        // Handle subscription (e.g., redirect to subscription page)
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSubscriptionCheckout('generator', 'month');
                       }}
                     >
-                      Subscribe
+                      Choose Generator
                     </Button>
                   </CardContent>
                 </Card>
@@ -2575,6 +2812,132 @@ const DailyPicksScreen = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Credits Modal */}
+        <Dialog open={showCreditsModal} onClose={() => setShowCreditsModal(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <CreditCard sx={{ color: '#f59e0b' }} />
+              <Typography variant="h6">Buy Generator Credits</Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent>
+            <Typography paragraph>
+              Generator credits allow you to create custom AI picks. Each generation uses 1 credit.
+            </Typography>
+            <Box sx={{ my: 3 }}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Current credits: <strong>{generatorCredits}</strong>
+              </Typography>
+            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleCreditsCheckout(1)}>
+                  <CardContent sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" fontWeight="bold">
+                      1 Credit
+                    </Typography>
+                    <Typography variant="h5" color="#f59e0b" fontWeight="bold">
+                      $1.99
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ mt: 2 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCreditsCheckout(1);
+                      }}
+                    >
+                      Buy Now
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={6}>
+                <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleCreditsCheckout(10)}>
+                  <CardContent sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" fontWeight="bold">
+                      10 Credits
+                    </Typography>
+                    <Typography variant="h5" color="#10b981" fontWeight="bold">
+                      $14.90
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      $1.49/credit
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ mt: 2, bgcolor: '#10b981' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCreditsCheckout(10);
+                      }}
+                    >
+                      Best Value
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={6}>
+                <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleCreditsCheckout(20)}>
+                  <CardContent sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" fontWeight="bold">
+                      20 Credits
+                    </Typography>
+                    <Typography variant="h5" color="#10b981" fontWeight="bold">
+                      $25.80
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      $1.29/credit
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ mt: 2, bgcolor: '#10b981' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCreditsCheckout(20);
+                      }}
+                    >
+                      Buy Now
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={6}>
+                <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleCreditsCheckout(50)}>
+                  <CardContent sx={{ textAlign: 'center' }}>
+                    <Typography variant="h4" fontWeight="bold">
+                      50 Credits
+                    </Typography>
+                    <Typography variant="h5" color="#10b981" fontWeight="bold">
+                      $44.50
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      $0.89/credit
+                    </Typography>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      sx={{ mt: 2, bgcolor: '#10b981' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCreditsCheckout(50);
+                      }}
+                    >
+                      Best Deal
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowCreditsModal(false)}>Cancel</Button>
           </DialogActions>
         </Dialog>
 
@@ -2588,8 +2951,15 @@ const DailyPicksScreen = () => {
                   Generating AI Picks...
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Fetching player props and filtering by your prompt
+                  {customPrompt.includes('moneyline') || customPrompt.includes('winner') || customPrompt.includes('win')
+                    ? 'Analyzing team matchups and player projections...'
+                    : 'Fetching player props and filtering by your prompt...'}
                 </Typography>
+                {!hasPremiumAccess && generatorCredits > 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                    Using 1 generator credit. Remaining: {generatorCredits - 1}
+                  </Typography>
+                )}
               </>
             ) : (
               <>
@@ -2608,15 +2978,47 @@ const DailyPicksScreen = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Footer watermark */}
+        {/* Rate Limit Warning */}
+        {rateLimited && (
+          <Alert
+            severity="warning"
+            sx={{
+              position: 'fixed',
+              bottom: 20,
+              right: 20,
+              zIndex: 1000,
+              maxWidth: 400,
+              boxShadow: 3
+            }}
+          >
+            <AlertTitle>Rate Limited</AlertTitle>
+            API rate limit reached. Automatic updates paused for 30 seconds.
+            <Button
+              size="small"
+              onClick={() => setRateLimited(false)}
+              sx={{ mt: 1 }}
+            >
+              Dismiss
+            </Button>
+          </Alert>
+        )}
+
+        {/* Footer */}
         <Box sx={{ mt: 6, textAlign: 'center', opacity: 0.3, fontSize: '0.8rem' }}>
           <Typography variant="caption" color="text.secondary">
-            AI‑powered daily picks · data updated in real‑time
+            AI‑powered daily picks · data updated in real‑time every 60 seconds · Showing top {MAX_VISIBLE_CARDS_PER_SPORT} picks per sport
           </Typography>
         </Box>
       </Container>
     </>
   );
+};
+
+// ============================================
+// WRAPPED COMPONENT
+// ============================================
+const DailyPicksScreen: React.FC = () => {
+  return <DailyPicksContent />;
 };
 
 export default DailyPicksScreen;

@@ -1,10 +1,9 @@
 // src/App.tsx – Complete Integrated Version with Authentication Flow
-// February 2026
+// March 2026 – Added Subscription Success and Cancel Pages
 
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate, BrowserRouter as Router } from 'react-router-dom';
-import { getAnalytics } from 'firebase/analytics';
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { initializeApp, getApps } from 'firebase/app';
 
 // React Query
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -14,7 +13,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ErrorBoundary } from 'react-error-boundary';
 
 // Context Providers
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider } from './contexts/AuthContext';
 import { PredictionsProvider } from './context/PredictionsContext';
 import { ParlayProvider } from './context/ParlayContext';
 import { BetSlipProvider } from './context/BetSlipContext';
@@ -44,17 +43,33 @@ import DailyPicksScreen from './pages/DailyPicksScreen';
 import LoginScreenEnhanced from './pages/LoginScreenEnhanced';
 import IntroPage from './pages/IntroPage';
 import TeamRostersPage from './pages/TeamRostersPage';
+import TutorialsScreen from './pages/TutorialsScreen';
+
+// ---------- SUBSCRIPTION SUCCESS/CANCEL PAGES ----------
+import SubscriptionSuccess from './pages/SubscriptionSuccess';
+import SubscriptionCancel from './pages/SubscriptionCancel';
+
+// ---------- NEW DASHBOARD & SUBSCRIPTION PAGES ----------
+import SportsAnalyticsDashboard from './pages/SportsAnalyticsDashboard';
+import SubscriptionScreen from './pages/SubscriptionScreen';  // <-- CHANGED: Use SubscriptionScreen
+
+// ---------- NEW INFO PAGES (FAQ, INFO, ABOUT, SETTINGS) ----------
+import FAQPage from './pages/FAQPage';
+import InfoPage from './pages/InfoPage';
+import AboutPage from './pages/AboutPage';
+import SettingsPage from './pages/SettingsPage';
 
 // ---------- NHL SCREENS ----------
 import NHLTrendsScreen from './pages/NHLTrendsScreen';
 
-// ---------- NCAAB SCREENS (FIXED with correct filenames) ----------
+// ---------- NCAAB SCREENS ----------
 import NCAABGamesPage from './pages/ncaab/NCAABGamesPage';
 import NCAABGameDetailPage from './pages/ncaab/NCAABGameDetailPage';
 import NCAABStandingsPage from './pages/ncaab/NCAABStandingsPage';
 import NCAABPlayersPage from './pages/ncaab/NCAABPlayersPage';
 import NCAABPlayerDetailPage from './pages/ncaab/NCAABPlayerDetailPage';
 import NCAABTeamsPage from './pages/ncaab/NCAABTeamsPage';
+import NCAABTeamDetailPage from './pages/ncaab/NCAABTeamDetailPage';
 import NCAABRankingsPage from './pages/ncaab/NCAABRankingsPage';
 import NCAABBracketPage from './pages/ncaab/NCAABBracketPage';
 
@@ -73,6 +88,9 @@ import ParlayAnalyticsScreen from './pages/ParlayAnalyticsScreen';
 
 // ---------- PROPS SCREENS ----------
 import PlayerPropsScreen from './pages/PlayerPropsScreen';
+
+// ---------- PLAYER DETAIL SCREEN ----------
+import PlayerDetailPage from './pages/PlayerDetailPage';
 
 // ---------- SPORTS DASHBOARDS ----------
 import NBADashboard from './pages/NBADashboard';
@@ -151,7 +169,7 @@ import PrivateRoute from './components/PrivateRoute';
 
 // ---------- Main App Component ----------
 function App() {
-  // Firebase init
+  // Firebase init (only auth, no analytics)
   useEffect(() => {
     try {
       const firebaseConfig = {
@@ -164,11 +182,7 @@ function App() {
         measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
       };
       if (!getApps().length) {
-        const app = initializeApp(firebaseConfig);
-        if (import.meta.env.PROD) getAnalytics(app);
-      } else {
-        const app = getApp();
-        if (import.meta.env.PROD) getAnalytics(app);
+        initializeApp(firebaseConfig);
       }
     } catch (error) {
       console.error('Firebase error:', error);
@@ -178,103 +192,120 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <AuthProvider>
-          <PredictionsProvider>
-            <ParlayProvider>
-              <BetSlipProvider>
-                <PredictionMarketsProvider>
-                  <ParlayTemplatesProvider>
-                    <NHLProvider>
-                      <FantasyProvider>
-                        <NotificationProvider>
-                          <BookmarkProvider>
-                            <SportsProvider initialRealtime={false}>
-                              <ErrorBoundary
-                                FallbackComponent={ErrorFallback}
-                                onReset={() => window.location.reload()}
-                              >
-                                <Router>
-                                  <InfiniteLoopDetector />
-                                  <Routes>
-                                    {/* Public routes */}
-                                    <Route path="/" element={<IntroPage />} />
-                                    <Route path="/login" element={<LoginScreenEnhanced />} />
+        <ErrorBoundary
+          FallbackComponent={ErrorFallback}
+          onReset={() => window.location.reload()}
+        >
+          <InfiniteLoopDetector />
+          <AuthProvider>
+            <PredictionsProvider>
+              <ParlayProvider>
+                <BetSlipProvider>
+                  <PredictionMarketsProvider>
+                    <ParlayTemplatesProvider>
+                      <NHLProvider>
+                        <FantasyProvider>
+                          <NotificationProvider>
+                            <BookmarkProvider>
+                              <SportsProvider initialRealtime={false}>
+                                <Routes>
+                                  {/* Public routes */}
+                                  <Route path="/" element={<IntroPage />} />
+                                  <Route path="/login" element={<LoginScreenEnhanced />} />
+                                  
+                                  {/* Subscription Success/Cancel Pages */}
+                                  <Route path="/subscription/success" element={<SubscriptionSuccess />} />
+                                  <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
 
-                                    {/* Private routes (require authentication) */}
-                                    <Route element={<PrivateRoute />}>
-                                      <Route element={<Layout />}>
-                                        {/* ALL-ACCESS Section */}
-                                        <Route path="/home" element={<HomeScreen />} />
-                                        <Route path="live-games" element={<LiveGamesScreen />} />
-                                        <Route path="newsdesk" element={<NewsDeskScreen />} />
-                                        <Route path="team-rosters" element={<TeamRostersPage />} />
+                                  {/* Private routes (require authentication) */}
+                                  <Route element={<PrivateRoute />}>
+                                    <Route element={<Layout />}>
+                                      {/* ALL-ACCESS Section */}
+                                      <Route path="/home" element={<HomeScreen />} />
+                                      <Route path="live-games" element={<LiveGamesScreen />} />
+                                      <Route path="newsdesk" element={<NewsDeskScreen />} />
+                                      <Route path="team-rosters" element={<TeamRostersPage />} />
+                                      <Route path="tutorials" element={<TutorialsScreen />} />
 
-                                        {/* STATS Section */}
-                                        <Route path="player-props" element={<PlayerPropsScreen />} />
-                                        <Route path="player-stats" element={<Suspense fallback={<div>Loading...</div>}><PlayerStatsScreen /></Suspense>} />
-                                        <Route path="match-analytics" element={<Suspense fallback={<div>Loading...</div>}><MatchAnalyticsScreen /></Suspense>} />
-                                        <Route path="season-stats" element={<Suspense fallback={<div>Loading...</div>}><SeasonStatsScreen /></Suspense>} />
-                                        <Route path="nhl-trends" element={<NHLTrendsScreen />} />
+                                      {/* STATS Section */}
+                                      <Route path="player-props" element={<PlayerPropsScreen />} />
+                                      <Route path="player-stats" element={<Suspense fallback={<div>Loading...</div>}><PlayerStatsScreen /></Suspense>} />
+                                      <Route path="player/:id" element={<PlayerDetailPage />} />
+                                      <Route path="match-analytics" element={<Suspense fallback={<div>Loading...</div>}><MatchAnalyticsScreen /></Suspense>} />
+                                      <Route path="season-stats" element={<Suspense fallback={<div>Loading...</div>}><SeasonStatsScreen /></Suspense>} />
+                                      <Route path="nhl-trends" element={<NHLTrendsScreen />} />
 
-                                        {/* GENERATOR$ Section */}
-                                        <Route path="daily-picks" element={<DailyPicksScreen />} />
-                                        <Route path="secret-phrases" element={<Suspense fallback={<div>Loading...</div>}><SecretPhraseScreen /></Suspense>} />
-                                        <Route path="sports-wire" element={<Suspense fallback={<div>Loading...</div>}><SportsWireScreen /></Suspense>} />
-                                        <Route path="prize-picks" element={<Suspense fallback={<div>Loading...</div>}><PrizePicksScreen /></Suspense>} />
-                                        <Route path="fantasy-hub" element={<Suspense fallback={<div>Loading...</div>}><FantasyHubScreen /></Suspense>} />
-                                        <Route path="advanced-analytics" element={<Suspense fallback={<div>Loading...</div>}><AdvancedAnalyticsScreen /></Suspense>} />
-                                        <Route path="kalshi-predictions" element={<Suspense fallback={<div>Loading...</div>}><KalshiPredictionsScreen /></Suspense>} />
-                                        <Route path="predictions-outcome" element={<Suspense fallback={<div>Loading...</div>}><PredictionsOutcomeScreen /></Suspense>} />
+                                      {/* GENERATOR$ Section */}
+                                      <Route path="daily-picks" element={<DailyPicksScreen />} />
+                                      <Route path="secret-phrases" element={<Suspense fallback={<div>Loading...</div>}><SecretPhraseScreen /></Suspense>} />
+                                      <Route path="sports-wire" element={<Suspense fallback={<div>Loading...</div>}><SportsWireScreen /></Suspense>} />
+                                      <Route path="prize-picks" element={<Suspense fallback={<div>Loading...</div>}><PrizePicksScreen /></Suspense>} />
+                                      <Route path="fantasy-hub" element={<Suspense fallback={<div>Loading...</div>}><FantasyHubScreen /></Suspense>} />
+                                      <Route path="advanced-analytics" element={<Suspense fallback={<div>Loading...</div>}><AdvancedAnalyticsScreen /></Suspense>} />
+                                      <Route path="kalshi-predictions" element={<Suspense fallback={<div>Loading...</div>}><KalshiPredictionsScreen /></Suspense>} />
+                                      <Route path="predictions-outcome" element={<Suspense fallback={<div>Loading...</div>}><PredictionsOutcomeScreen /></Suspense>} />
 
-                                        {/* PARLAYPLUSPACKAGE-PPP Section */}
-                                        <Route path="parlay-architect" element={<Suspense fallback={<div>Loading...</div>}><ParlayArchitectScreen /></Suspense>} />
-                                        <Route path="same-game-parlay" element={<SameGameParlayScreen />} />
-                                        <Route path="parlay-analytics" element={<ParlayAnalyticsScreen />} />
-                                        <Route path="ai-suggestions" element={<AIParlaySuggestionsScreen />} />
+                                      {/* PARLAYPLUSPACKAGE-PPP Section */}
+                                      <Route path="parlay-architect" element={<Suspense fallback={<div>Loading...</div>}><ParlayArchitectScreen /></Suspense>} />
+                                      <Route path="same-game-parlay" element={<SameGameParlayScreen />} />
+                                      <Route path="parlay-analytics" element={<ParlayAnalyticsScreen />} />
+                                      <Route path="ai-suggestions" element={<AIParlaySuggestionsScreen />} />
 
-                                        {/* DASHBOARDS Section */}
-                                        <Route path="analytics-dashboard" element={<AnalyticsDashboardScreen />} />
-                                        <Route path="nba-dashboard" element={<NBADashboard />} />
-                                        <Route path="nhl-dashboard" element={<NHLDashboard />} />
-                                        <Route path="mlb-spring-training" element={<MLBSpringTraining />} />
+                                      {/* DASHBOARDS Section */}
+                                      <Route path="analytics-dashboard" element={<AnalyticsDashboardScreen />} />
+                                      <Route path="nba-dashboard" element={<NBADashboard />} />
+                                      <Route path="nhl-dashboard" element={<NHLDashboard />} />
+                                      <Route path="mlb-spring-training" element={<MLBSpringTraining />} />
 
-                                        {/* NCAAB Section - with correct paths */}
-                                        <Route path="ncaab/games" element={<NCAABGamesPage />} />
-                                        <Route path="ncaab/games/:id" element={<NCAABGameDetailPage />} />
-                                        <Route path="ncaab/standings" element={<NCAABStandingsPage />} />
-                                        <Route path="ncaab/players" element={<NCAABPlayersPage />} />
-                                        <Route path="ncaab/players/:id" element={<NCAABPlayerDetailPage />} />
-                                        <Route path="ncaab/teams" element={<NCAABTeamsPage />} />
-                                        <Route path="ncaab/rankings" element={<NCAABRankingsPage />} />
-                                        <Route path="ncaab/bracket" element={<NCAABBracketPage />} />
+                                      {/* 👇 USER ACCOUNT Section 👇 - UPDATED */}
+                                      <Route path="dashboard" element={<SportsAnalyticsDashboard />} />
+                                      <Route path="pricing" element={<SubscriptionScreen />} />
+                                      <Route path="subscription" element={<SubscriptionScreen />} />
+                                      <Route path="billing" element={<SportsAnalyticsDashboard />} />
 
-                                        {/* Misc. Sports Section */}
-                                        <Route path="world-cup-2026" element={<WorldCup2026Screen />} />
-                                        <Route path="tennis/players" element={<TennisPlayers />} />
-                                        <Route path="tennis/tournaments" element={<TennisTournaments />} />
-                                        <Route path="tennis/matches" element={<TennisMatches />} />
-                                        <Route path="golf/players" element={<GolfPlayers />} />
-                                        <Route path="golf/tournaments" element={<GolfTournaments />} />
-                                        <Route path="golf/leaderboard" element={<GolfLeaderboard />} />
-                                      </Route>
+                                      {/* 👇 INFO & SUPPORT Pages 👇 */}
+                                      <Route path="faq" element={<FAQPage />} />
+                                      <Route path="info" element={<InfoPage />} />
+                                      <Route path="about" element={<AboutPage />} />
+                                      <Route path="settings" element={<SettingsPage />} />
+
+                                      {/* NCAAB Section */}
+                                      <Route path="ncaab/games" element={<NCAABGamesPage />} />
+                                      <Route path="ncaab/games/:id" element={<NCAABGameDetailPage />} />
+                                      <Route path="ncaab/standings" element={<NCAABStandingsPage />} />
+                                      <Route path="ncaab/players" element={<NCAABPlayersPage />} />
+                                      <Route path="ncaab/players/:id" element={<NCAABPlayerDetailPage />} />
+                                      <Route path="ncaab/teams" element={<NCAABTeamsPage />} />
+                                      <Route path="ncaab/teams/:id" element={<NCAABTeamDetailPage />} />
+                                      <Route path="ncaab/rankings" element={<NCAABRankingsPage />} />
+                                      <Route path="ncaab/bracket" element={<NCAABBracketPage />} />
+
+                                      {/* Misc. Sports Section */}
+                                      <Route path="world-cup-2026" element={<WorldCup2026Screen />} />
+                                      <Route path="tennis/players" element={<TennisPlayers />} />
+                                      <Route path="tennis/tournaments" element={<TennisTournaments />} />
+                                      <Route path="tennis/matches" element={<TennisMatches />} />
+                                      <Route path="golf/players" element={<GolfPlayers />} />
+                                      <Route path="golf/tournaments" element={<GolfTournaments />} />
+                                      <Route path="golf/leaderboard" element={<GolfLeaderboard />} />
                                     </Route>
+                                  </Route>
 
-                                    {/* Catch-all */}
-                                    <Route path="*" element={<Navigate to="/" replace />} />
-                                  </Routes>
-                                </Router>
-                              </ErrorBoundary>
-                            </SportsProvider>
-                          </BookmarkProvider>
-                        </NotificationProvider>
-                      </FantasyProvider>
-                    </NHLProvider>
-                  </ParlayTemplatesProvider>
-                </PredictionMarketsProvider>
-              </BetSlipProvider>
-            </ParlayProvider>
-          </PredictionsProvider>
-        </AuthProvider>
+                                  {/* Catch-all */}
+                                  <Route path="*" element={<Navigate to="/" replace />} />
+                                </Routes>
+                              </SportsProvider>
+                            </BookmarkProvider>
+                          </NotificationProvider>
+                        </FantasyProvider>
+                      </NHLProvider>
+                    </ParlayTemplatesProvider>
+                  </PredictionMarketsProvider>
+                </BetSlipProvider>
+              </ParlayProvider>
+            </PredictionsProvider>
+          </AuthProvider>
+        </ErrorBoundary>
       </ThemeProvider>
       {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />}
     </QueryClientProvider>

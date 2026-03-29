@@ -1,0 +1,85 @@
+// Plan requirements for each feature/screen
+export const PLAN_REQUIREMENTS = {
+  // Starter Package Features
+  'home': 'starter',
+  'live-games': 'starter',
+  'news-desk': 'starter',
+  'team-rosters': 'starter',
+  'match-analytics': 'starter',
+  'nhl-trends': 'starter',
+  'ncaab-teams': 'starter',
+  'world-cup': 'starter',
+  
+  // Analytics Package Features
+  'player-props': 'analytics',
+  'player-stats': 'analytics',
+  'season-stats': 'analytics',
+  'parlay-analytics': 'analytics',
+  'ai-suggestions': 'analytics',
+  'analytics-dashboard': 'analytics',
+  'nhl-dashboard': 'analytics',
+  'mlb-spring-training': 'analytics',
+  'tennis-players': 'analytics',
+  'tennis-tournaments': 'analytics',
+  'tennis-matches': 'analytics',
+  'golf-players': 'analytics',
+  'golf-tournaments': 'analytics',
+  'golf-leaderboard': 'analytics',
+  
+  // Generator Package Features
+  'nba-dashboard': 'generator',
+  'daily-picks': 'generator',
+  'secret-phrases': 'generator',
+  'sports-wire': 'generator',
+  'fantasy-hub': 'generator',
+  'prizepicks': 'generator',
+  'kalshi-predictions': 'generator',
+  'predictions-outcome': 'generator',
+  'parlay-architect': 'generator',
+  'same-game-parlay': 'generator',
+  'ncaab-games': 'generator',
+  'ncaab-standings': 'generator',
+  'ncaab-players': 'generator',
+  'ncaab-bracket': 'generator'
+};
+
+// Screen to feature mapping
+export const SCREEN_REQUIREMENTS: Record<string, string> = {
+  'LiveGames': 'live-games',
+  'NewsDesk': 'news-desk',
+  'TeamRosters': 'team-rosters',
+  'MatchAnalytics': 'match-analytics',
+  'NHLTrends': 'nhl-trends',
+  'NCAABTeams': 'ncaab-teams',
+  'WorldCup': 'world-cup',
+  
+  'PlayerProps': 'player-props',
+  'PlayerStats': 'player-stats',
+  'SeasonStats': 'season-stats',
+  'ParlayAnalytics': 'parlay-analytics',
+  'AIParlaySuggestions': 'ai-suggestions',
+  'AnalyticsDashboard': 'analytics-dashboard',
+  'NHLDashboard': 'nhl-dashboard',
+  'MLBSpringTraining': 'mlb-spring-training',
+  'TennisPlayers': 'tennis-players',
+  'TennisTournaments': 'tennis-tournaments',
+  'TennisMatches': 'tennis-matches',
+  'GolfPlayers': 'golf-players',
+  'GolfTournaments': 'golf-tournaments',
+  'GolfLeaderboard': 'golf-leaderboard',
+  
+  'NBADashboard': 'nba-dashboard',
+  'DailyPicks': 'daily-picks',
+  'SecretPhrasesHub': 'secret-phrases',
+  'SportsWire': 'sports-wire',
+  'FantasyHub': 'fantasy-hub',
+  'PrizePicks': 'prizepicks',
+  'KalshiPredictions': 'kalshi-predictions',
+  'PredictionsOutcome': 'predictions-outcome',
+  'ParlayArchitect': 'parlay-architect',
+  'SameGameParlay': 'same-game-parlay',
+  'NCAABGames': 'ncaab-games',
+  'NCAABStandings': 'ncaab-standings',
+  'NCAABPlayers': 'ncaab-players',
+  'NCAABBracket': 'ncaab-bracket'
+};

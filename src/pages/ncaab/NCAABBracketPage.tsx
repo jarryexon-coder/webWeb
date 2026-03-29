@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Container, Typography, Paper, Box, CircularProgress, Alert,
   Button, TextField, Select, MenuItem, FormControl, InputLabel,
@@ -7,6 +7,7 @@ import {
   TableHead, TableRow
 } from '@mui/material';
 import { useBracket } from '../../hooks/useNcaab';
+import { useTeams } from '../../hooks/useNcaab';
 import {
   AutoAwesome as AutoAwesomeIcon,
   ExpandMore, ExpandLess,
@@ -26,15 +27,23 @@ interface Team {
   eliminatedInRound?: number;
 }
 
+interface ApiTeam {
+  id: string;
+  full_name: string;
+  name: string;
+  seed?: number;
+  conference?: string;
+}
+
 interface BracketGame {
-  round: number;          // 1 = first round (64->32), 2 = second, ... 6 = final
+  round: number;
   region?: string;
-  gameNumber: number;     // unique within round/region
+  gameNumber: number;
   team1: Team;
   team2: Team;
   winner?: Team;
   loser?: Team;
-  confidence?: number;    // probability that the predicted winner actually wins
+  confidence?: number;
   upset?: boolean;
 }
 
@@ -49,166 +58,125 @@ interface GeneratedBracket {
 }
 
 // ------------------------------
-// Mock Team Data with Seeds
+// Actual 2025 Tournament Teams (for the generator)
 // ------------------------------
-
 const TEAMS_BY_REGION: Record<string, { name: string; seed: number }[]> = {
   'East': [
-    { name: 'UConn', seed: 1 },
-    { name: 'Marquette', seed: 2 },
-    { name: 'Creighton', seed: 3 },
-    { name: 'Iowa St', seed: 4 },
-    { name: 'Auburn', seed: 5 },
+    { name: 'Duke', seed: 1 },
+    { name: 'Mount St. Mary\'s/American', seed: 16 },
+    { name: 'Mississippi St', seed: 8 },
+    { name: 'Baylor', seed: 9 },
+    { name: 'Oregon', seed: 5 },
+    { name: 'Liberty', seed: 12 },
+    { name: 'Arizona', seed: 4 },
+    { name: 'Akron', seed: 13 },
     { name: 'BYU', seed: 6 },
-    { name: 'Illinois', seed: 7 },
-    { name: 'Washington St', seed: 8 },
-    { name: 'Texas', seed: 9 },
-    { name: 'Nebraska', seed: 10 },
-    { name: 'Michigan St', seed: 11 },
-    { name: 'St Mary\'s', seed: 12 },
-    { name: 'Grand Canyon', seed: 13 },
-    { name: 'Morehead St', seed: 14 },
-    { name: 'Long Beach St', seed: 15 },
-    { name: 'Stetson', seed: 16 }
+    { name: 'VCU', seed: 11 },
+    { name: 'Wisconsin', seed: 3 },
+    { name: 'Montana', seed: 14 },
+    { name: 'Saint Mary\'s', seed: 7 },
+    { name: 'Vanderbilt', seed: 10 },
+    { name: 'Alabama', seed: 2 },
+    { name: 'Robert Morris', seed: 15 }
   ],
   'West': [
-    { name: 'North Carolina', seed: 1 },
-    { name: 'Arizona', seed: 2 },
-    { name: 'Baylor', seed: 3 },
-    { name: 'Alabama', seed: 4 },
-    { name: 'Clemson', seed: 5 },
-    { name: 'Dayton', seed: 6 },
-    { name: 'Saint Mary\'s', seed: 7 },
-    { name: 'Gonzaga', seed: 8 },
-    { name: 'Grand Canyon', seed: 9 },
-    { name: 'Oregon', seed: 10 },
-    { name: 'South Carolina', seed: 11 },
-    { name: 'Utah St', seed: 12 },
-    { name: 'McNeese St', seed: 13 },
-    { name: 'Colgate', seed: 14 },
-    { name: 'Akron', seed: 15 },
-    { name: 'Stetson', seed: 16 }
+    { name: 'Florida', seed: 1 },
+    { name: 'Norfolk St', seed: 16 },
+    { name: 'UConn', seed: 8 },
+    { name: 'Oklahoma', seed: 9 },
+    { name: 'Memphis', seed: 5 },
+    { name: 'Colorado St', seed: 12 },
+    { name: 'Maryland', seed: 4 },
+    { name: 'Grand Canyon', seed: 13 },
+    { name: 'Missouri', seed: 6 },
+    { name: 'Drake', seed: 11 },
+    { name: 'Texas Tech', seed: 3 },
+    { name: 'UNC Wilmington', seed: 14 },
+    { name: 'Kansas', seed: 7 },
+    { name: 'Arkansas', seed: 10 },
+    { name: 'St. John\'s', seed: 2 },
+    { name: 'Omaha', seed: 15 }
   ],
   'South': [
-    { name: 'Houston', seed: 1 },
-    { name: 'Duke', seed: 2 },
-    { name: 'Kentucky', seed: 3 },
-    { name: 'Kansas', seed: 4 },
-    { name: 'Texas Tech', seed: 5 },
-    { name: 'Wisconsin', seed: 6 },
-    { name: 'Nebraska', seed: 7 },
-    { name: 'Florida', seed: 8 },
-    { name: 'Texas A&M', seed: 9 },
-    { name: 'NC State', seed: 10 },
-    { name: 'Michigan', seed: 11 },
-    { name: 'James Madison', seed: 12 },
-    { name: 'Vermont', seed: 13 },
-    { name: 'Oakland', seed: 14 },
-    { name: 'Western Ky', seed: 15 },
-    { name: 'Longwood', seed: 16 }
+    { name: 'Auburn', seed: 1 },
+    { name: 'Alabama St', seed: 16 },
+    { name: 'Louisville', seed: 8 },
+    { name: 'Creighton', seed: 9 },
+    { name: 'Michigan', seed: 5 },
+    { name: 'UC San Diego', seed: 12 },
+    { name: 'Texas A&M', seed: 4 },
+    { name: 'Yale', seed: 13 },
+    { name: 'Ole Miss', seed: 6 },
+    { name: 'San Diego St', seed: 11 },
+    { name: 'Iowa St', seed: 3 },
+    { name: 'Lipscomb', seed: 14 },
+    { name: 'Marquette', seed: 7 },
+    { name: 'New Mexico', seed: 10 },
+    { name: 'Michigan St', seed: 2 },
+    { name: 'Bryant', seed: 15 }
   ],
   'Midwest': [
-    { name: 'Purdue', seed: 1 },
+    { name: 'Houston', seed: 1 },
+    { name: 'SIU Edwardsville', seed: 16 },
+    { name: 'Gonzaga', seed: 8 },
+    { name: 'Georgia', seed: 9 },
+    { name: 'Clemson', seed: 5 },
+    { name: 'McNeese', seed: 12 },
+    { name: 'Purdue', seed: 4 },
+    { name: 'High Point', seed: 13 },
+    { name: 'Illinois', seed: 6 },
+    { name: 'Xavier/Texas', seed: 11 },
+    { name: 'Kentucky', seed: 3 },
+    { name: 'Troy', seed: 14 },
+    { name: 'UCLA', seed: 7 },
+    { name: 'Utah St', seed: 10 },
     { name: 'Tennessee', seed: 2 },
-    { name: 'Iowa St', seed: 3 },
-    { name: 'Gonzaga', seed: 4 },
-    { name: 'Kansas St', seed: 5 },
-    { name: 'South Carolina', seed: 6 },
-    { name: 'Oregon', seed: 7 },
-    { name: 'Utah St', seed: 8 },
-    { name: 'TCU', seed: 9 },
-    { name: 'Colorado', seed: 10 },
-    { name: 'Providence', seed: 11 },
-    { name: 'Drake', seed: 12 },
-    { name: 'Samford', seed: 13 },
-    { name: 'South Fla', seed: 14 },
-    { name: 'Stetson', seed: 15 },
-    { name: 'Grambling', seed: 16 }
+    { name: 'Wofford', seed: 15 }
   ]
 };
 
-// List of traditional "blue blood" programs for the Blue Bloods strategy
 const BLUE_BLOODS = new Set([
   'Duke', 'North Carolina', 'Kansas', 'Kentucky', 'UCLA', 'Indiana', 'Michigan St', 'Louisville'
 ]);
 
 // ------------------------------
-// Helper: Simulate a game based on strategy
+// Helper: Simulate a game (for the generator)
 // ------------------------------
-
 const playGame = (team1: Team, team2: Team, strategy: string, query: string): { winner: Team; loser: Team; confidence: number; upset: boolean } => {
-  // Determine base win probability using seed difference
-  const seedDiff = team2.seed - team1.seed; // positive if team2 is lower seed
-  const baseProb = 1 / (1 + Math.exp(-seedDiff / 2)); // logistic function: higher seed (lower number) wins more often
-  // baseProb is probability that team1 wins (team1 has lower seed number)
-
-  // Adjust for strategy
+  const seedDiff = team2.seed - team1.seed;
+  const baseProb = 1 / (1 + Math.exp(-seedDiff / 2));
   let prob = baseProb;
 
   switch (strategy) {
-    case 'chalk': // Chalk (Favorites) – slight boost to favorites
-      prob = Math.min(0.95, baseProb + 0.15);
+    case 'chalk': prob = Math.min(0.95, baseProb + 0.15); break;
+    case 'heavy_chalk': prob = Math.min(0.98, baseProb + 0.3); break;
+    case 'upsets': prob = Math.max(0.05, baseProb - 0.15); break;
+    case 'even_more_upsets': prob = Math.max(0.02, baseProb - 0.3); break;
+    case 'balanced': break;
+    case 'random': prob = 0.5; break;
+    case 'cinderella':
+      if (team1.seed >= 11 && team2.seed < 11) prob = Math.min(0.7, baseProb + 0.25);
+      else if (team2.seed >= 11 && team1.seed < 11) prob = Math.max(0.3, baseProb - 0.25);
       break;
-    case 'heavy_chalk': // Heavy Chalk – strong boost to favorites
-      prob = Math.min(0.98, baseProb + 0.3);
+    case 'blue_bloods':
+      if (BLUE_BLOODS.has(team1.name) && !BLUE_BLOODS.has(team2.name)) prob = Math.min(0.95, baseProb + 0.2);
+      else if (!BLUE_BLOODS.has(team1.name) && BLUE_BLOODS.has(team2.name)) prob = Math.max(0.05, baseProb - 0.2);
       break;
-    case 'upsets': // Upset Heavy – slight boost to underdogs
-      prob = Math.max(0.05, baseProb - 0.15);
+    case 'top_heavy':
+      if (team1.seed <= 4 && team2.seed > 4) prob = Math.min(0.95, baseProb + 0.2);
+      else if (team2.seed <= 4 && team1.seed > 4) prob = Math.max(0.05, baseProb - 0.2);
       break;
-    case 'even_more_upsets': // Even More Upsets – strong boost to underdogs
-      prob = Math.max(0.02, baseProb - 0.3);
+    case 'underdog':
+      if (team1.seed > team2.seed) prob = Math.min(0.7, baseProb + 0.15);
+      else if (team2.seed > team1.seed) prob = Math.max(0.3, baseProb - 0.15);
       break;
-    case 'balanced': // Balanced – use base probability as is
-      // no change
-      break;
-    case 'random': // Random – coin flip
-      prob = 0.5;
-      break;
-    case 'cinderella': // Cinderella – boost double‑digit seeds (11+)
-      if (team1.seed >= 11 && team2.seed < 11) {
-        prob = Math.min(0.7, baseProb + 0.25); // boost cinderella over favorite
-      } else if (team2.seed >= 11 && team1.seed < 11) {
-        prob = Math.max(0.3, baseProb - 0.25);
-      } else {
-        // both are cinderella or both favorites – keep base
-      }
-      break;
-    case 'blue_bloods': // Blue Bloods – boost traditional powers
-      if (BLUE_BLOODS.has(team1.name) && !BLUE_BLOODS.has(team2.name)) {
-        prob = Math.min(0.95, baseProb + 0.2);
-      } else if (!BLUE_BLOODS.has(team1.name) && BLUE_BLOODS.has(team2.name)) {
-        prob = Math.max(0.05, baseProb - 0.2);
-      }
-      break;
-    case 'top_heavy': // Top Heavy – boost top 4 seeds
-      if (team1.seed <= 4 && team2.seed > 4) {
-        prob = Math.min(0.95, baseProb + 0.2);
-      } else if (team2.seed <= 4 && team1.seed > 4) {
-        prob = Math.max(0.05, baseProb - 0.2);
-      }
-      break;
-    case 'underdog': // Underdog – always boost the lower seed (higher number)
-      if (team1.seed > team2.seed) {
-        prob = Math.min(0.7, baseProb + 0.15); // team1 is underdog
-      } else if (team2.seed > team1.seed) {
-        prob = Math.max(0.3, baseProb - 0.15); // team2 is underdog
-      }
-      break;
-    default:
-      // fallback to balanced
-      break;
+    default: break;
   }
 
-  // Influence from query: if query contains a team name, boost its chances
   const queryLower = query.toLowerCase();
-  if (queryLower.includes(team1.name.toLowerCase())) {
-    prob = Math.min(0.95, prob + 0.2);
-  }
-  if (queryLower.includes(team2.name.toLowerCase())) {
-    prob = Math.max(0.05, prob - 0.2);
-  }
+  if (queryLower.includes(team1.name.toLowerCase())) prob = Math.min(0.95, prob + 0.2);
+  if (queryLower.includes(team2.name.toLowerCase())) prob = Math.max(0.05, prob - 0.2);
 
-  // Random outcome
   const rand = Math.random();
   const winner = rand < prob ? team1 : team2;
   const loser = winner === team1 ? team2 : team1;
@@ -221,9 +189,56 @@ const playGame = (team1: Team, team2: Team, strategy: string, query: string): { 
 // ------------------------------
 // Main Component
 // ------------------------------
-
 const NCAABBracketPage: React.FC = () => {
   const { data, isLoading, error } = useBracket({ season: 2025 });
+  const { data: teamsData, isLoading: teamsLoading } = useTeams({ per_page: 500 });
+
+  // Build lookup map from team ID to team object (optional, may not be needed)
+  const teamsById = useMemo(() => {
+    if (!teamsData?.data) return {} as Record<string, ApiTeam>;
+    return teamsData.data.reduce((acc, team) => {
+      acc[team.id] = team;
+      return acc;
+    }, {} as Record<string, ApiTeam>);
+  }, [teamsData]);
+
+  // Seed map from the generator's team data (fallback if backend doesn't provide seeds)
+  const seedMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const regions = ['East', 'West', 'South', 'Midwest'];
+    regions.forEach(reg => {
+      TEAMS_BY_REGION[reg].forEach(t => {
+        const lowerRaw = t.name.toLowerCase();
+        map.set(lowerRaw, t.seed);
+        map.set(lowerRaw.replace(/['.-]/g, ''), t.seed);
+        const withoutSuffix = lowerRaw.replace(/\s+(state|st|university|college)$/i, '');
+        if (withoutSuffix !== lowerRaw) map.set(withoutSuffix, t.seed);
+        const firstWord = lowerRaw.split(/\s+/)[0];
+        if (firstWord && firstWord !== lowerRaw) map.set(firstWord, t.seed);
+      });
+    });
+    return map;
+  }, []);
+
+  // Helper to get seed from a team object (fallback)
+  const getTeamSeed = (team: ApiTeam | undefined): number | undefined => {
+    if (!team) return undefined;
+    if (team.seed) return team.seed;
+    // Try to match by name
+    const full = team.full_name.toLowerCase();
+    const name = team.name.toLowerCase();
+    if (seedMap.has(full)) return seedMap.get(full);
+    if (seedMap.has(name)) return seedMap.get(name);
+    return undefined;
+  };
+
+  // ----- DIAGNOSTIC LOGS (optional) -----
+  useEffect(() => {
+    console.log('=== NCAABBracketPage Debug ===');
+    console.log('Bracket API data:', data);
+    console.log('Teams API data (first 5):', teamsData?.data?.slice(0, 5));
+    console.log('Teams lookup map (sample):', Object.keys(teamsById).slice(0, 5).map(id => ({ id, team: teamsById[id] })));
+  }, [data, teamsData, teamsById]);
 
   // ===== GENERATOR STATE =====
   const [genStrategy, setGenStrategy] = useState<string>('balanced');
@@ -235,10 +250,9 @@ const NCAABBracketPage: React.FC = () => {
   const [showGenerator, setShowGenerator] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
-  // ===== GENERATOR FUNCTION =====
   const generateBracket = useCallback(async () => {
     setIsGenerating(true);
-    await new Promise(resolve => setTimeout(resolve, 1200)); // simulate work
+    await new Promise(resolve => setTimeout(resolve, 1200));
 
     const newBracket: GeneratedBracket = {
       id: `bracket-${Date.now()}`,
@@ -250,7 +264,6 @@ const NCAABBracketPage: React.FC = () => {
       timestamp: Date.now(),
     };
 
-    // Deep copy teams by region
     const regions = ['East', 'West', 'South', 'Midwest'];
     const regionTeams: Record<string, Team[]> = {};
     regions.forEach(reg => {
@@ -259,10 +272,8 @@ const NCAABBracketPage: React.FC = () => {
 
     const allGames: BracketGame[] = [];
 
-    // Simulate each region from round 1 to 4 (region finals)
     regions.forEach(region => {
       let roundTeams = [...regionTeams[region]];
-
       for (let round = 1; round <= 4; round++) {
         const winners: Team[] = [];
         for (let i = 0; i < roundTeams.length; i += 2) {
@@ -278,17 +289,14 @@ const NCAABBracketPage: React.FC = () => {
             allGames.push({ ...game, winner, loser, confidence, upset });
             winners.push(winner);
           } else {
-            // Bye? shouldn't happen with 16 teams.
             winners.push(roundTeams[i]);
           }
         }
         roundTeams = winners;
       }
-      // regionTeams[region] now contains the regional champion (last remaining)
-      regionTeams[region] = roundTeams; // one team left
+      regionTeams[region] = roundTeams;
     });
 
-    // Final Four
     const finalFourTeams = [
       regionTeams['East'][0],
       regionTeams['West'][0],
@@ -297,7 +305,6 @@ const NCAABBracketPage: React.FC = () => {
     ];
     newBracket.finalFour = finalFourTeams;
 
-    // Semifinals (round 5)
     const semi1 = { team1: finalFourTeams[0], team2: finalFourTeams[1] };
     const semi2 = { team1: finalFourTeams[2], team2: finalFourTeams[3] };
     const semiResult1 = playGame(semi1.team1, semi1.team2, genStrategy, genQuery);
@@ -323,7 +330,6 @@ const NCAABBracketPage: React.FC = () => {
       upset: semiResult2.upset
     });
 
-    // Championship (round 6)
     const final = playGame(semiResult1.winner, semiResult2.winner, genStrategy, genQuery);
     allGames.push({
       round: 6,
@@ -344,12 +350,8 @@ const NCAABBracketPage: React.FC = () => {
     setIsGenerating(false);
   }, [genStrategy, genQuery, ignoreExisting]);
 
-  const handlePrevBracket = () => {
-    setCurrentBracketIndex(prev => prev - 1);
-  };
-  const handleNextBracket = () => {
-    setCurrentBracketIndex(prev => prev + 1);
-  };
+  const handlePrevBracket = () => setCurrentBracketIndex(prev => prev - 1);
+  const handleNextBracket = () => setCurrentBracketIndex(prev => prev + 1);
   const clearGenerated = () => {
     setGeneratedBrackets([]);
     setCurrentBracketIndex(0);
@@ -357,19 +359,22 @@ const NCAABBracketPage: React.FC = () => {
 
   const currentBracket = generatedBrackets[currentBracketIndex - 1];
 
-  // Group games by round for display
-  const gamesByRound = useMemo(() => {
-    if (!currentBracket) return {};
-    const byRound: Record<number, BracketGame[]> = {};
-    currentBracket.games.forEach(game => {
-      if (!byRound[game.round]) byRound[game.round] = [];
-      byRound[game.round].push(game);
+  // Heuristic to check if the data is for 2025 (based on team names)
+  const isDataFor2025 = useMemo(() => {
+    if (!data) return false;
+    const games = Array.isArray(data) ? data : data.data || [];
+    // Check for a team name that we know is in 2025
+    return games.some((g: any) => {
+      const team1Name = g.team1_name || '';
+      const team2Name = g.team2_name || '';
+      return team1Name.includes('Duke') || team2Name.includes('Duke') ||
+             team1Name.includes('UConn') || team2Name.includes('UConn') ||
+             team1Name.includes('Florida') || team2Name.includes('Florida') ||
+             team1Name.includes('Houston') || team2Name.includes('Houston');
     });
-    return byRound;
-  }, [currentBracket]);
+  }, [data]);
 
-  // ===== RENDER =====
-  if (isLoading) {
+  if (isLoading || teamsLoading) {
     return (
       <Container maxWidth="lg" sx={{ py: 4, textAlign: 'center' }}>
         <CircularProgress />
@@ -569,22 +574,45 @@ const NCAABBracketPage: React.FC = () => {
         )}
       </Paper>
 
-      {/* Existing bracket display from API */}
+      {/* Official bracket display from API */}
       {bracketGames.length > 0 && (
         <>
           <Typography variant="h5" gutterBottom sx={{ mt: 3, color: 'white' }}>Official Bracket (API)</Typography>
-          {bracketGames.map((game) => (
-            <Paper key={game.game_id} sx={{ p: 2, mb: 2, backgroundColor: 'rgba(255,255,255,0.9)' }}>
-              <Typography variant="subtitle1">
-                Round {game.round} {game.region && `- ${game.region}`}
-              </Typography>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography>{game.team1_id ? `Team ${game.team1_id}` : 'TBD'}</Typography>
-                <Typography>vs</Typography>
-                <Typography>{game.team2_id ? `Team ${game.team2_id}` : 'TBD'}</Typography>
-              </Box>
-            </Paper>
-          ))}
+          {!isDataFor2025 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              The data below appears to be from a different season. Seeds may not display correctly.
+            </Alert>
+          )}
+          {bracketGames.map((game: any) => {
+            // Primary source: use the game's own team_name and team_seed fields
+            const team1Name = game.team1_name || 'TBD';
+            const team2Name = game.team2_name || 'TBD';
+            const team1Seed = game.team1_seed;
+            const team2Seed = game.team2_seed;
+            const winnerName = game.winner_name;
+
+            return (
+              <Paper key={game.game_id} sx={{ p: 2, mb: 2, backgroundColor: 'rgba(255,255,255,0.9)' }}>
+                <Typography variant="subtitle1">
+                  Round {game.round} {game.region && `- ${game.region}`}
+                </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography>
+                    {team1Seed ? `${team1Seed}. ` : ''}{team1Name}
+                  </Typography>
+                  <Typography>vs</Typography>
+                  <Typography>
+                    {team2Seed ? `${team2Seed}. ` : ''}{team2Name}
+                  </Typography>
+                </Box>
+                {winnerName && (
+                  <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>
+                    Winner: {winnerName}
+                  </Typography>
+                )}
+              </Paper>
+            );
+          })}
         </>
       )}
 

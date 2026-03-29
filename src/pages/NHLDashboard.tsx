@@ -42,6 +42,9 @@ import {
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart } from '@mui/x-charts/BarChart';
+import ProtectedRoute from '../components/ProtectedRoute';
+import PlanGuard from '../components/PlanGuard';
+import GeneratorCredits from '../components/GeneratorCredits';
 
 // ----------------------------------------------------------------------
 // Types
@@ -308,15 +311,17 @@ const StreakChip = ({ streak }: { streak: string }) => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component with Plan Guards
 // ----------------------------------------------------------------------
-
-const NHLDashboard: React.FC = () => {
+const NHLDashboardContent: React.FC = () => {
   const [tabValue, setTabValue] = useState<number>(0);
   const [selectedDate, setSelectedDate] = useState<string>(''); // empty = today
   const [selectedConference, setSelectedConference] = useState<string>('all');
   const [selectedPosition, setSelectedPosition] = useState<string>('all');
   const [playerType, setPlayerType] = useState<'skaters' | 'goalies'>('skaters');
+
+  // Mock user plan for testing - in production this would come from auth/user context
+  const [userPlan, setUserPlan] = useState('starter'); // 'starter', 'analytics', or 'generator'
 
   // Fetch data – with fallback to mock data via the API functions
   const {
@@ -441,8 +446,387 @@ const NHLDashboard: React.FC = () => {
     );
   }
 
+  // 🔵 Starter Content - Everyone sees games
+  const renderGamesTab = () => (
+    <>
+      <Typography variant="h6" gutterBottom>
+        NHL Games
+      </Typography>
+      {!games || games.length === 0 ? (
+        <Alert severity="info">No games scheduled for today.</Alert>
+      ) : (
+        <Grid container spacing={3}>
+          {games.map((game) => (
+            <Grid item xs={12} md={6} key={game.id}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                    <GameStatusChip status={game.status} />
+                    {game.broadcast && (
+                      <Chip label={game.broadcast} size="small" variant="outlined" />
+                    )}
+                  </Box>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    {/* Away team */}
+                    <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1 }}>
+                      <Typography variant="h6" fontWeight="bold">
+                        {game.away_team}
+                      </Typography>
+                    </Box>
+                    {/* Score / vs */}
+                    <Box textAlign="center" sx={{ px: 2 }}>
+                      {game.status === 'scheduled' ? (
+                        <Typography variant="body1">@</Typography>
+                      ) : (
+                        <Typography variant="h5" fontWeight="bold">
+                          {game.away_score ?? 0} - {game.home_score ?? 0}
+                        </Typography>
+                      )}
+                    </Box>
+                    {/* Home team */}
+                    <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1, justifyContent: 'flex-end' }}>
+                      <Typography variant="h6" fontWeight="bold">
+                        {game.home_team}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  {game.status === 'live' && game.period && game.time_remaining && (
+                    <Box display="flex" justifyContent="center" mt={2}>
+                      <Chip
+                        label={`${game.period} • ${game.time_remaining}`}
+                        size="small"
+                        color="error"
+                        variant="outlined"
+                      />
+                    </Box>
+                  )}
+                  <Box display="flex" justifyContent="space-between" mt={2}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <LocationIcon fontSize="small" color="action" />
+                      <Typography variant="caption" color="text.secondary">
+                        {game.venue}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(game.date).toLocaleString()}
+                    </Typography>
+                  </Box>
+                  {!game.is_real_data && (
+                    <Box display="flex" justifyContent="flex-end" mt={1}>
+                      <Chip label="Simulated" size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+    </>
+  );
+
+  // 🟣 Analytics Content - Only Analytics+ users see standings
+  const renderStandingsTab = () => (
+    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
+      <Alert severity="info" sx={{ mt: 2 }}>
+        Upgrade to Analytics Package to access detailed NHL standings.
+      </Alert>
+    }>
+      <>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">NHL Standings</Typography>
+          <FormControl sx={{ minWidth: 150 }} size="small">
+            <InputLabel id="conference-filter-label">Conference</InputLabel>
+            <Select
+              labelId="conference-filter-label"
+              value={selectedConference}
+              label="Conference"
+              onChange={handleConferenceChange}
+            >
+              <MenuItem value="all">All</MenuItem>
+              <MenuItem value="eastern">Eastern</MenuItem>
+              <MenuItem value="western">Western</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+
+        {!filteredStandings || filteredStandings.length === 0 ? (
+          <Alert severity="info">No standings data available.</Alert>
+        ) : (
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Team</TableCell>
+                  <TableCell align="center">Conf</TableCell>
+                  <TableCell align="center">Div</TableCell>
+                  <TableCell align="center">GP</TableCell>
+                  <TableCell align="center">W</TableCell>
+                  <TableCell align="center">L</TableCell>
+                  <TableCell align="center">OTL</TableCell>
+                  <TableCell align="center">PTS</TableCell>
+                  <TableCell align="center">P%</TableCell>
+                  <TableCell align="center">GF</TableCell>
+                  <TableCell align="center">GA</TableCell>
+                  <TableCell align="center">DIFF</TableCell>
+                  <TableCell align="center">STRK</TableCell>
+                  <TableCell align="center">L10</TableCell>
+                  <TableCell align="center">HOME</TableCell>
+                  <TableCell align="center">AWAY</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredStandings.map((team) => {
+                  const diff = team.goals_for - team.goals_against;
+                  return (
+                    <TableRow key={team.id} hover>
+                      <TableCell>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography variant="body2" fontWeight="medium">
+                            {team.team}
+                          </Typography>
+                          <Chip
+                            label={team.abbreviation}
+                            size="small"
+                            variant="outlined"
+                            sx={{ height: 20, fontSize: '0.7rem' }}
+                          />
+                        </Box>
+                      </TableCell>
+                      <TableCell align="center">
+                        <ConferenceChip conference={team.conference} />
+                      </TableCell>
+                      <TableCell align="center">
+                        <DivisionChip division={team.division} />
+                      </TableCell>
+                      <TableCell align="center">{team.games_played}</TableCell>
+                      <TableCell align="center">{team.wins}</TableCell>
+                      <TableCell align="center">{team.losses}</TableCell>
+                      <TableCell align="center">{team.ot_losses}</TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2" fontWeight="bold">
+                          {team.points}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <PointsBar percentage={team.win_percentage} />
+                      </TableCell>
+                      <TableCell align="center">{team.goals_for}</TableCell>
+                      <TableCell align="center">{team.goals_against}</TableCell>
+                      <TableCell align="center">
+                        <Typography
+                          variant="body2"
+                          color={diff > 0 ? 'success.main' : diff < 0 ? 'error.main' : 'text.secondary'}
+                        >
+                          {diff > 0 ? '+' : ''}{diff}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <StreakChip streak={team.streak} />
+                      </TableCell>
+                      <TableCell align="center">{team.last_10}</TableCell>
+                      <TableCell align="center">{team.home_record}</TableCell>
+                      <TableCell align="center">{team.away_record}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </>
+    </PlanGuard>
+  );
+
+  // 🟠 Generator Content - Only Generator users see player stats
+  const renderPlayersTab = () => (
+    <PlanGuard requiredPlan="generator" currentPlan={userPlan} fallback={
+      <Alert severity="info" sx={{ mt: 2 }}>
+        Upgrade to Generators Package to access detailed NHL player stats.
+      </Alert>
+    }>
+      <>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">NHL Player Stats</Typography>
+          <Box display="flex" gap={2}>
+            <FormControl sx={{ minWidth: 120 }} size="small">
+              <InputLabel id="player-type-label">Type</InputLabel>
+              <Select
+                labelId="player-type-label"
+                value={playerType}
+                label="Type"
+                onChange={handlePlayerTypeChange}
+              >
+                <MenuItem value="skaters">Skaters</MenuItem>
+                <MenuItem value="goalies">Goalies</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl sx={{ minWidth: 120 }} size="small">
+              <InputLabel id="position-filter-label">Position</InputLabel>
+              <Select
+                labelId="position-filter-label"
+                value={selectedPosition}
+                label="Position"
+                onChange={handlePositionChange}
+              >
+                <MenuItem value="all">All</MenuItem>
+                {playerType === 'skaters' ? (
+                  [
+                    <MenuItem key="C" value="C">Center</MenuItem>,
+                    <MenuItem key="LW" value="LW">Left Wing</MenuItem>,
+                    <MenuItem key="RW" value="RW">Right Wing</MenuItem>,
+                    <MenuItem key="D" value="D">Defense</MenuItem>
+                  ]
+                ) : (
+                  <MenuItem value="G">Goalie</MenuItem>
+                )}
+              </Select>
+            </FormControl>
+          </Box>
+        </Box>
+
+        {!filteredPlayers || filteredPlayers.length === 0 ? (
+          <Alert severity="info">No player data available.</Alert>
+        ) : (
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Player</TableCell>
+                  <TableCell align="center">Team</TableCell>
+                  <TableCell align="center">Pos</TableCell>
+                  {playerType === 'skaters' ? (
+                    <>
+                      <TableCell align="center">GP</TableCell>
+                      <TableCell align="center">G</TableCell>
+                      <TableCell align="center">A</TableCell>
+                      <TableCell align="center">PTS</TableCell>
+                      <TableCell align="center">+/-</TableCell>
+                      <TableCell align="center">PIM</TableCell>
+                      <TableCell align="center">PPG</TableCell>
+                      <TableCell align="center">SHG</TableCell>
+                      <TableCell align="center">GWG</TableCell>
+                      <TableCell align="center">SOG</TableCell>
+                      <TableCell align="center">TOI/G</TableCell>
+                    </>
+                  ) : (
+                    <>
+                      <TableCell align="center">GP</TableCell>
+                      <TableCell align="center">W</TableCell>
+                      <TableCell align="center">L</TableCell>
+                      <TableCell align="center">OTL</TableCell>
+                      <TableCell align="center">GAA</TableCell>
+                      <TableCell align="center">SV%</TableCell>
+                      <TableCell align="center">SO</TableCell>
+                    </>
+                  )}
+                  <TableCell align="center">Fantasy</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredPlayers.map((player) => (
+                  <TableRow key={player.id} hover>
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <PersonIcon fontSize="small" color="action" />
+                        <Typography variant="body2" fontWeight="medium">
+                          {player.name}
+                        </Typography>
+                      </Box>
+                    </TableCell>
+                    <TableCell align="center">{player.team}</TableCell>
+                    <TableCell align="center">
+                      <Chip label={player.position} size="small" variant="outlined" />
+                    </TableCell>
+                    {playerType === 'skaters' ? (
+                      <>
+                        <TableCell align="center">{player.games_played || '—'}</TableCell>
+                        <TableCell align="center">{player.goals || 0}</TableCell>
+                        <TableCell align="center">{player.assists || 0}</TableCell>
+                        <TableCell align="center">
+                          <Typography variant="body2" fontWeight="bold">
+                            {player.points || 0}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <Typography
+                            variant="body2"
+                            color={(player.plus_minus || 0) > 0 ? 'success.main' : (player.plus_minus || 0) < 0 ? 'error.main' : 'text.secondary'}
+                          >
+                            {player.plus_minus || 0}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">{player.penalty_minutes || 0}</TableCell>
+                        <TableCell align="center">{player.power_play_goals || 0}</TableCell>
+                        <TableCell align="center">{player.shorthanded_goals || 0}</TableCell>
+                        <TableCell align="center">{player.game_winning_goals || 0}</TableCell>
+                        <TableCell align="center">{player.shots || 0}</TableCell>
+                        <TableCell align="center">{player.time_on_ice_avg || '—'}</TableCell>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell align="center">{player.games_played || '—'}</TableCell>
+                        <TableCell align="center">{player.wins || 0}</TableCell>
+                        <TableCell align="center">{player.losses || 0}</TableCell>
+                        <TableCell align="center">{player.otl || 0}</TableCell>
+                        <TableCell align="center">{player.goals_against_avg?.toFixed(2) || '0.00'}</TableCell>
+                        <TableCell align="center">{player.save_pct?.toFixed(3) || '.000'}</TableCell>
+                        <TableCell align="center">{player.shutouts || 0}</TableCell>
+                      </>
+                    )}
+                    <TableCell align="center">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Typography variant="body2" fontWeight="bold">
+                          {player.fantasy_points?.toFixed(1) || '—'}
+                        </Typography>
+                        {player.value && (
+                          <Chip
+                            label={player.value.toFixed(1)}
+                            size="small"
+                            color={player.value > 90 ? 'success' : player.value > 70 ? 'warning' : 'default'}
+                            sx={{ height: 20, fontSize: '0.7rem' }}
+                          />
+                        )}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </>
+    </PlanGuard>
+  );
+
+  // 🟠 Generator Content - Only Generator users see credits
+  const renderGeneratorCredits = () => {
+    return (
+      <PlanGuard requiredPlan="generator" currentPlan={userPlan}>
+        <Box sx={{ mb: 3 }}>
+          <GeneratorCredits />
+        </Box>
+      </PlanGuard>
+    );
+  };
+
   return (
     <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
+      {/* Plan indicator chip for testing */}
+      <Box display="flex" justifyContent="flex-end" mb={2}>
+        <Chip 
+          label={`Current Plan: ${userPlan.toUpperCase()}`} 
+          color={userPlan === 'generator' ? 'warning' : userPlan === 'analytics' ? 'secondary' : 'primary'}
+          onDelete={() => {
+            // Cycle through plans for testing
+            if (userPlan === 'starter') setUserPlan('analytics');
+            else if (userPlan === 'analytics') setUserPlan('generator');
+            else setUserPlan('starter');
+          }}
+          deleteIcon={<Box component="span">↻</Box>}
+        />
+      </Box>
+
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box display="flex" alignItems="center" gap={2}>
@@ -465,6 +849,9 @@ const NHLDashboard: React.FC = () => {
         </Box>
       </Box>
 
+      {/* 🟠 Generator Content - Show credits at the top for Generator users */}
+      {renderGeneratorCredits()}
+
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={tabValue} onChange={handleTabChange}>
@@ -474,347 +861,22 @@ const NHLDashboard: React.FC = () => {
         </Tabs>
       </Box>
 
-      {/* Tab: Games */}
-      {tabValue === 0 && (
-        <>
-          <Typography variant="h6" gutterBottom>
-            NHL Games
-          </Typography>
-          {!games || games.length === 0 ? (
-            <Alert severity="info">No games scheduled for today.</Alert>
-          ) : (
-            <Grid container spacing={3}>
-              {games.map((game) => (
-                <Grid item xs={12} md={6} key={game.id}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                        <GameStatusChip status={game.status} />
-                        {game.broadcast && (
-                          <Chip label={game.broadcast} size="small" variant="outlined" />
-                        )}
-                      </Box>
-                      <Box display="flex" justifyContent="space-between" alignItems="center">
-                        {/* Away team */}
-                        <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1 }}>
-                          <Typography variant="h6" fontWeight="bold">
-                            {game.away_team}
-                          </Typography>
-                        </Box>
-                        {/* Score / vs */}
-                        <Box textAlign="center" sx={{ px: 2 }}>
-                          {game.status === 'scheduled' ? (
-                            <Typography variant="body1">@</Typography>
-                          ) : (
-                            <Typography variant="h5" fontWeight="bold">
-                              {game.away_score ?? 0} - {game.home_score ?? 0}
-                            </Typography>
-                          )}
-                        </Box>
-                        {/* Home team */}
-                        <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1, justifyContent: 'flex-end' }}>
-                          <Typography variant="h6" fontWeight="bold">
-                            {game.home_team}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      {game.status === 'live' && game.period && game.time_remaining && (
-                        <Box display="flex" justifyContent="center" mt={2}>
-                          <Chip
-                            label={`${game.period} • ${game.time_remaining}`}
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                          />
-                        </Box>
-                      )}
-                      <Box display="flex" justifyContent="space-between" mt={2}>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <LocationIcon fontSize="small" color="action" />
-                          <Typography variant="caption" color="text.secondary">
-                            {game.venue}
-                          </Typography>
-                        </Box>
-                        <Typography variant="caption" color="text.secondary">
-                          {new Date(game.date).toLocaleString()}
-                        </Typography>
-                      </Box>
-                      {!game.is_real_data && (
-                        <Box display="flex" justifyContent="flex-end" mt={1}>
-                          <Chip label="Simulated" size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-                        </Box>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          )}
-        </>
-      )}
-
-      {/* Tab: Standings */}
-      {tabValue === 1 && (
-        <>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h6">NHL Standings</Typography>
-            <FormControl sx={{ minWidth: 150 }} size="small">
-              <InputLabel id="conference-filter-label">Conference</InputLabel>
-              <Select
-                labelId="conference-filter-label"
-                value={selectedConference}
-                label="Conference"
-                onChange={handleConferenceChange}
-              >
-                <MenuItem value="all">All</MenuItem>
-                <MenuItem value="eastern">Eastern</MenuItem>
-                <MenuItem value="western">Western</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
-
-          {!filteredStandings || filteredStandings.length === 0 ? (
-            <Alert severity="info">No standings data available.</Alert>
-          ) : (
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Team</TableCell>
-                    <TableCell align="center">Conf</TableCell>
-                    <TableCell align="center">Div</TableCell>
-                    <TableCell align="center">GP</TableCell>
-                    <TableCell align="center">W</TableCell>
-                    <TableCell align="center">L</TableCell>
-                    <TableCell align="center">OTL</TableCell>
-                    <TableCell align="center">PTS</TableCell>
-                    <TableCell align="center">P%</TableCell>
-                    <TableCell align="center">GF</TableCell>
-                    <TableCell align="center">GA</TableCell>
-                    <TableCell align="center">DIFF</TableCell>
-                    <TableCell align="center">STRK</TableCell>
-                    <TableCell align="center">L10</TableCell>
-                    <TableCell align="center">HOME</TableCell>
-                    <TableCell align="center">AWAY</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredStandings.map((team) => {
-                    const diff = team.goals_for - team.goals_against;
-                    return (
-                      <TableRow key={team.id} hover>
-                        <TableCell>
-                          <Box display="flex" alignItems="center" gap={1}>
-                            <Typography variant="body2" fontWeight="medium">
-                              {team.team}
-                            </Typography>
-                            <Chip
-                              label={team.abbreviation}
-                              size="small"
-                              variant="outlined"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
-                          </Box>
-                        </TableCell>
-                        <TableCell align="center">
-                          <ConferenceChip conference={team.conference} />
-                        </TableCell>
-                        <TableCell align="center">
-                          <DivisionChip division={team.division} />
-                        </TableCell>
-                        <TableCell align="center">{team.games_played}</TableCell>
-                        <TableCell align="center">{team.wins}</TableCell>
-                        <TableCell align="center">{team.losses}</TableCell>
-                        <TableCell align="center">{team.ot_losses}</TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2" fontWeight="bold">
-                            {team.points}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <PointsBar percentage={team.win_percentage} />
-                        </TableCell>
-                        <TableCell align="center">{team.goals_for}</TableCell>
-                        <TableCell align="center">{team.goals_against}</TableCell>
-                        <TableCell align="center">
-                          <Typography
-                            variant="body2"
-                            color={diff > 0 ? 'success.main' : diff < 0 ? 'error.main' : 'text.secondary'}
-                          >
-                            {diff > 0 ? '+' : ''}{diff}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <StreakChip streak={team.streak} />
-                        </TableCell>
-                        <TableCell align="center">{team.last_10}</TableCell>
-                        <TableCell align="center">{team.home_record}</TableCell>
-                        <TableCell align="center">{team.away_record}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </>
-      )}
-
-      {/* Tab: Players */}
-      {tabValue === 2 && (
-        <>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h6">NHL Player Stats</Typography>
-            <Box display="flex" gap={2}>
-              <FormControl sx={{ minWidth: 120 }} size="small">
-                <InputLabel id="player-type-label">Type</InputLabel>
-                <Select
-                  labelId="player-type-label"
-                  value={playerType}
-                  label="Type"
-                  onChange={handlePlayerTypeChange}
-                >
-                  <MenuItem value="skaters">Skaters</MenuItem>
-                  <MenuItem value="goalies">Goalies</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl sx={{ minWidth: 120 }} size="small">
-                <InputLabel id="position-filter-label">Position</InputLabel>
-                <Select
-                  labelId="position-filter-label"
-                  value={selectedPosition}
-                  label="Position"
-                  onChange={handlePositionChange}
-                >
-                  <MenuItem value="all">All</MenuItem>
-                  {playerType === 'skaters' ? (
-                    [
-                      <MenuItem key="C" value="C">Center</MenuItem>,
-                      <MenuItem key="LW" value="LW">Left Wing</MenuItem>,
-                      <MenuItem key="RW" value="RW">Right Wing</MenuItem>,
-                      <MenuItem key="D" value="D">Defense</MenuItem>
-                    ]
-                  ) : (
-                    <MenuItem value="G">Goalie</MenuItem>
-                  )}
-                </Select>
-              </FormControl>
-            </Box>
-          </Box>
-
-          {!filteredPlayers || filteredPlayers.length === 0 ? (
-            <Alert severity="info">No player data available.</Alert>
-          ) : (
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Player</TableCell>
-                    <TableCell align="center">Team</TableCell>
-                    <TableCell align="center">Pos</TableCell>
-                    {playerType === 'skaters' ? (
-                      <>
-                        <TableCell align="center">GP</TableCell>
-                        <TableCell align="center">G</TableCell>
-                        <TableCell align="center">A</TableCell>
-                        <TableCell align="center">PTS</TableCell>
-                        <TableCell align="center">+/-</TableCell>
-                        <TableCell align="center">PIM</TableCell>
-                        <TableCell align="center">PPG</TableCell>
-                        <TableCell align="center">SHG</TableCell>
-                        <TableCell align="center">GWG</TableCell>
-                        <TableCell align="center">SOG</TableCell>
-                        <TableCell align="center">TOI/G</TableCell>
-                      </>
-                    ) : (
-                      <>
-                        <TableCell align="center">GP</TableCell>
-                        <TableCell align="center">W</TableCell>
-                        <TableCell align="center">L</TableCell>
-                        <TableCell align="center">OTL</TableCell>
-                        <TableCell align="center">GAA</TableCell>
-                        <TableCell align="center">SV%</TableCell>
-                        <TableCell align="center">SO</TableCell>
-                      </>
-                    )}
-                    <TableCell align="center">Fantasy</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredPlayers.map((player) => (
-                    <TableRow key={player.id} hover>
-                      <TableCell>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <PersonIcon fontSize="small" color="action" />
-                          <Typography variant="body2" fontWeight="medium">
-                            {player.name}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">{player.team}</TableCell>
-                      <TableCell align="center">
-                        <Chip label={player.position} size="small" variant="outlined" />
-                      </TableCell>
-                      {playerType === 'skaters' ? (
-                        <>
-                          <TableCell align="center">{player.games_played || '—'}</TableCell>
-                          <TableCell align="center">{player.goals || 0}</TableCell>
-                          <TableCell align="center">{player.assists || 0}</TableCell>
-                          <TableCell align="center">
-                            <Typography variant="body2" fontWeight="bold">
-                              {player.points || 0}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="center">
-                            <Typography
-                              variant="body2"
-                              color={(player.plus_minus || 0) > 0 ? 'success.main' : (player.plus_minus || 0) < 0 ? 'error.main' : 'text.secondary'}
-                            >
-                              {player.plus_minus || 0}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="center">{player.penalty_minutes || 0}</TableCell>
-                          <TableCell align="center">{player.power_play_goals || 0}</TableCell>
-                          <TableCell align="center">{player.shorthanded_goals || 0}</TableCell>
-                          <TableCell align="center">{player.game_winning_goals || 0}</TableCell>
-                          <TableCell align="center">{player.shots || 0}</TableCell>
-                          <TableCell align="center">{player.time_on_ice_avg || '—'}</TableCell>
-                        </>
-                      ) : (
-                        <>
-                          <TableCell align="center">{player.games_played || '—'}</TableCell>
-                          <TableCell align="center">{player.wins || 0}</TableCell>
-                          <TableCell align="center">{player.losses || 0}</TableCell>
-                          <TableCell align="center">{player.otl || 0}</TableCell>
-                          <TableCell align="center">{player.goals_against_avg?.toFixed(2) || '0.00'}</TableCell>
-                          <TableCell align="center">{player.save_pct?.toFixed(3) || '.000'}</TableCell>
-                          <TableCell align="center">{player.shutouts || 0}</TableCell>
-                        </>
-                      )}
-                      <TableCell align="center">
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <Typography variant="body2" fontWeight="bold">
-                            {player.fantasy_points?.toFixed(1) || '—'}
-                          </Typography>
-                          {player.value && (
-                            <Chip
-                              label={player.value.toFixed(1)}
-                              size="small"
-                              color={player.value > 90 ? 'success' : player.value > 70 ? 'warning' : 'default'}
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
-                          )}
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </>
-      )}
+      {/* Tab Content */}
+      {tabValue === 0 && renderGamesTab()}
+      {tabValue === 1 && renderStandingsTab()}
+      {tabValue === 2 && renderPlayersTab()}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Outer Wrapper with Protected Route
+// ----------------------------------------------------------------------
+const NHLDashboard: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="NHLDashboard">
+      <NHLDashboardContent />
+    </ProtectedRoute>
   );
 };
 

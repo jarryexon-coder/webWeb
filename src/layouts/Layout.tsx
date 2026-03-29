@@ -13,9 +13,20 @@ import {
   IconButton,
   Avatar,
   Divider,
+  Badge,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
+import {
+  Dashboard as DashboardIcon,
+  Payment as PaymentIcon,
+  Subscriptions as SubscriptionIcon,
+  Settings as SettingsIcon,
+  ExitToApp as LogoutIcon,
+  Person as PersonIcon
+} from '@mui/icons-material';
 import { navigationGroups } from '../config/navigation';
-import { useAuth } from '../context/AuthContext'; // <-- import auth hook
+import { useAuth } from '../contexts/AuthContext'; // <-- import auth hook
 
 const Layout: React.FC = () => {
   const navigate = useNavigate();
@@ -99,9 +110,16 @@ const Layout: React.FC = () => {
           {user && (
             <Box>
               <IconButton onClick={handleUserMenuOpen} sx={{ p: 0 }}>
-                <Avatar alt={user.displayName || 'User'} src={user.photoURL || ''}>
-                  {!user.photoURL && getUserInitials()}
-                </Avatar>
+                <Badge 
+                  color="success" 
+                  variant="dot" 
+                  overlap="circular"
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                >
+                  <Avatar alt={user.displayName || 'User'} src={user.photoURL || ''}>
+                    {!user.photoURL && getUserInitials()}
+                  </Avatar>
+                </Badge>
               </IconButton>
               <Menu
                 anchorEl={userMenuAnchor}
@@ -109,14 +127,59 @@ const Layout: React.FC = () => {
                 onClose={handleUserMenuClose}
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                PaperProps={{
+                  sx: { width: 240, maxWidth: '100%' }
+                }}
               >
-                <MenuItem disabled>
-                  <Typography variant="body2">
-                    {user.displayName || user.email}
-                  </Typography>
+                <MenuItem disabled sx={{ opacity: 1 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Typography variant="subtitle2" fontWeight="bold">
+                      {user.displayName || 'User'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {user.email}
+                    </Typography>
+                  </Box>
                 </MenuItem>
                 <Divider />
-                <MenuItem onClick={handleLogout}>Logout</MenuItem>
+                
+                {/* 👇 NEW DASHBOARD & ACCOUNT MENU ITEMS 👇 */}
+                <MenuItem onClick={() => { handleUserMenuClose(); navigate('/dashboard'); }}>
+                  <ListItemIcon>
+                    <DashboardIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Dashboard</ListItemText>
+                </MenuItem>
+                
+                <MenuItem onClick={() => { handleUserMenuClose(); navigate('/pricing'); }}>
+                  <ListItemIcon>
+                    <SubscriptionIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Subscription</ListItemText>
+                </MenuItem>
+                
+                <MenuItem onClick={() => { handleUserMenuClose(); navigate('/billing'); }}>
+                  <ListItemIcon>
+                    <PaymentIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Billing</ListItemText>
+                </MenuItem>
+                
+                <MenuItem onClick={() => { handleUserMenuClose(); navigate('/settings'); }}>
+                  <ListItemIcon>
+                    <SettingsIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Settings</ListItemText>
+                </MenuItem>
+                
+                <Divider />
+                
+                <MenuItem onClick={handleLogout}>
+                  <ListItemIcon>
+                    <LogoutIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Logout</ListItemText>
+                </MenuItem>
               </Menu>
             </Box>
           )}

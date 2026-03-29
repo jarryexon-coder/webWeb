@@ -1,10 +1,6 @@
-// src/pages/SecretPhrasesScreen.tsx - FULL INTEGRATION with Secret Phrases & Easter Egg
-// Updated with a 20‑prompt dropdown for NBA, NHL, Golf, Tennis
-// ADDED DEBUG LOGS: Raw API response, state update, and renderPhraseCard
-// FIXED: renderPhraseCard now correctly displays phrase.phrase
-// ADDED: Generator request limit (2 requests) and "Show More" functionality
+// src/pages/SecretPhraseScreen.tsx - FINAL VERSION with top 3 picks and duplicate prevention
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -36,7 +32,9 @@ import {
   Slider,
   List,
   ListItem,
-  ListItemText
+  ListItemText,
+  Snackbar,
+  Tooltip,
 } from '@mui/material';
 import { Link } from 'react-router-dom';
 import {
@@ -57,9 +55,40 @@ import {
   Insights as InsightsIcon,
   Lock as LockIcon,
   Send as SendIcon,
-  EmojiEvents as EmojiEventsIcon
+  EmojiEvents as EmojiEventsIcon,
+  History as HistoryIcon,
+  TrendingDown as TrendingDownIcon,
+  Whatshot as WhatshotIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
+  ExpandMore as ExpandMoreIcon,
+  CreditCard as CreditCardIcon,
+  Shuffle as ShuffleIcon,
+  FilterAlt as FilterAltIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import ProtectedRoute from '../components/ProtectedRoute';
+import { getAuth } from 'firebase/auth';
+
+// ============================================
+// CONSTANTS
+// ============================================
+const MAX_VISIBLE_PHRASES = 3; // Show only top 3 picks by default
+const MAX_GENERATED_PICKS = 5; // Generate up to 5 additional picks
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+
+// Helper function to get Firebase ID token
+const getFirebaseIdToken = async (): Promise<string | null> => {
+  const auth = getAuth();
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    return await user.getIdToken();
+  } catch (error) {
+    console.error('Error getting ID token:', error);
+    return null;
+  }
+};
 
 // ============================================
 // TYPES
@@ -75,10 +104,21 @@ interface SecretPhrase {
   game?: string;
   player?: string;
   team?: string;
+  opponent?: string;
+  stat?: string;
+  line?: number;
+  projection?: number;
+  edge?: string;
+  edge_percentage?: number;
+  odds?: string;
+  bookmaker?: string;
+  type?: 'Over' | 'Under';
   timestamp: string;
   tags?: string[];
   analysis?: string;
   expiration?: string;
+  is_mock?: boolean;
+  generated_variation?: number; // Track which variation this is
 }
 
 interface ApiResponse {
@@ -87,31 +127,30 @@ interface ApiResponse {
   phrases: SecretPhrase[];
   scraped?: boolean;
   sources?: string[];
-}
-
-// Secret phrase handler types
-interface SecretPhraseHandlerContext {
-  sport: string;
-  customQuery: string;
-  playerData?: any;
-}
-
-interface SecretPhraseDefinition {
-  triggers: string[];
-  category: string;
-  handler: (context: SecretPhraseHandlerContext) => Promise<any>;
-  description: string;
-  rarity?: 'common' | 'uncommon' | 'rare' | 'legendary';
-  requiresPremium?: boolean;
-  analytics?: any;
+  cache_age?: number;
+  cached?: boolean;
+  filters_applied?: any;
+  timestamp?: string;
+  total_available?: number;
 }
 
 // ============================================
-// MAIN COMPONENT
+// MAIN CONTENT COMPONENT
 // ============================================
 
-const SecretPhrasesScreen: React.FC = () => {
+const SecretPhraseContent: React.FC = () => {
   const theme = useTheme();
+  const auth = getAuth();
+  const user = auth.currentUser;
+
+  // Subscription & Credits State
+  const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
+  const [generatorCredits, setGeneratorCredits] = useState(0);
+  const [plan, setPlan] = useState('free');
+  const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' | 'warning' });
 
   // State
   const [phrases, setPhrases] = useState<SecretPhrase[]>([]);
@@ -119,6 +158,7 @@ const SecretPhrasesScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [apiSource, setApiSource] = useState<string>('API');
 
   // Filters
   const [selectedSport, setSelectedSport] = useState('nba');
@@ -134,275 +174,581 @@ const SecretPhrasesScreen: React.FC = () => {
   const [showGeneratorModal, setShowGeneratorModal] = useState(false);
   const [customQuery, setCustomQuery] = useState('');
   const [generatedResult, setGeneratedResult] = useState<any>(null);
-  const [selectedPromptCategory, setSelectedPromptCategory] = useState('Insider Tips');
-  const [selectedPrompt, setSelectedPrompt] = useState(''); // dropdown prompt selection
+  const [selectedPrompt, setSelectedPrompt] = useState('');
 
-  // Generator request limit and pagination states
+  // Generator pagination states
   const [availablePhrases, setAvailablePhrases] = useState<SecretPhrase[]>([]);
   const [displayedPhrases, setDisplayedPhrases] = useState<SecretPhrase[]>([]);
   const [showMoreButton, setShowMoreButton] = useState(false);
-  const [remainingRequests, setRemainingRequests] = useState(2);
-  const [usedPhraseIds, setUsedPhraseIds] = useState<Set<string>>(new Set());
+
+  // Generated picks state
+  const [generatedPicks, setGeneratedPicks] = useState<SecretPhrase[]>([]);
+  const [showingGeneratedPicks, setShowingGeneratedPicks] = useState(false);
+  const [generationVariation, setGenerationVariation] = useState(1);
+  const [usedPlayerIds, setUsedPlayerIds] = useState<Set<string>>(new Set());
 
   // Secret phrase states
-  const [secretPhraseResult, setSecretPhraseResult] = useState<any>(null);
   const [phraseAnalytics, setPhraseAnalytics] = useState<any>(null);
 
   // Display options
   const [showAllPhrases, setShowAllPhrases] = useState(false);
   const [filteredPhrases, setFilteredPhrases] = useState<SecretPhrase[]>([]);
 
-  // ============================================
-  // API URL
-  // ============================================
-  const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
-
-  // ============================================
-  // 20 useful prompts for NBA, NHL, Golf, Tennis
-  // ============================================
-  const USEFUL_PROMPTS_EXTENDED = [
-    // NBA
-    "Generate insider tips for tonight's NBA games",
-    "Which NBA players have the best prop value tonight?",
-    "Show me sharp money moves for NBA",
-    "NBA injury updates affecting tonight's games",
-    "Advanced analytics suggesting an NBA breakout player",
-    // NHL
-    "NHL goalie fatigue insights for tonight",
-    "Best NHL player props based on defensive matchups",
-    "NHL line movements with sharp action",
-    "NHL power play regression candidates",
-    "NHL back-to-back travel advantages",
-    // Golf
-    "Golf DFS picks for this week's tournament",
-    "Golf course fit – which players excel at this venue?",
-    "Golf weather impact – wind and rain predictions",
-    "Top 10 finish predictions for PGA event",
-    "Golf betting odds movement – sharp money",
-    // Tennis
-    "Tennis head-to-head trends for upcoming matches",
-    "Tennis surface advantage – clay vs grass specialists",
-    "Tennis injury updates affecting match odds",
-    "Tennis underdog value picks this week",
-    "Tennis serve stats – players with high ace rates"
+  // Variation strategies for generating unique responses
+  const variationStrategies = [
+    { name: 'High Confidence', weight: 0.4, filter: (p: SecretPhrase) => p.confidence >= 80 },
+    { name: 'Positive Edge', weight: 0.3, filter: (p: SecretPhrase) => (p.edge_percentage || 0) > 5 },
+    { name: 'Player Props', weight: 0.2, filter: (p: SecretPhrase) => p.stat !== undefined && p.player !== undefined },
+    { name: 'Sharp Money', weight: 0.1, filter: (p: SecretPhrase) => p.category === 'sharp_money' },
   ];
 
   // ============================================
-  // Generate comprehensive mock phrases
+  // Helper: Get top picks with variation
   // ============================================
-  const generateMockPhrases = (sport: string): SecretPhrase[] => {
-    const now = new Date().toISOString();
-    const allMocks: SecretPhrase[] = [
-      // Insider Tips
-      {
-        id: 'mock-insider-1',
-        phrase: 'Lakers are targeting a trade for a defensive center before deadline',
-        category: 'insider_tip',
-        sport: 'nba',
-        confidence: 85,
-        source: 'ESPN Insider',
-        team: 'Lakers',
-        timestamp: now,
-        tags: ['trade', 'rumor'],
-        analysis: 'High likelihood based on recent moves'
-      },
-      {
-        id: 'mock-insider-2',
-        phrase: 'Chiefs offensive coordinator hinted at more deep shots this week',
-        category: 'insider_tip',
-        sport: 'nfl',
-        confidence: 72,
-        source: 'NFL Network',
-        team: 'Chiefs',
-        timestamp: now,
-        tags: ['offense', 'strategy'],
-        analysis: 'Could benefit WRs'
-      },
-      // Sharp Money
-      {
-        id: 'mock-sharp-1',
-        phrase: 'Sharp money on UNDER in Lakers vs Warriors - line dropped from 232 to 229',
-        category: 'sharp_money',
-        sport: 'nba',
-        confidence: 88,
-        source: 'Action Network',
-        game: 'Lakers @ Warriors',
-        timestamp: now,
-        tags: ['under', 'line movement'],
-        analysis: '70% of money but only 45% of bets on under'
-      },
-      {
-        id: 'mock-sharp-2',
-        phrase: 'Steam move on Eagles -3.5 - sharp action detected',
-        category: 'sharp_money',
-        sport: 'nfl',
-        confidence: 91,
-        source: 'Circa Sports',
-        team: 'Eagles',
-        timestamp: now,
-        tags: ['steam', 'sharp'],
-        analysis: 'Multiple sportsbooks moving simultaneously'
-      },
-      // Prop Value
-      {
-        id: 'mock-prop-1',
-        phrase: 'Jokic triple-double props seeing heavy action - line likely to move',
-        category: 'prop_value',
-        sport: 'nba',
-        confidence: 92,
-        source: 'PrizePicks',
-        player: 'Nikola Jokic',
-        team: 'Nuggets',
-        timestamp: now,
-        tags: ['prop', 'jokic'],
-        analysis: 'Strong correlation with recent minutes'
-      },
-      {
-        id: 'mock-prop-2',
-        phrase: 'Aaron Judge over 1.5 total bases has 65% success rate vs lefties',
-        category: 'prop_value',
-        sport: 'mlb',
-        confidence: 72,
-        source: 'Fantasy Labs',
-        player: 'Aaron Judge',
-        team: 'Yankees',
-        timestamp: now,
-        tags: ['analytics', 'split'],
-        analysis: 'Historical data supports'
-      },
-      // Injury Update
-      {
-        id: 'mock-injury-1',
-        phrase: 'LeBron James minutes restriction expected to be lifted tonight',
-        category: 'injury_update',
-        sport: 'nba',
-        confidence: 88,
-        source: 'Shams Charania',
-        player: 'LeBron James',
-        team: 'Lakers',
-        timestamp: now,
-        tags: ['injury', 'minutes'],
-        analysis: 'Confirmed by team sources'
-      },
-      {
-        id: 'mock-injury-2',
-        phrase: 'Christian McCaffrey listed as questionable but expected to play',
-        category: 'injury_update',
-        sport: 'nfl',
-        confidence: 76,
-        source: 'Ian Rapoport',
-        player: 'Christian McCaffrey',
-        team: '49ers',
-        timestamp: now,
-        tags: ['injury', 'questionable'],
-        analysis: 'Likely to suit up'
-      },
-      // Line Move
-      {
-        id: 'mock-line-1',
-        phrase: 'Bruins -1.5 puck line sharp play tonight - 70% of money on Boston',
-        category: 'line_move',
-        sport: 'nhl',
-        confidence: 68,
-        source: 'BetMGM',
-        team: 'Bruins',
-        game: 'Bruins vs Maple Leafs',
-        timestamp: now,
-        tags: ['puck line', 'sharp'],
-        analysis: 'Public on Toronto but sharp on Boston'
-      },
-      {
-        id: 'mock-line-2',
-        phrase: 'Dodgers -130 has moved to -145 overnight - heavy action',
-        category: 'line_move',
-        sport: 'mlb',
-        confidence: 81,
-        source: 'DraftKings',
-        team: 'Dodgers',
-        timestamp: now,
-        tags: ['mlb', 'line move'],
-        analysis: 'Consistent across multiple books'
-      },
-      // Advanced Analytics
-      {
-        id: 'mock-analytics-1',
-        phrase: 'Luka Doncic usage rate up 8% in last 5 games - over 31.5 points projected',
-        category: 'advanced_analytics',
-        sport: 'nba',
-        confidence: 84,
-        source: 'NBA Advanced Stats',
-        player: 'Luka Doncic',
-        team: 'Mavericks',
-        timestamp: now,
-        tags: ['usage', 'projection'],
-        analysis: 'Kyrie absence increases usage'
-      },
-      {
-        id: 'mock-analytics-2',
-        phrase: 'Ravens run-pass ratio heavily skewed to run in red zone - 78% run rate',
-        category: 'advanced_analytics',
-        sport: 'nfl',
-        confidence: 79,
-        source: 'ESPN Analytics',
-        team: 'Ravens',
-        timestamp: now,
-        tags: ['analytics', 'red zone'],
-        analysis: 'Gus Edwards value increases'
+  const getTopPicksWithVariation = (phrases: SecretPhrase[], limit: number = 3, variation: number = 1): SecretPhrase[] => {
+    if (!phrases.length) return [];
+    
+    // Create a copy to work with
+    let availablePhrases = [...phrases];
+    
+    // Apply variation strategy based on variation number
+    const strategyIndex = (variation - 1) % variationStrategies.length;
+    const primaryStrategy = variationStrategies[strategyIndex];
+    const secondaryStrategies = variationStrategies.filter((_, i) => i !== strategyIndex);
+    
+    let selectedPicks: SecretPhrase[] = [];
+    let remainingLimit = limit;
+    
+    // First, try to get picks from primary strategy
+    let primaryPicks = availablePhrases.filter(primaryStrategy.filter);
+    
+    // If primary strategy doesn't yield enough, add from secondary strategies
+    if (primaryPicks.length < remainingLimit) {
+      selectedPicks.push(...primaryPicks);
+      remainingLimit -= primaryPicks.length;
+      
+      // Remove used picks
+      const usedIds = new Set(selectedPicks.map(p => p.id));
+      availablePhrases = availablePhrases.filter(p => !usedIds.has(p.id));
+      
+      // Try secondary strategies
+      for (const strategy of secondaryStrategies) {
+        if (remainingLimit <= 0) break;
+        const strategyPicks = availablePhrases
+          .filter(strategy.filter)
+          .sort((a, b) => b.confidence - a.confidence)
+          .slice(0, remainingLimit);
+        
+        selectedPicks.push(...strategyPicks);
+        remainingLimit -= strategyPicks.length;
+        
+        const newUsedIds = new Set(strategyPicks.map(p => p.id));
+        availablePhrases = availablePhrases.filter(p => !newUsedIds.has(p.id));
       }
-    ];
-    // Filter by sport
-    return sport === 'all' ? allMocks : allMocks.filter(p => p.sport === sport);
+    } else {
+      // Sort primary picks by confidence and take top ones
+      primaryPicks.sort((a, b) => b.confidence - a.confidence);
+      selectedPicks = primaryPicks.slice(0, remainingLimit);
+      remainingLimit = 0;
+    }
+    
+    // If still need more picks, fill with highest confidence remaining
+    if (remainingLimit > 0 && availablePhrases.length > 0) {
+      const remainingPicks = availablePhrases
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, remainingLimit);
+      selectedPicks.push(...remainingPicks);
+    }
+    
+    // Add variation tracking
+    return selectedPicks.map(pick => ({
+      ...pick,
+      generated_variation: variation
+    }));
   };
 
   // ============================================
-  // Fetch secret phrases
+  // Helper: Get unique picks not in existing sets
   // ============================================
-  const fetchSecretPhrases = useCallback(async (sport: string, category: string, minConf: number) => {
-    const url = `${API_BASE_URL}/api/secret-phrases?sport=${sport}&category=${category}&min_confidence=${minConf}`;
+  const getUniquePicks = (
+    sourcePhrases: SecretPhrase[], 
+    excludeIds: Set<string>, 
+    limit: number,
+    variation: number
+  ): SecretPhrase[] => {
+    // Filter out already used picks
+    const available = sourcePhrases.filter(p => !excludeIds.has(p.id));
+    
+    // Apply variation strategy to get diverse picks
+    const strategyIndex = variation % variationStrategies.length;
+    const strategy = variationStrategies[strategyIndex];
+    
+    // First try strategy-specific picks
+    let strategyPicks = available.filter(strategy.filter);
+    strategyPicks.sort((a, b) => b.confidence - a.confidence);
+    
+    let selected = strategyPicks.slice(0, limit);
+    
+    // If not enough, fill with highest confidence remaining
+    if (selected.length < limit) {
+      const usedSelectedIds = new Set(selected.map(p => p.id));
+      const remaining = available.filter(p => !usedSelectedIds.has(p.id));
+      const fillPicks = remaining
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, limit - selected.length);
+      selected.push(...fillPicks);
+    }
+    
+    return selected.map(pick => ({
+      ...pick,
+      generated_variation: variation
+    }));
+  };
+
+  // ============================================
+  // FETCH SUBSCRIPTION & CREDITS
+  // ============================================
+  const fetchSubscriptionAndCredits = useCallback(async () => {
+    if (!user || !user.uid) return;
+
+    try {
+      const token = await getFirebaseIdToken();
+      if (!token) return;
+
+      const subResponse = await fetch(`${PYTHON_API_BASE}/api/subscriptions/my-subscription`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const subData = await subResponse.json();
+
+      if (subData.success && subData.subscription) {
+        const isActive = subData.subscription.status === 'active';
+        setHasPremiumAccess(isActive);
+        setPlan(subData.subscription.plan_id || 'free');
+        setSubscriptionStatus(subData.subscription.status);
+      }
+
+      const profileResponse = await fetch(`${PYTHON_API_BASE}/api/user/profile`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const profileData = await profileResponse.json();
+      setGeneratorCredits(profileData.credits || 0);
+
+    } catch (error) {
+      console.error('Failed to fetch subscription/credits:', error);
+    }
+  }, [user]);
+
+  // ============================================
+  // STRIPE CHECKOUT FUNCTIONS
+  // ============================================
+  const handleSubscriptionCheckout = async (planId: string, interval: string = 'month') => {
+    try {
+      const token = await getFirebaseIdToken();
+      const response = await fetch(`${PYTHON_API_BASE}/api/subscriptions/create-checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planId, interval }),
+      });
+
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setSnackbar({ open: true, message: 'Failed to create checkout session', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      setSnackbar({ open: true, message: 'Checkout error', severity: 'error' });
+    }
+  };
+
+  const handleCreditsCheckout = async (credits: number) => {
+    try {
+      const token = await getFirebaseIdToken();
+      const response = await fetch(`${PYTHON_API_BASE}/api/generator/credits/checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ credits }),
+      });
+
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setSnackbar({ open: true, message: 'Failed to create credits checkout', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Credits checkout error:', error);
+      setSnackbar({ open: true, message: 'Credits checkout error', severity: 'error' });
+    }
+  };
+
+  // ============================================
+  // ENHANCED PROMPTS
+  // ============================================
+  const SECRET_PHRASE_PROMPTS = [
+    'Generate insider tips for tonight\'s NBA games',
+    'Latest injury updates from team sources',
+    'Breaking news from locker room insiders',
+    'Team chemistry issues affecting performance',
+    'Contract year players to watch',
+    'Sharp money moves detected in last hour',
+    'Steam moves on tonight\'s games',
+    'Reverse line movement alerts',
+    'Professional bettor positions to follow',
+    'Biggest liability for sportsbooks tonight',
+    'Players due for regression based on analytics',
+    'Advanced metrics suggesting breakout candidates',
+    'Underlying numbers that beat the market',
+    'Predictive clustering analysis results',
+    'Bayesian inference model predictions',
+    'Most undervalued player props tonight',
+    'Props where public money is wrong',
+    'Best value props according to model',
+    'Correlated prop opportunities',
+    'Same game parlay building blocks'
+  ];
+
+  // ============================================
+  // Helper: Format stat for display
+  // ============================================
+  const formatStatDisplay = (stat: string, type?: string, line?: number): string => {
+    let formattedStat = String(stat || '').toLowerCase();
+    
+    if (formattedStat === 'pts' || formattedStat === 'points') formattedStat = 'Points';
+    else if (formattedStat === 'reb' || formattedStat === 'rebounds') formattedStat = 'Rebounds';
+    else if (formattedStat === 'ast' || formattedStat === 'assists') formattedStat = 'Assists';
+    else if (formattedStat === 'stl' || formattedStat === 'steals') formattedStat = 'Steals';
+    else if (formattedStat === 'blk' || formattedStat === 'blocks') formattedStat = 'Blocks';
+    else if (formattedStat === 'three_pointers' || formattedStat === '3pm') formattedStat = '3PM';
+    else formattedStat = stat.charAt(0).toUpperCase() + stat.slice(1);
+    
+    if (type && line) {
+      const roundedLine = Math.round(line * 10) / 10;
+      return `${formattedStat} ${type} ${roundedLine}`;
+    }
+    
+    return formattedStat;
+  };
+
+  // ============================================
+  // Generate enhanced mock phrases
+  // ============================================
+  const generateEnhancedMockPhrases = (sport: string): SecretPhrase[] => {
+    const now = new Date().toISOString();
+    const today = new Date().toLocaleDateString();
+    
+    const nbaMocks: SecretPhrase[] = [
+      {
+        id: `nba-mock-1-${Date.now()}`,
+        phrase: `LeBron James over 25.5 points - strong matchup vs Bulls (${today})`,
+        category: 'prop_value',
+        sport: 'nba',
+        confidence: 82,
+        source: 'NBA Advanced Stats',
+        player: 'LeBron James',
+        team: 'Lakers',
+        opponent: 'Bulls',
+        stat: 'points',
+        line: 25.5,
+        projection: 27.8,
+        edge: '+9%',
+        edge_percentage: 9,
+        odds: '-110',
+        bookmaker: 'DraftKings',
+        type: 'Over',
+        timestamp: now,
+        tags: ['points', 'lebron', 'value'],
+        analysis: 'LeBron averages 28.2 vs Bulls in last 5 meetings'
+      },
+      {
+        id: `nba-mock-2-${Date.now()}`,
+        phrase: `Stephen Curry over 4.5 three-pointers - hot from deep (${today})`,
+        category: 'prop_value',
+        sport: 'nba',
+        confidence: 78,
+        source: 'ESPN Stats',
+        player: 'Stephen Curry',
+        team: 'Warriors',
+        opponent: 'Kings',
+        stat: 'three_pointers',
+        line: 4.5,
+        projection: 5.2,
+        edge: '+15%',
+        edge_percentage: 15,
+        odds: '+120',
+        bookmaker: 'FanDuel',
+        type: 'Over',
+        timestamp: now,
+        tags: ['threes', 'curry', 'value'],
+        analysis: 'Curry averaging 5.8 3PM at home this season'
+      },
+      {
+        id: `nba-mock-3-${Date.now()}`,
+        phrase: `Giannis Antetokounmpo double-double - lock of the night (${today})`,
+        category: 'insider_tip',
+        sport: 'nba',
+        confidence: 88,
+        source: 'Team Insider',
+        player: 'Giannis Antetokounmpo',
+        team: 'Bucks',
+        opponent: 'Heat',
+        stat: 'double_double',
+        line: 1,
+        projection: 0.85,
+        edge: '+85%',
+        edge_percentage: 85,
+        odds: '-250',
+        bookmaker: 'BetMGM',
+        type: 'Over',
+        timestamp: now,
+        tags: ['giannis', 'lock', 'double-double'],
+        analysis: 'Giannis has double-double in 12 of last 15 games'
+      },
+      {
+        id: `nba-mock-4-${Date.now()}`,
+        phrase: `Jokic triple-double props - sharp money coming in (${today})`,
+        category: 'sharp_money',
+        sport: 'nba',
+        confidence: 85,
+        source: 'Action Network',
+        player: 'Nikola Jokic',
+        team: 'Nuggets',
+        opponent: 'Spurs',
+        stat: 'triple_double',
+        line: 1,
+        projection: 0.65,
+        edge: '+65%',
+        edge_percentage: 65,
+        odds: '+180',
+        bookmaker: 'Caesars',
+        type: 'Over',
+        timestamp: now,
+        tags: ['jokic', 'sharp', 'triple-double'],
+        analysis: '70% of money on Jokic triple-double, only 45% of bets'
+      },
+      {
+        id: `nba-mock-5-${Date.now()}`,
+        phrase: `Luka Doncic under 8.5 assists - line movement detected (${today})`,
+        category: 'line_move',
+        sport: 'nba',
+        confidence: 72,
+        source: 'Circa Sports',
+        player: 'Luka Doncic',
+        team: 'Mavericks',
+        opponent: 'Thunder',
+        stat: 'assists',
+        line: 8.5,
+        projection: 7.8,
+        edge: '-8%',
+        edge_percentage: -8,
+        odds: '-105',
+        bookmaker: 'BetRivers',
+        type: 'Under',
+        timestamp: now,
+        tags: ['doncic', 'line-move', 'assists'],
+        analysis: 'Line moved from 8 to 8.5, sharp action on under'
+      },
+      {
+        id: `nba-mock-6-${Date.now()}`,
+        phrase: `Anthony Davis over 11.5 rebounds - favorable matchup (${today})`,
+        category: 'advanced_analytics',
+        sport: 'nba',
+        confidence: 81,
+        source: 'NBA Math',
+        player: 'Anthony Davis',
+        team: 'Lakers',
+        opponent: 'Bulls',
+        stat: 'rebounds',
+        line: 11.5,
+        projection: 12.4,
+        edge: '+8%',
+        edge_percentage: 8,
+        odds: '-110',
+        bookmaker: 'DraftKings',
+        type: 'Over',
+        timestamp: now,
+        tags: ['ad', 'rebounds', 'analytics'],
+        analysis: 'Bulls allow 4th most rebounds to opposing bigs'
+      }
+    ];
+
+    const nflMocks: SecretPhrase[] = [
+      {
+        id: `nfl-mock-1-${Date.now()}`,
+        phrase: `Patrick Mahomes over 300.5 passing yards - sharp play (${today})`,
+        category: 'sharp_money',
+        sport: 'nfl',
+        confidence: 84,
+        source: 'Sharp Football',
+        player: 'Patrick Mahomes',
+        team: 'Chiefs',
+        opponent: 'Raiders',
+        stat: 'passing_yards',
+        line: 300.5,
+        projection: 315.2,
+        edge: '+5%',
+        edge_percentage: 5,
+        odds: '-110',
+        bookmaker: 'BetMGM',
+        type: 'Over',
+        timestamp: now,
+        tags: ['mahomes', 'passing', 'sharp'],
+        analysis: 'Raiders allow 2nd most passing yards'
+      }
+    ];
+
+    const mlbMocks: SecretPhrase[] = [
+      {
+        id: `mlb-mock-1-${Date.now()}`,
+        phrase: `Shohei Ohtani over 1.5 hits + RBI - MVP candidate heating up (${today})`,
+        category: 'prop_value',
+        sport: 'mlb',
+        confidence: 75,
+        source: 'Baseball Savant',
+        player: 'Shohei Ohtani',
+        team: 'Dodgers',
+        opponent: 'Padres',
+        stat: 'hits_rbi',
+        line: 1.5,
+        projection: 2.1,
+        edge: '+40%',
+        edge_percentage: 40,
+        odds: '+130',
+        bookmaker: 'DraftKings',
+        type: 'Over',
+        timestamp: now,
+        tags: ['ohtani', 'hits', 'rbi'],
+        analysis: 'Ohtani has 8 hits and 6 RBI in last 5 games'
+      }
+    ];
+
+    const allMocks = [...nbaMocks, ...nflMocks, ...mlbMocks];
+    
+    if (sport === 'all') {
+      return allMocks.sort(() => 0.5 - Math.random()).slice(0, 15);
+    }
+    
+    return allMocks
+      .filter(p => p.sport === sport)
+      .sort(() => 0.5 - Math.random())
+      .slice(0, 10);
+  };
+
+  // ============================================
+  // Fetch secret phrases - NO HEADERS to avoid CORS
+  // ============================================
+  const fetchSecretPhrases = useCallback(async (sport: string, category: string, minConf: number, bypassCache: boolean = false) => {
+    const today = new Date().toDateString();
+    const timestamp = Date.now();
+    const cacheBuster = bypassCache ? `&daily=${encodeURIComponent(today)}&_t=${timestamp}` : '';
+    
+    const url = `${PYTHON_API_BASE}/api/secret-phrases?sport=${sport}&category=${category}&min_confidence=${minConf}${cacheBuster}`;
+    
     console.log(`🔍 Fetching from: ${url}`);
 
     try {
       const response = await fetch(url);
+      
       if (!response.ok) throw new Error(`API error: ${response.status}`);
       const data: ApiResponse = await response.json();
       
-      // 🔍 DEBUG: Raw API response and first phrase
-      console.log('🔍 Raw API response:', data);
-      if (data.phrases && data.phrases.length > 0) {
-        console.log('🔍 First phrase from API:', data.phrases[0]);
-      }
+      console.log('🔍 Raw API response:', {
+        cache_age: data.cache_age,
+        cached: data.cached,
+        count: data.count,
+        timestamp: data.timestamp,
+        sources: data.sources
+      });
       
-      console.log('✅ API Response:', data);
-      console.log(`📊 Phrases count: ${data.count}`);
-      
-      // Always combine real and mock to have enough variety
       const real = data.phrases || [];
-      const mock = generateMockPhrases(sport);
+      console.log(`📊 Real phrases count: ${real.length}`);
       
-      // Avoid duplicates (simple by checking phrase text)
-      const existingPhrases = new Set(real.map(p => p.phrase));
-      const newMock = mock.filter(m => !existingPhrases.has(m.phrase));
-      
-      // Combine, ensuring we have at least 10 items total for variety
-      const combined = [...real, ...newMock];
-      return combined;
+      if (real.length > 0) {
+        setApiSource(`Real API Data (${data.sources?.join(', ') || 'Unknown'})`);
+        console.log('✅ Using real API data');
+        
+        if (real.length > 10) {
+          const shuffled = [...real].sort(() => 0.5 - Math.random());
+          return shuffled;
+        }
+        return real;
+      } else {
+        console.log('⚠️ No real data received from API');
+        const enhancedMock = generateEnhancedMockPhrases(sport);
+        setApiSource('Enhanced Mock Data');
+        return enhancedMock;
+      }
     } catch (err) {
-      console.error('❌ Fetch error, using mock data:', err);
-      // Return all mock data as fallback
-      return generateMockPhrases(sport);
+      console.error('❌ Fetch error:', err);
+      const enhancedMock = generateEnhancedMockPhrases(sport);
+      setApiSource('Mock Data (Error Fallback)');
+      return enhancedMock;
     }
   }, []);
 
-  // Load data on mount and when filters change
+  // ============================================
+  // Handlers
+  // ============================================
+  const handleSportChange = (sportId: string) => {
+    setSelectedSport(sportId);
+    setSelectedTabCategory('all');
+    setSearchQuery('');
+    setSearchInput('');
+    setShowingGeneratedPicks(false);
+    setGeneratedPicks([]);
+    setUsedPlayerIds(new Set());
+  };
+
+  const handleCategoryChange = (event: any) => {
+    setSelectedCategory(event.target.value);
+  };
+
+  const handleTabCategoryChange = (event: React.SyntheticEvent, newValue: string) => {
+    setSelectedTabCategory(newValue);
+    setShowingGeneratedPicks(false);
+  };
+
+  const handleConfidenceChange = (event: any, newValue: number | number[]) => {
+    setMinConfidence(newValue as number);
+  };
+
+  const handleSearchSubmit = () => {
+    if (searchInput.trim()) {
+      setSearchQuery(searchInput.trim());
+    }
+  };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setShowingGeneratedPicks(false);
+    setGeneratedPicks([]);
+    try {
+      const data = await fetchSecretPhrases(selectedSport, selectedCategory, minConfidence, true);
+      setPhrases(data);
+      setLastUpdated(new Date());
+      setUsedPlayerIds(new Set());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedSport, selectedCategory, minConfidence, fetchSecretPhrases]);
+
+  // Load data on mount
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchSecretPhrases(selectedSport, selectedCategory, minConfidence);
+        const data = await fetchSecretPhrases(selectedSport, selectedCategory, minConfidence, true);
         setPhrases(data);
-        // 🔍 DEBUG: Phrases state updated
-        console.log('🔍 Phrases state updated:', data);
         setLastUpdated(new Date());
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load secret phrases');
@@ -414,11 +760,15 @@ const SecretPhrasesScreen: React.FC = () => {
     loadData();
   }, [selectedSport, selectedCategory, minConfidence, fetchSecretPhrases]);
 
+  // Fetch subscription and credits on mount
+  useEffect(() => {
+    fetchSubscriptionAndCredits();
+  }, [fetchSubscriptionAndCredits]);
+
   // Filter by search query and tab category
   useEffect(() => {
     let filtered = phrases;
     
-    // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(p => {
@@ -435,7 +785,6 @@ const SecretPhrasesScreen: React.FC = () => {
       });
     }
     
-    // Apply tab category filter
     if (selectedTabCategory !== 'all') {
       filtered = filtered.filter(p => p.category === selectedTabCategory);
     }
@@ -443,815 +792,253 @@ const SecretPhrasesScreen: React.FC = () => {
     setFilteredPhrases(filtered);
   }, [searchQuery, phrases, selectedTabCategory]);
 
-  // ============================================
-  // Secret Phrase Definitions
-  // ============================================
+  // Get top picks with variation for initial display
+  const topPicks = getTopPicksWithVariation(filteredPhrases, MAX_VISIBLE_PHRASES, generationVariation);
 
-  // Easter Egg detection (special case)
-  const checkForEasterEgg = (prompt: string) => {
-    if (prompt.toLowerCase().includes('easter egg')) {
-      handleEasterEggActivation();
-      return true;
-    }
-    return false;
-  };
-
-  const handleEasterEggActivation = () => {
-    console.log('🎉 Easter Egg Activated!');
-    
-    // Log analytics (mock)
-    console.log('Analytics: easter_egg_activated', {
-      player_name: undefined,
-      sport: selectedSport,
-      feature: 'bench_player_parlays',
-    });
-
-    // Generate bench player parlay
-    const benchPlayerData = [
-      {
-        name: 'Alex Caruso',
-        team: 'CHI',
-        position: 'SG',
-        stat: 'Steals',
-        value: 'Over 1.5',
-        probability: '82%',
-        reasoning: 'League leader in steal rate, opponent turns over ball 15 times per game',
-        odds: '+180'
-      },
-      {
-        name: 'TJ McConnell',
-        team: 'IND',
-        position: 'PG',
-        stat: 'Assists',
-        value: 'Over 5.5',
-        probability: '78%',
-        reasoning: 'Primary playmaker with second unit, averages 7.2 assists per 36 minutes',
-        odds: '+150'
-      },
-      {
-        name: 'Naz Reid',
-        team: 'MIN',
-        position: 'C',
-        stat: 'Points',
-        value: 'Over 11.5',
-        probability: '75%',
-        reasoning: 'High-usage bench scorer, faces backup centers averaging 25+ minutes',
-        odds: '+140'
-      },
-      {
-        name: 'Malik Monk',
-        team: 'SAC',
-        position: 'SG',
-        stat: 'Points',
-        value: 'Over 15.5',
-        probability: '80%',
-        reasoning: 'Sixth Man of the Year candidate, consistently high scoring off bench',
-        odds: '+160'
-      },
-      {
-        name: 'Jonathan Kuminga',
-        team: 'GSW',
-        position: 'PF',
-        stat: 'Points+Rebounds',
-        value: 'Over 18.5',
-        probability: '77%',
-        reasoning: 'Emerging young player getting 25+ minutes, high athleticism',
-        odds: '+175'
-      }
-    ];
-
-    // Generate a parlay with 3 bench players
-    const selectedPlayers = benchPlayerData
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 3);
-
-    const parlayPicks = selectedPlayers.map(player => 
-      `${player.name} ${player.stat} ${player.value} (${player.odds})`
-    );
-
-    const totalOdds = selectedPlayers.reduce((acc, player) => {
-      const odds = parseInt(player.odds.replace('+', '')) / 100;
-      return acc * (odds + 1);
-    }, 1);
-
-    const formattedOdds = `+${Math.round((totalOdds - 1) * 100)}`;
-
-    const easterEggResult = {
-      type: 'easter_egg',
-      picks: parlayPicks,
-      odds: formattedOdds,
-      confidence: 'High',
-      players: selectedPlayers,
-      description: '🧠 DEEP DIVE: These bench players have consistent roles and face favorable matchups against second units. Their minutes and production are more predictable than starters.',
-      reasoning: 'Bench players often face weaker defensive matchups and have more consistent minute allocations. These selections focus on high-usage bench players with proven track records.'
-    };
-
-    // Show in modal
-    setGeneratedResult({
-      success: true,
-      analysis: `🥚 **Easter Egg Activated!**\n\n` +
-        `**Bench Player Parlay:**\n` +
-        easterEggResult.picks.map((p, i) => `${i+1}. ${p}`).join('\n') +
-        `\n\n**Combined Odds:** ${easterEggResult.odds}\n` +
-        `**Confidence:** ${easterEggResult.confidence}\n\n` +
-        `**Analysis:** ${easterEggResult.description}\n\n` +
-        `**Reasoning:** ${easterEggResult.reasoning}`,
-      model: 'easter-egg',
-      timestamp: new Date().toISOString(),
-      source: 'Easter Egg'
-    });
-
-    setShowGeneratorModal(true);
-  };
-
-  // Secret phrase definitions
-  const SECRET_PHRASES: Record<string, SecretPhraseDefinition> = {
-    // Predictive Clustering
-    '26predictive_clustering': {
-      triggers: ['26predictive clustering', 'predictive clustering', 'game clustering', 'similar scenarios', 'cluster analysis'],
-      category: 'advanced_models',
-      handler: async (context) => {
-        await logAnalytics('predictive_clustering_parlay_generated', { sport: context.sport });
-        return {
-          type: 'predictive_clustering',
-          picks: ['Team A ML', 'Team B Under 45.5'],
-          odds: '+180',
-          confidence: 'High',
-          description: 'Predictive clustering model activated – 68.5% accuracy on similar scenarios.'
-        };
-      },
-      description: 'Uses unsupervised learning to cluster similar game scenarios and predict outcomes',
-      rarity: 'legendary'
-    },
-    // Bayesian Inference
-    '26bayesian_inference': {
-      triggers: ['26bayesian inference', 'bayesian inference', 'bayesian updating', 'probability updating', 'sequential updating'],
-      category: 'advanced_models',
-      handler: async (context) => ({
-        type: 'bayesian',
-        picks: ['Team C +7.5', 'Player D Over 20.5'],
-        odds: '+160',
-        confidence: 'Very High',
-        description: 'Bayesian inference model updated probabilities with new data.'
-      }),
-      description: 'Continuously updates probabilities with new information using Bayesian methods',
-      rarity: 'legendary'
-    },
-    // Gradient Boosted Models
-    '26gradient_boosted_models': {
-      triggers: ['26gradient boosted models', 'gradient boosted models', 'xgboost', 'lightgbm', 'ensemble models'],
-      category: 'advanced_models',
-      handler: async (context) => ({
-        type: 'gradient_boosted',
-        picks: ['Total Under 225.5', 'Player E Over 10.5 rebounds'],
-        odds: '+200',
-        confidence: 'High',
-        description: 'Gradient boosted model (100 trees) activated.'
-      }),
-      description: 'Ensemble machine learning model that combines multiple weak predictors',
-      rarity: 'legendary'
-    },
-    // Neural Network Ensemble
-    '26neural_network_ensemble': {
-      triggers: ['26neural network ensemble', 'neural network ensemble', 'deep learning ensemble', 'nn ensemble', 'multiple networks'],
-      category: 'advanced_models',
-      handler: async (context) => ({
-        type: 'neural_network',
-        picks: ['Team F -3.5', 'Player G Under 25.5'],
-        odds: '+220',
-        confidence: 'High',
-        description: 'Neural network ensemble (5 layers, 128 nodes) activated.'
-      }),
-      description: 'Combines multiple neural networks for higher accuracy predictions',
-      rarity: 'legendary'
-    },
-    // Feature Importance
-    '26feature_importance': {
-      triggers: ['26feature importance', 'feature importance', 'predictive features', 'key statistics', 'model features'],
-      category: 'analytics',
-      handler: async (context) => ({
-        type: 'feature_importance',
-        picks: ['Time of Possession over 32.5', 'Third Down Efficiency under 40%'],
-        odds: '+150',
-        confidence: 'Medium',
-        description: 'Feature importance analysis identified time of possession as top predictor (32% importance).'
-      }),
-      description: 'Identifies which statistics have highest predictive power for specific bets',
-      rarity: 'rare'
-    },
-    // Injury Cascade
-    '26injury_cascades': {
-      triggers: ['26injury cascades', 'injury cascades', 'secondary injuries', 'injury domino effect', 'cascading impact'],
-      category: 'injury',
-      handler: async (context) => ({
-        type: 'injury_cascade',
-        picks: ['Backup RB Over 40.5 rushing yards', 'Team H Under team total'],
-        odds: '+300',
-        confidence: 'Medium',
-        description: 'Injury cascade analysis: primary injury leads to increased workload for backup, fatigue risk.'
-      }),
-      description: 'Predicts secondary injury impacts (player B gets more minutes, then fatigues and gets injured)',
-      rarity: 'rare'
-    },
-    // Recovery Timelines
-    '26recovery_timelines': {
-      triggers: ['26recovery timelines', 'recovery timelines', 'return dates', 'injury recovery', 'rehabilitation timeline'],
-      category: 'injury',
-      handler: async (context) => ({
-        type: 'recovery_timeline',
-        picks: ['Player I to return in 7-10 days', 'Team J ML in first game back'],
-        odds: '+250',
-        confidence: 'High',
-        description: 'Recovery timeline model predicts return in 7-10 days with 85% confidence.'
-      }),
-      description: 'Uses historical data to predict exact return dates from specific injuries',
-      rarity: 'rare'
-    },
-    // Injury Propensity
-    '26injury_propensity': {
-      triggers: ['26injury propensity', 'injury propensity', 'injury risk', 'future injury risk', 'injury prediction'],
-      category: 'injury',
-      handler: async (context) => ({
-        type: 'injury_propensity',
-        picks: ['Player K under 28.5 minutes', 'Team L over team total (if he sits)'],
-        odds: '+400',
-        confidence: 'Medium',
-        description: 'Injury propensity score: 78% risk – player has 5 risk factors.'
-      }),
-      description: 'Identifies players at high risk for future injuries based on workload and biomechanics',
-      rarity: 'rare'
-    },
-    // Load Management Value
-    '26load_management_value': {
-      triggers: ['26load management value', 'load management value', 'rest day value', 'scheduled rest', 'load management edge'],
-      category: 'injury',
-      handler: async (context) => ({
-        type: 'load_management',
-        picks: ['Team M +8.5 (star resting)', 'Team N Under (without star)'],
-        odds: '+120',
-        confidence: 'Very High',
-        description: 'Load management edge: 85% probability star rests, 12% value in lines.'
-      }),
-      description: 'Finds value in games where stars are rested for load management',
-      rarity: 'uncommon'
-    },
-    // Concussion Protocol Edge
-    '26concussion_protocol_edge': {
-      triggers: ['26concussion protocol edge', 'concussion protocol edge', 'concussion management', 'protocol differences', 'head injury protocols'],
-      category: 'injury',
-      handler: async (context) => ({
-        type: 'concussion_protocol',
-        picks: ['Team O ML (opponent conservative protocol)', 'Player P under 15.5 points'],
-        odds: '+280',
-        confidence: 'Medium',
-        description: 'Conservative protocol likely keeps player out longer – edge against.'
-      }),
-      description: 'Tracks teams/players with different concussion management approaches',
-      rarity: 'uncommon'
-    },
-    // Goalie Fatigue
-    '26goalie_fatigue': {
-      triggers: ['26goalie fatigue', 'goalie fatigue', 'goalie workload', 'consecutive starts', 'goalie rest'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'goalie_fatigue',
-        picks: ['Opponent team ML', 'Over 5.5 total goals'],
-        odds: '+190',
-        confidence: 'High',
-        description: 'Goalie fatigue index: 72% after 3 consecutive starts – save percentage drops 4%.'
-      }),
-      description: 'Tracks goalie workload and performance degradation with consecutive starts',
-      rarity: 'uncommon'
-    },
-    // Special Teams Regression
-    '26special_teams_regression': {
-      triggers: ['26special teams regression', 'special teams regression', 'power play regression', 'penalty kick regression', 'pp/pk regression'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'special_teams',
-        picks: ['Power play goals over 0.5 (due positive regression)', 'Penalty kill under team total'],
-        odds: '+210',
-        confidence: 'Medium',
-        description: 'Special teams regression identified: PP expected to regress positively.'
-      }),
-      description: 'Identifies power play/penalty kill units due for positive/negative regression',
-      rarity: 'rare'
-    },
-    // Shot Quality Analytics
-    '26shot_quality_analytics': {
-      triggers: ['26shot quality analytics', 'shot quality analytics', 'expected goals', 'xg model', 'high danger chances'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'shot_quality',
-        picks: ['Team Q ML (high xG differential)', 'Under 5.5 (suppressed chances)'],
-        odds: '+170',
-        confidence: 'High',
-        description: 'xG differential of +0.8 – strong edge for ML.'
-      }),
-      description: 'Uses expected goals (xG) models to find value in puck line/total markets',
-      rarity: 'rare'
-    },
-    // Back-to-Back Travel
-    '26back_to_back_travel': {
-      triggers: ['26back-to-back travel', 'back to back travel', 'nhl travel fatigue', 'b2b travel', 'travel schedule impact'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'back_to_back_travel',
-        picks: ['Opponent ML (traveling team at disadvantage)', 'Under 5.5'],
-        odds: '+130',
-        confidence: 'Medium',
-        description: 'Travel distance 1200 miles, 2 time zones – performance impact significant.'
-      }),
-      description: 'Analyzes NHL team performance with different back-to-back travel scenarios',
-      rarity: 'common'
-    },
-    // Defensive Pairing Matchups
-    '26defensive_pairing_matchups': {
-      triggers: ['26defensive pairing matchups', 'defensive pairing matchups', 'd-pair matchups', 'defense vs forward lines', 'pairing assignments'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'defensive_pairing',
-        picks: ['Opponent top line Under 1.5 points', 'Team R Under 2.5 goals'],
-        odds: '+240',
-        confidence: 'High',
-        description: 'Elite pairing shuts down opponent top line – strong suppression.'
-      }),
-      description: 'Tracks how specific defensive pairings perform against opponent lines',
-      rarity: 'rare'
-    },
-    // Faceoff Leverage
-    '26faceoff_leverage': {
-      triggers: ['26faceoff leverage', 'faceoff leverage', 'faceoff specialists', 'draw importance', 'faceoff win percentage'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'faceoff_leverage',
-        picks: ['Team S to win faceoff battle', 'Over 0.5 PPG (offensive zone starts)'],
-        odds: '+180',
-        confidence: 'Medium',
-        description: 'Faceoff specialist at 58.3% – critical in key situations.'
-      }),
-      description: 'Identifies critical faceoff situations and specialists who excel in them',
-      rarity: 'uncommon'
-    },
-    // Post-Goal Momentum
-    '26post_goal_momentum': {
-      triggers: ['26post-goal momentum', 'post goal momentum', 'momentum after goal', 'scoring response', 'goal response analysis'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'post_goal_momentum',
-        picks: ['Team T to score next', 'Over 0.5 goals in next 5 minutes'],
-        odds: '+220',
-        confidence: 'Medium',
-        description: 'Post-goal momentum rating: 0.81 – 42% chance of next goal within 5 minutes.'
-      }),
-      description: 'Tracks team performance in the 5 minutes after scoring/conceding',
-      rarity: 'rare'
-    },
-    // Empty Net Strategies
-    '26empty_net_strategies': {
-      triggers: ['26empty net strategies', 'empty net strategies', 'goal pulled strategies', 'extra attacker', 'empty net tendencies'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'empty_net',
-        picks: ['Empty net goal to be scored', 'Team U -0.5 (puck line)'],
-        odds: '+350',
-        confidence: 'Low',
-        description: 'Aggressive coach pulls early – success rate 32%.'
-      }),
-      description: 'Analyzes coach tendencies and success rates with empty net situations',
-      rarity: 'uncommon'
-    },
-    // Line Matching
-    '26line_matching': {
-      triggers: ['26line matching', 'line matching', 'coach matchups', 'line assignments', 'matchup hunting'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'line_matching',
-        picks: ['Home team top line Over 1.5 points', 'Opponent checking line Under'],
-        odds: '+160',
-        confidence: 'Medium',
-        description: 'Home coach aggressively matches – 15% advantage.'
-      }),
-      description: 'Identifies which coaches aggressively match lines and the betting implications',
-      rarity: 'uncommon'
-    },
-    // Goalie Pull Timing
-    '26goalie_pull_timing': {
-      triggers: ['26goalie pull timing', 'goalie pull timing', 'extra attacker timing', 'when to pull goalie', 'pull timing analysis'],
-      category: 'nhl_specific',
-      handler: async (context) => ({
-        type: 'goalie_pull',
-        picks: ['Empty net goal +300', 'Opponent ENG +200'],
-        odds: '+290',
-        confidence: 'Medium',
-        description: 'Optimal pull time 1:45 remaining – coach efficiency 68%.'
-      }),
-      description: 'Analyzes optimal goalie pull times by team/coach and success rates',
-      rarity: 'rare'
-    }
-  };
-
-  // Helper to log analytics (mock)
-  const logAnalytics = async (event: string, data: any) => {
-    console.log(`📊 Analytics: ${event}`, data);
-  };
-
-  // Check if query matches any secret phrase
-  const checkForSecretPhrase = (query: string): SecretPhraseDefinition | null => {
-    const lowerQuery = query.toLowerCase();
-    for (const [key, def] of Object.entries(SECRET_PHRASES)) {
-      if (def.triggers.some(trigger => lowerQuery.includes(trigger))) {
-        return def;
-      }
-    }
-    return null;
-  };
-
-  // Load phrase analytics (mock)
-  const loadPhraseAnalytics = async () => {
-    // In real app, fetch from backend
-    setPhraseAnalytics({
-      totalActivations: 42,
-      topPhrases: ['26predictive_clustering', '26bayesian_inference'],
-      successRate: 0.68
-    });
-  };
-
+  // Update used player IDs when top picks change
   useEffect(() => {
-    loadPhraseAnalytics();
-  }, []);
+    const newUsedIds = new Set(topPicks.map(p => p.id));
+    setUsedPlayerIds(prev => new Set([...prev, ...newUsedIds]));
+  }, [topPicks]);
 
   // ============================================
-  // Sports data
+  // Generate additional picks with variation
   // ============================================
-  const sports = [
-    { id: 'nba', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444' },
-    { id: 'nfl', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6' },
-    { id: 'nhl', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af' },
-    { id: 'mlb', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981' },
-    { id: 'soccer', name: 'Soccer', icon: <SportsSoccerIcon />, color: '#14b8a6' }
-  ];
-
-  const categories = [
-    { id: 'all', name: 'All Categories' },
-    { id: 'insider_tip', name: 'Insider Tips' },
-    { id: 'advanced_analytics', name: 'Advanced Analytics' },
-    { id: 'injury_update', name: 'Injury Updates' },
-    { id: 'line_move', name: 'Line Moves' },
-    { id: 'sharp_money', name: 'Sharp Money' },
-    { id: 'prop_value', name: 'Prop Value' }
-  ];
-
-  // ============================================
-  // Useful prompts for generator (original)
-  // ============================================
-  const USEFUL_PROMPTS = [
-    {
-      category: 'Insider Tips',
-      prompts: [
-        "Generate insider tips for tonight's NBA games",
-        "What are the best underdog insights for NFL?",
-        "Show me sharp money moves for MLB",
-        "Insider information on player injuries",
-        "Secret strategies from team sources"
-      ]
-    },
-    {
-      category: 'Advanced Analytics',
-      prompts: [
-        "Advanced metrics suggesting a breakout player",
-        "Analytics-based predictions for upcoming games",
-        "Which teams have hidden value according to data?",
-        "Regression candidates based on advanced stats",
-        "Underlying numbers that beat the market"
-      ]
-    },
-    {
-      category: 'Prop Value',
-      prompts: [
-        "Player props with the biggest edge tonight",
-        "Undervalued player props according to model",
-        "Props where public money is wrong",
-        "Best value props for NBA",
-        "Prop betting opportunities from advanced data"
-      ]
-    },
-    {
-      category: 'Line Movements',
-      prompts: [
-        "Recent line movements with sharp action",
-        "Reverse line movement alerts",
-        "Steam moves in the last hour",
-        "Line movement predictions for tomorrow",
-        "Which games have seen biggest line shifts?"
-      ]
-    }
-  ];
-
-  // ============================================
-  // Handlers
-  // ============================================
-  const handleSportChange = (sportId: string) => {
-    setSelectedSport(sportId);
-    setSelectedTabCategory('all');
-    setSearchQuery('');
-    setSearchInput('');
-  };
-
-  const handleCategoryChange = (event: any) => {
-    setSelectedCategory(event.target.value);
-  };
-
-  const handleTabCategoryChange = (event: React.SyntheticEvent, newValue: string) => {
-    setSelectedTabCategory(newValue);
-  };
-
-  const handleConfidenceChange = (event: any, newValue: number | number[]) => {
-    setMinConfidence(newValue as number);
-  };
-
-  const handleSearchSubmit = () => {
-    if (searchInput.trim()) {
-      setSearchQuery(searchInput.trim());
-    }
-  };
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const data = await fetchSecretPhrases(selectedSport, selectedCategory, minConfidence);
-      setPhrases(data);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Refresh failed');
-    } finally {
-      setRefreshing(false);
-    }
-  }, [selectedSport, selectedCategory, minConfidence, fetchSecretPhrases]);
-
-  // ============================================
-  // Generator logic (with secret phrase detection and request limits)
-  // ============================================
-  const handleGeneratePredictions = async () => {
-    if (!customQuery.trim()) {
-      alert('Please enter a query');
-      return;
-    }
-
-    // Check for Easter egg first (does NOT consume a request)
-    if (checkForEasterEgg(customQuery)) {
-      return; // Easter egg already opens modal and sets result
-    }
-
-    // Check for other secret phrases (also does NOT consume a request)
-    const matchedPhrase = checkForSecretPhrase(customQuery);
-    if (matchedPhrase) {
-      setGenerating(true);
-      setShowGeneratorModal(true);
-
-      try {
-        // Execute the handler
-        const result = await matchedPhrase.handler({
-          sport: selectedSport,
-          customQuery
-        });
-
-        // Format result for display
-        const formattedResult = {
-          success: true,
-          analysis: `🔓 **Secret Phrase Unlocked: ${matchedPhrase.category.replace(/_/g, ' ')}**\n\n` +
-            `*${matchedPhrase.description}*\n\n` +
-            `**Generated Picks:**\n` +
-            result.picks.map((p: string, i: number) => `${i+1}. ${p}`).join('\n') +
-            `\n\n**Combined Odds:** ${result.odds}\n` +
-            `**Confidence:** ${result.confidence}\n\n` +
-            `**Analysis:** ${result.description}`,
-          model: 'secret-phrase',
-          timestamp: new Date().toISOString(),
-          source: 'Secret Phrase',
-          rawData: result
-        };
-
-        setGeneratedResult(formattedResult);
-        await logAnalytics('secret_phrase_activated', {
-          phrase: Object.keys(SECRET_PHRASES).find(k => SECRET_PHRASES[k] === matchedPhrase),
-          sport: selectedSport
-        });
-      } catch (error) {
-        console.error('Secret phrase handler error:', error);
-        setGeneratedResult({
-          success: true,
-          analysis: `Secret phrase activated but encountered an error. Please try again.`,
-          model: 'error',
-          timestamp: new Date().toISOString(),
-          source: 'Secret Phrase'
-        });
-      } finally {
-        setGenerating(false);
-      }
-      return;
-    }
-
-    // ----- Normal generation – consumes a request -----
-    if (remainingRequests <= 0) {
-      alert('You have no generator requests left. Please upgrade your membership.');
+  const handleGenerateAdditionalPicks = async () => {
+    if (!hasPremiumAccess && generatorCredits < 1) {
+      setShowCreditsModal(true);
       return;
     }
 
     setGenerating(true);
-    setShowGeneratorModal(true);
-
+    
     try {
-      // Fetch fresh data
-      const freshPhrases = await fetchSecretPhrases(selectedSport, 'all', 0);
+      // Increment variation for diverse results
+      const newVariation = generationVariation + 1;
+      setGenerationVariation(newVariation);
+      
+      // Get fresh phrases based on current filters
+      const freshPhrases = await fetchSecretPhrases(selectedSport, selectedTabCategory !== 'all' ? selectedTabCategory : 'all', minConfidence, true);
       const phrasesArray = Array.isArray(freshPhrases) ? freshPhrases : [];
-
-      // Keyword-based matching
-      const query = customQuery.toLowerCase();
-      const keywords = query
-        .split(/\s+/)
-        .filter(word => word.length > 2)
-        .map(word => word.replace(/[^\w]/g, ''));
-
-      let matched = phrasesArray;
-      if (keywords.length > 0) {
-        matched = phrasesArray.filter(p => {
-          const phrase = p.phrase?.toLowerCase() || '';
-          const player = p.player?.toLowerCase() || '';
-          const team = p.team?.toLowerCase() || '';
-          const category = p.category?.toLowerCase() || '';
-          const tags = p.tags?.map(t => t?.toLowerCase() || '') || [];
-          return keywords.some(keyword =>
-            phrase.includes(keyword) ||
-            player.includes(keyword) ||
-            team.includes(keyword) ||
-            category.includes(keyword) ||
-            tags.some(tag => tag.includes(keyword))
-          );
-        });
-      }
-
-      // Fallback if no matches
-      const allRelevant = matched.length > 0 ? matched : phrasesArray;
-      const note = matched.length === 0 ? '⚠️ No phrases directly matching your query – showing all available phrases.' : '';
-
-      // Filter out phrases already shown in previous requests
-      const unusedPhrases = allRelevant.filter(p => !usedPhraseIds.has(p.id));
-
-      if (unusedPhrases.length === 0) {
-        // No new phrases left
-        setGeneratedResult({
-          success: true,
-          analysis: `You have seen all available phrases for "${customQuery}". Try a different query or upgrade your membership.`,
-          model: 'info',
-          timestamp: new Date().toISOString(),
-          source: 'System'
+      
+      // Get unique picks not already shown
+      const newPicks = getUniquePicks(
+        phrasesArray,
+        usedPlayerIds,
+        MAX_GENERATED_PICKS,
+        newVariation
+      );
+      
+      if (newPicks.length === 0) {
+        setSnackbar({ 
+          open: true, 
+          message: 'No new unique picks available. Try changing filters.', 
+          severity: 'warning' 
         });
         setGenerating(false);
         return;
       }
-
-      // Randomly select up to 3 from unused phrases
-      const shuffled = [...unusedPhrases].sort(() => 0.5 - Math.random());
-      const initialPhrases = shuffled.slice(0, 3);
-
-      // Mark these as used
-      const newUsedIds = new Set(usedPhraseIds);
-      initialPhrases.forEach(p => newUsedIds.add(p.id));
-      setUsedPhraseIds(newUsedIds);
-
-      // Store the full unused list for the "Show More" button
-      setAvailablePhrases(unusedPhrases);
-      setDisplayedPhrases(initialPhrases);
-      setShowMoreButton(unusedPhrases.length > initialPhrases.length);
-
-      // Decrement remaining requests
-      setRemainingRequests(prev => prev - 1);
-
-      // Confidence breakdown for display
-      const highConfidence = allRelevant.filter(p => p.confidence >= 80).length;
-      const mediumConfidence = allRelevant.filter(p => p.confidence >= 60 && p.confidence < 80).length;
-      const lowConfidence = allRelevant.filter(p => p.confidence < 60).length;
-
-      const analysis = `🎯 **AI Secret Phrase Generation Results**\n\n` +
-        `Based on ${allRelevant.length} secret phrases for "${customQuery}":\n` +
-        (note ? `${note}\n\n` : '\n') +
-        `📊 **Confidence Breakdown:**\n` +
-        `   • High Confidence (80%+): ${highConfidence}\n` +
-        `   • Medium Confidence (60-79%): ${mediumConfidence}\n` +
-        `   • Low Confidence (<60%): ${lowConfidence}\n\n` +
-        `🔐 **Showing ${initialPhrases.length} of ${unusedPhrases.length} new phrases:**\n\n` +
-        initialPhrases.map((p, idx) =>
-          `**${idx + 1}. ${p.category?.replace(/_/g, ' ') || 'Unknown'}**\n` +
-          `   📝 **Phrase:** ${p.phrase || 'N/A'}\n` +
-          `   💎 **Confidence:** ${p.confidence || 0}%\n` +
-          `   🏷️ **Source:** ${p.source || 'Unknown'}\n` +
-          (p.player ? `   👤 **Player:** ${p.player}\n` : '') +
-          (p.team ? `   🏀 **Team:** ${p.team}\n` : '') +
-          (p.game ? `   🎮 **Game:** ${p.game}\n` : '') +
-          (p.analysis ? `   🔍 **Analysis:** ${p.analysis}` : '')
-        ).join('\n\n') +
-        `\n\n_Requests remaining: ${remainingRequests - 1}_`;
-
-      setGeneratedResult({
-        success: true,
-        analysis,
-        model: 'secret-phrases-ai',
-        timestamp: new Date().toISOString(),
-        source: 'Secret Phrases API',
-        rawData: {
-          total: allRelevant.length,
-          newAvailable: unusedPhrases.length,
-          shown: initialPhrases.length
+      
+      // Deduct credit if not premium
+      if (!hasPremiumAccess && generatorCredits > 0) {
+        const token = await getFirebaseIdToken();
+        if (token) {
+          await fetch(`${PYTHON_API_BASE}/api/generator/use`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              pickType: 'additional_picks',
+              pickData: { 
+                sport: selectedSport,
+                variation: newVariation,
+                count: newPicks.length 
+              }
+            }),
+          });
+          setGeneratorCredits(prev => prev - 1);
+          setSnackbar({ open: true, message: 'Used 1 credit', severity: 'info' });
         }
+      }
+      
+      // Add new picks to generated picks
+      setGeneratedPicks(prev => [...prev, ...newPicks]);
+      
+      // Update used player IDs
+      const newIds = new Set(newPicks.map(p => p.id));
+      setUsedPlayerIds(prev => new Set([...prev, ...newIds]));
+      
+      setShowingGeneratedPicks(true);
+      
+      setSnackbar({ 
+        open: true, 
+        message: `Generated ${newPicks.length} new picks (Variation ${newVariation})!`, 
+        severity: 'success' 
       });
-
+      
     } catch (error) {
-      console.error('❌ Error generating:', error);
-      setGeneratedResult({
-        success: true,
-        analysis: `Error generating phrases. Please try again.`,
-        model: 'error',
-        timestamp: new Date().toISOString(),
-        source: 'System'
+      console.error('Error generating additional picks:', error);
+      setSnackbar({ 
+        open: true, 
+        message: 'Failed to generate additional picks', 
+        severity: 'error' 
       });
     } finally {
       setGenerating(false);
     }
   };
 
-  // Load more phrases within the same request (does NOT consume a request)
-  const loadMorePhrases = () => {
-    if (availablePhrases.length <= displayedPhrases.length) {
-      setShowMoreButton(false);
-      return;
-    }
-
-    // Get phrases not yet shown in this request
-    const shownIds = new Set(displayedPhrases.map(p => p.id));
-    const remaining = availablePhrases.filter(p => !shownIds.has(p.id));
-
-    if (remaining.length === 0) {
-      setShowMoreButton(false);
-      return;
-    }
-
-    // Randomly select up to 3 from remaining
-    const shuffled = [...remaining].sort(() => 0.5 - Math.random());
-    const newPhrases = shuffled.slice(0, 3);
-
-    // Mark these as used globally
-    const newUsedIds = new Set(usedPhraseIds);
-    newPhrases.forEach(p => newUsedIds.add(p.id));
-    setUsedPhraseIds(newUsedIds);
-
-    // Update displayed phrases
-    const updatedDisplayed = [...displayedPhrases, ...newPhrases];
-    setDisplayedPhrases(updatedDisplayed);
-
-    // Hide button if no more left
-    if (updatedDisplayed.length >= availablePhrases.length) {
-      setShowMoreButton(false);
-    }
-
-    // Update the modal content
-    if (generatedResult) {
-      const highConfidence = availablePhrases.filter(p => p.confidence >= 80).length;
-      const mediumConfidence = availablePhrases.filter(p => p.confidence >= 60 && p.confidence < 80).length;
-      const lowConfidence = availablePhrases.filter(p => p.confidence < 60).length;
-
-      const updatedAnalysis = generatedResult.analysis.split('\n🔐')[0] + '\n\n' +
-        `🔐 **Showing ${updatedDisplayed.length} of ${availablePhrases.length} new phrases:**\n\n` +
-        updatedDisplayed.map((p, idx) =>
-          `**${idx + 1}. ${p.category?.replace(/_/g, ' ') || 'Unknown'}**\n` +
-          `   📝 **Phrase:** ${p.phrase || 'N/A'}\n` +
-          `   💎 **Confidence:** ${p.confidence || 0}%\n` +
-          `   🏷️ **Source:** ${p.source || 'Unknown'}\n` +
-          (p.player ? `   👤 **Player:** ${p.player}\n` : '') +
-          (p.team ? `   🏀 **Team:** ${p.team}\n` : '') +
-          (p.game ? `   🎮 **Game:** ${p.game}\n` : '') +
-          (p.analysis ? `   🔍 **Analysis:** ${p.analysis}` : '')
-        ).join('\n\n') +
-        `\n\n_Requests remaining: ${remainingRequests}_`;
-
-      setGeneratedResult({
-        ...generatedResult,
-        analysis: updatedAnalysis
-      });
-    }
-  };
-
-  // Helper to set query from phrase
-  const usePhraseInGenerator = (phrase: SecretPhrase) => {
-    // Use the actual phrase text to generate similar
-    const query = `Generate similar to: ${phrase.phrase}`;
-    setCustomQuery(query);
-    handleGeneratePredictions();
+  // ============================================
+  // Reset to top picks only
+  // ============================================
+  const handleResetToTopPicks = () => {
+    setShowingGeneratedPicks(false);
+    setGeneratedPicks([]);
+    setGenerationVariation(1);
+    setUsedPlayerIds(new Set(topPicks.map(p => p.id)));
+    setSnackbar({ 
+      open: true, 
+      message: 'Reset to top 3 picks', 
+      severity: 'info' 
+    });
   };
 
   // ============================================
-  // Render functions
+  // Log analytics
   // ============================================
+  const logAnalytics = async (event: string, data: any) => {
+    console.log(`📊 Analytics: ${event}`, data);
+  };
+
+  // ============================================
+  // Render components
+  // ============================================
+
+  const renderSubscriptionStatus = () => (
+    <Alert 
+      severity={hasPremiumAccess ? "success" : "warning"} 
+      sx={{ mb: 3 }}
+      action={
+        !hasPremiumAccess && (
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button color="inherit" size="small" onClick={() => setShowCreditsModal(true)}>
+              Buy Credits ({generatorCredits})
+            </Button>
+            <Button color="inherit" size="small" onClick={() => setShowUpgradeModal(true)}>
+              Upgrade
+            </Button>
+          </Box>
+        )
+      }
+    >
+      <AlertTitle>
+        {hasPremiumAccess ? 'Premium Access Active' : `Free Tier - ${generatorCredits} Credits Remaining`}
+      </AlertTitle>
+      {hasPremiumAccess 
+        ? 'Unlimited access to all secret phrases and AI generation!'
+        : 'Generate secret phrases using credits. Upgrade to Premium for unlimited access.'}
+    </Alert>
+  );
+
+  const renderUpgradeModal = () => (
+    <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <RocketLaunchIcon color="primary" />
+          Upgrade to Premium
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Typography variant="body1" gutterBottom>
+          Get unlimited access to:
+        </Typography>
+        <List>
+          <ListItem><ListItemText primary="🔐 Unlimited Secret Phrases" secondary="No credit limits" /></ListItem>
+          <ListItem><ListItemText primary="🤖 Unlimited AI Generation" secondary="Generate as many as you want" /></ListItem>
+          <ListItem><ListItemText primary="📊 Advanced Analytics" secondary="Deeper insights and predictions" /></ListItem>
+          <ListItem><ListItemText primary="🔄 Multiple Variations" secondary="Get diverse picks with different strategies" /></ListItem>
+        </List>
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="h6" gutterBottom>Pricing</Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={6}>
+            <Card sx={{ cursor: 'pointer' }} onClick={() => handleSubscriptionCheckout('premium_monthly', 'month')}>
+              <CardContent sx={{ textAlign: 'center' }}>
+                <Typography variant="h5">$9.99</Typography>
+                <Typography variant="body2" color="text.secondary">per month</Typography>
+                <Chip label="Monthly" size="small" sx={{ mt: 1 }} />
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6}>
+            <Card sx={{ cursor: 'pointer', border: '2px solid gold' }} onClick={() => handleSubscriptionCheckout('premium_yearly', 'year')}>
+              <CardContent sx={{ textAlign: 'center' }}>
+                <Typography variant="h5">$99.99</Typography>
+                <Typography variant="body2" color="text.secondary">per year</Typography>
+                <Chip label="Save 17%" size="small" color="success" sx={{ mt: 1 }} />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setShowUpgradeModal(false)}>Cancel</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
+  const renderCreditsModal = () => (
+    <Dialog open={showCreditsModal} onClose={() => setShowCreditsModal(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <CreditCardIcon color="primary" />
+          Purchase Credits
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Current credits: <strong>{generatorCredits}</strong>
+        </Typography>
+        <Typography variant="body1" gutterBottom sx={{ mt: 2 }}>
+          Each generation uses 1 credit and gives you up to {MAX_GENERATED_PICKS} unique picks.
+        </Typography>
+        <Grid container spacing={2} sx={{ mt: 1 }}>
+          <Grid item xs={4}>
+            <Card sx={{ cursor: 'pointer' }} onClick={() => handleCreditsCheckout(10)}>
+              <CardContent sx={{ textAlign: 'center' }}>
+                <Typography variant="h6">10 Credits</Typography>
+                <Typography variant="body2">$4.99</Typography>
+                <Typography variant="caption">$0.50/credit</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={4}>
+            <Card sx={{ cursor: 'pointer', border: '2px solid gold' }} onClick={() => handleCreditsCheckout(25)}>
+              <CardContent sx={{ textAlign: 'center' }}>
+                <Typography variant="h6">25 Credits</Typography>
+                <Typography variant="body2">$9.99</Typography>
+                <Typography variant="caption" color="success.main">$0.40/credit</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={4}>
+            <Card sx={{ cursor: 'pointer' }} onClick={() => handleCreditsCheckout(50)}>
+              <CardContent sx={{ textAlign: 'center' }}>
+                <Typography variant="h6">50 Credits</Typography>
+                <Typography variant="body2">$14.99</Typography>
+                <Typography variant="caption" color="success.main">$0.30/credit</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setShowCreditsModal(false)}>Cancel</Button>
+      </DialogActions>
+    </Dialog>
+  );
 
   const renderHeader = () => (
     <Box sx={{
@@ -1280,7 +1067,7 @@ const SecretPhrasesScreen: React.FC = () => {
                 🔐 Secret Phrases Hub
               </Typography>
               <Typography variant="h5" sx={{ opacity: 0.9 }}>
-                Insider tips, advanced analytics, and sharp money moves
+                Insider tips, sharp money moves, and player prop insights
               </Typography>
             </Box>
             <IconButton
@@ -1324,20 +1111,48 @@ const SecretPhrasesScreen: React.FC = () => {
   );
 
   const renderRefreshIndicator = () => (
-    <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+    <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
         <RefreshIcon sx={{ mr: 1, color: 'primary.main' }} />
         <Typography variant="body2" color="text.secondary">
           Last updated: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </Typography>
         {phrases.length > 0 && (
+          <>
+            <Chip
+              label={`Total: ${phrases.length} picks`}
+              size="small"
+              color="info"
+            />
+            <Tooltip title="Showing top 3 highest confidence picks">
+              <Chip
+                label={`Top ${MAX_VISIBLE_PHRASES} shown`}
+                size="small"
+                color="success"
+                variant="outlined"
+              />
+            </Tooltip>
+          </>
+        )}
+        <Chip
+          label={apiSource}
+          size="small"
+          color={apiSource.includes('Real') ? 'success' : 'warning'}
+        />
+        {showingGeneratedPicks && (
           <Chip
-            label={`${phrases.length} phrases`}
+            label={`+${generatedPicks.length} generated`}
             size="small"
-            color="info"
-            sx={{ ml: 2 }}
+            color="secondary"
+            icon={<SparklesIcon />}
           />
         )}
+        <Chip
+          label={`Variation ${generationVariation}`}
+          size="small"
+          variant="outlined"
+          icon={<ShuffleIcon />}
+        />
       </Box>
       <Button
         startIcon={<RefreshIcon />}
@@ -1351,130 +1166,175 @@ const SecretPhrasesScreen: React.FC = () => {
     </Paper>
   );
 
-  const renderSportSelector = () => (
-    <Paper sx={{ p: 3, mb: 4 }}>
-      <Typography variant="h6" gutterBottom>
-        Select Sport
-      </Typography>
-      <Grid container spacing={2}>
-        {sports.map((sport) => (
-          <Grid item key={sport.id}>
-            <Card
-              sx={{
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                border: selectedSport === sport.id ? `2px solid ${sport.color}` : '2px solid transparent',
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: 4
-                }
-              }}
-              onClick={() => handleSportChange(sport.id)}
-            >
-              <CardContent sx={{ textAlign: 'center', minWidth: 100 }}>
-                <Box sx={{ color: sport.color, mb: 1, fontSize: 32 }}>
-                  {sport.icon}
-                </Box>
-                <Typography variant="body2" fontWeight="medium">
-                  {sport.name}
-                </Typography>
-              </CardContent>
-            </Card>
+  const renderSportSelector = () => {
+    const sports = [
+      { id: 'nba', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444' },
+      { id: 'nfl', name: 'NFL', icon: <SportsFootballIcon />, color: '#3b82f6' },
+      { id: 'nhl', name: 'NHL', icon: <SportsHockeyIcon />, color: '#1e40af' },
+      { id: 'mlb', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981' },
+      { id: 'soccer', name: 'Soccer', icon: <SportsSoccerIcon />, color: '#14b8a6' }
+    ];
+
+    return (
+      <Paper sx={{ p: 3, mb: 4 }}>
+        <Typography variant="h6" gutterBottom>
+          Select Sport
+        </Typography>
+        <Grid container spacing={2}>
+          {sports.map((sport) => (
+            <Grid item key={sport.id}>
+              <Card
+                sx={{
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  border: selectedSport === sport.id ? `2px solid ${sport.color}` : '2px solid transparent',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4
+                  }
+                }}
+                onClick={() => handleSportChange(sport.id)}
+              >
+                <CardContent sx={{ textAlign: 'center', minWidth: 100 }}>
+                  <Box sx={{ color: sport.color, mb: 1, fontSize: 32 }}>
+                    {sport.icon}
+                  </Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    {sport.name}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Paper>
+    );
+  };
+
+  const renderFilters = () => {
+    const categories = [
+      { id: 'all', name: 'All Categories' },
+      { id: 'insider_tip', name: 'Insider Tips' },
+      { id: 'advanced_analytics', name: 'Advanced Analytics' },
+      { id: 'injury_update', name: 'Injury Updates' },
+      { id: 'line_move', name: 'Line Moves' },
+      { id: 'sharp_money', name: 'Sharp Money' },
+      { id: 'prop_value', name: 'Prop Value' }
+    ];
+
+    return (
+      <Paper sx={{ p: 3, mb: 4 }}>
+        <Grid container spacing={3} alignItems="center">
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Category</InputLabel>
+              <Select
+                value={selectedCategory}
+                onChange={handleCategoryChange}
+                label="Category"
+              >
+                {categories.map(cat => (
+                  <MenuItem key={cat.id} value={cat.id}>{cat.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Grid>
-        ))}
-      </Grid>
-    </Paper>
-  );
-
-  const renderFilters = () => (
-    <Paper sx={{ p: 3, mb: 4 }}>
-      <Grid container spacing={3} alignItems="center">
-        <Grid item xs={12} md={4}>
-          <FormControl fullWidth>
-            <InputLabel>Category</InputLabel>
-            <Select
-              value={selectedCategory}
-              onChange={handleCategoryChange}
-              label="Category"
+          <Grid item xs={12} md={4}>
+            <Typography gutterBottom>Min Confidence: {minConfidence}%</Typography>
+            <Slider
+              value={minConfidence}
+              onChange={handleConfidenceChange}
+              min={0}
+              max={100}
+              step={5}
+              valueLabelDisplay="auto"
+            />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Button
+              fullWidth
+              variant="contained"
+              startIcon={<RocketLaunchIcon />}
+              onClick={() => {
+                setCustomQuery("Generate secret phrases for tonight");
+                // handleGeneratePredictions will be called via the generator section
+              }}
             >
-              {categories.map(cat => (
-                <MenuItem key={cat.id} value={cat.id}>{cat.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              Generate AI Phrases
+            </Button>
+          </Grid>
         </Grid>
-        <Grid item xs={12} md={4}>
-          <Typography gutterBottom>Min Confidence: {minConfidence}%</Typography>
-          <Slider
-            value={minConfidence}
-            onChange={handleConfidenceChange}
-            min={0}
-            max={100}
-            step={5}
-            valueLabelDisplay="auto"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Button
-            fullWidth
-            variant="contained"
-            startIcon={<RocketLaunchIcon />}
-            onClick={() => {
-              setCustomQuery("Generate secret phrases for tonight");
-              handleGeneratePredictions();
-            }}
-          >
-            Generate AI Phrases
-          </Button>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
+      </Paper>
+    );
+  };
 
-  const renderCategoryTabs = () => (
-    <Paper sx={{ mb: 3 }}>
-      <Tabs
-        value={selectedTabCategory}
-        onChange={handleTabCategoryChange}
-        variant="scrollable"
-        scrollButtons="auto"
-        sx={{ borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab value="all" label="All" />
-        {categories.slice(1).map(cat => (
-          <Tab key={cat.id} value={cat.id} label={cat.name} />
-        ))}
-      </Tabs>
-    </Paper>
-  );
+  const renderCategoryTabs = () => {
+    const categories = [
+      { id: 'all', name: 'All Categories' },
+      { id: 'insider_tip', name: 'Insider Tips' },
+      { id: 'advanced_analytics', name: 'Advanced Analytics' },
+      { id: 'injury_update', name: 'Injury Updates' },
+      { id: 'line_move', name: 'Line Moves' },
+      { id: 'sharp_money', name: 'Sharp Money' },
+      { id: 'prop_value', name: 'Prop Value' }
+    ];
 
-  // ============================================
-  // FIXED renderPhraseCard – uses phrase.phrase for main text
-  // ============================================
+    return (
+      <Paper sx={{ mb: 3 }}>
+        <Tabs
+          value={selectedTabCategory}
+          onChange={handleTabCategoryChange}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab value="all" label="All" />
+          {categories.slice(1).map(cat => (
+            <Tab key={cat.id} value={cat.id} label={cat.name} />
+          ))}
+        </Tabs>
+      </Paper>
+    );
+  };
+
   const renderPhraseCard = (phrase: SecretPhrase) => {
-    // 🔍 DEBUG: Log phrase being rendered
-    console.log('🔍 Rendering phrase card with:', phrase);
-    
     const confidenceColor =
       phrase.confidence >= 80 ? 'success' :
-      phrase.confidence >= 60 ? 'warning' : 'default';
+      phrase.confidence >= 70 ? 'warning' : 
+      phrase.confidence >= 60 ? 'info' : 'default';
+
+    const edgeDisplay = phrase.edge_percentage ? 
+      (phrase.edge_percentage > 0 ? `+${phrase.edge_percentage}%` : `${phrase.edge_percentage}%`) : 
+      phrase.edge;
+
+    const statDisplay = phrase.stat ? formatStatDisplay(phrase.stat, phrase.type, phrase.line) : '';
 
     return (
       <Card sx={{
         mb: 2,
         borderLeft: `4px solid ${
           phrase.confidence >= 80 ? '#22c55e' :
-          phrase.confidence >= 60 ? '#eab308' : '#94a3b8'
+          phrase.confidence >= 70 ? '#eab308' :
+          phrase.confidence >= 60 ? '#3b82f6' : '#94a3b8'
         }`
       }}>
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
             <Box>
               <Typography variant="h6" fontWeight="bold">
-                {phrase.category?.replace(/_/g, ' ') || 'Unknown'}
+                {phrase.category?.replace(/_/g, ' ') || 'Player Prop'}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {phrase.source || 'Unknown'} • {phrase.timestamp ? new Date(phrase.timestamp).toLocaleString() : 'N/A'}
+                {phrase.is_mock && ' • (Sample)'}
+                {phrase.generated_variation && (
+                  <Chip 
+                    label={`Var ${phrase.generated_variation}`} 
+                    size="small" 
+                    variant="outlined" 
+                    sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+                  />
+                )}
               </Typography>
             </Box>
             <Chip
@@ -1485,17 +1345,47 @@ const SecretPhrasesScreen: React.FC = () => {
             />
           </Box>
 
-          {/* ✅ ALWAYS use phrase.phrase for the main text */}
           <Typography variant="body1" sx={{ my: 2, fontStyle: 'italic' }}>
             "{phrase.phrase || 'No phrase'}"
           </Typography>
 
-          {(phrase.player || phrase.team || phrase.game) && (
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-              {phrase.player && <Chip label={`👤 ${phrase.player}`} size="small" variant="outlined" />}
-              {phrase.team && <Chip label={`🏀 ${phrase.team}`} size="small" variant="outlined" />}
-              {phrase.game && <Chip label={`🎮 ${phrase.game}`} size="small" variant="outlined" />}
-            </Box>
+          {(phrase.player || phrase.team || phrase.stat || phrase.line) && (
+            <Paper sx={{ p: 2, bgcolor: 'grey.50', mb: 2 }}>
+              <Grid container spacing={2}>
+                {phrase.player && (
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Player</Typography>
+                    <Typography variant="body2" fontWeight="bold">{phrase.player}</Typography>
+                  </Grid>
+                )}
+                {phrase.team && (
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Team</Typography>
+                    <Typography variant="body2">{phrase.team} {phrase.opponent ? `vs ${phrase.opponent}` : ''}</Typography>
+                  </Grid>
+                )}
+                {statDisplay && (
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="text.secondary">Prop</Typography>
+                    <Typography variant="body2">{statDisplay}</Typography>
+                  </Grid>
+                )}
+                {edgeDisplay && (
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="text.secondary">Edge</Typography>
+                    <Typography variant="body2" color={phrase.edge_percentage && phrase.edge_percentage > 0 ? '#10b981' : '#ef4444'}>
+                      {edgeDisplay}
+                    </Typography>
+                  </Grid>
+                )}
+                {phrase.odds && (
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="text.secondary">Odds</Typography>
+                    <Typography variant="body2">{phrase.odds}</Typography>
+                  </Grid>
+                )}
+              </Grid>
+            </Paper>
           )}
 
           {phrase.analysis && (
@@ -1511,27 +1401,22 @@ const SecretPhrasesScreen: React.FC = () => {
               ))}
             </Box>
           )}
-
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<SendIcon />}
-              onClick={() => usePhraseInGenerator(phrase)}
-            >
-              Use in Generator
-            </Button>
-          </Box>
         </CardContent>
       </Card>
     );
   };
 
-  const renderPhrasesList = () => {
-    const dataToShow = filteredPhrases;
-    const displayLimit = showAllPhrases ? dataToShow.length : 10;
-
-    if (dataToShow.length === 0) {
+  const renderPhrasesSection = () => {
+    // Determine which picks to display
+    const displayPhrases = showingGeneratedPicks 
+      ? [...topPicks, ...generatedPicks]
+      : topPicks;
+    
+    const totalAvailable = filteredPhrases.length;
+    const remainingCount = totalAvailable - MAX_VISIBLE_PHRASES;
+    const hasMoreToGenerate = (remainingCount > 0 || generatedPicks.length === 0) && !showingGeneratedPicks;
+    
+    if (displayPhrases.length === 0 && !loading) {
       return (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <LockIcon sx={{ fontSize: 64, color: 'primary.main', mb: 3 }} />
@@ -1541,90 +1426,88 @@ const SecretPhrasesScreen: React.FC = () => {
           <Typography variant="body2" color="text.secondary">
             Try adjusting filters or generate new phrases with AI.
           </Typography>
+          <Button
+            variant="contained"
+            startIcon={<RocketLaunchIcon />}
+            onClick={handleGenerateAdditionalPicks}
+            sx={{ mt: 2 }}
+            disabled={generating}
+          >
+            {generating ? 'Generating...' : 'Generate Picks'}
+          </Button>
         </Paper>
       );
     }
 
     return (
-      <Paper sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5">
-            {searchQuery ? `Search Results (${dataToShow.length})` : `Secret Phrases (${dataToShow.length})`}
-          </Typography>
-          {dataToShow.length > 10 && (
-            <Button variant="outlined" onClick={() => setShowAllPhrases(!showAllPhrases)}>
-              {showAllPhrases ? 'Show Less' : `Show All (${dataToShow.length})`}
-            </Button>
-          )}
+      <Paper sx={{ p: 3, mb: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+          <Box>
+            <Typography variant="h5">
+              {searchQuery ? `Search Results (${filteredPhrases.length})` : `Secret Phrases`}
+            </Typography>
+            {!showingGeneratedPicks && (
+              <Typography variant="caption" color="text.secondary">
+                Showing top {MAX_VISIBLE_PHRASES} picks • {totalAvailable} total available
+              </Typography>
+            )}
+            {showingGeneratedPicks && (
+              <Typography variant="caption" color="text.secondary">
+                Showing top {MAX_VISIBLE_PHRASES} picks + {generatedPicks.length} generated picks (Var {generationVariation})
+              </Typography>
+            )}
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            {showingGeneratedPicks && (
+              <Button 
+                variant="outlined" 
+                onClick={handleResetToTopPicks}
+                size="small"
+                startIcon={<FilterAltIcon />}
+              >
+                Show Only Top {MAX_VISIBLE_PHRASES}
+              </Button>
+            )}
+            {hasMoreToGenerate && (
+              <Button
+                variant="contained"
+                startIcon={generating ? <CircularProgress size={20} /> : <ShuffleIcon />}
+                onClick={handleGenerateAdditionalPicks}
+                disabled={generating}
+                size="small"
+              >
+                {generating ? 'Generating...' : `Generate ${MAX_GENERATED_PICKS} More Picks`}
+              </Button>
+            )}
+          </Box>
         </Box>
 
-        {dataToShow.slice(0, displayLimit).map(phrase => (
+        {displayPhrases.map(phrase => (
           <React.Fragment key={phrase.id}>
             {renderPhraseCard(phrase)}
           </React.Fragment>
         ))}
 
-        {dataToShow.length > 10 && !showAllPhrases && (
-          <Box sx={{ mt: 2, textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">
-              Showing first 10 of {dataToShow.length} phrases
+        {!showingGeneratedPicks && totalAvailable > MAX_VISIBLE_PHRASES && (
+          <Box sx={{ mt: 3, textAlign: 'center', p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              {remainingCount} more picks available
             </Typography>
+            <Button
+              variant="outlined"
+              onClick={handleGenerateAdditionalPicks}
+              startIcon={<RocketLaunchIcon />}
+              disabled={generating}
+            >
+              Generate {Math.min(remainingCount, MAX_GENERATED_PICKS)} More Picks
+            </Button>
           </Box>
         )}
       </Paper>
     );
   };
 
-  const renderGeneratorModal = () => (
-    <Dialog open={showGeneratorModal} onClose={() => !generating && setShowGeneratorModal(false)} maxWidth="md" fullWidth>
-      <DialogTitle>
-        {generating ? 'Generating...' : 'Secret Phrases Generated!'}
-      </DialogTitle>
-      <DialogContent>
-        {generating ? (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <CircularProgress size={60} sx={{ mb: 3 }} />
-            <Typography variant="h6" gutterBottom>
-              Analyzing insider data...
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Processing your query and generating secret phrases using advanced models
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ py: 2 }}>
-            {generatedResult && (
-              <Paper sx={{ p: 2, bgcolor: 'background.default', whiteSpace: 'pre-wrap' }}>
-                <Typography variant="body1" component="div" sx={{ whiteSpace: 'pre-line' }}>
-                  {generatedResult.analysis}
-                </Typography>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="caption" color="text.secondary">
-                  Source: {generatedResult.source} • {new Date(generatedResult.timestamp).toLocaleString()}
-                </Typography>
-              </Paper>
-            )}
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        {!generating && (
-          <Box sx={{ display: 'flex', gap: 2, width: '100%' }}>
-            {showMoreButton && (
-              <Button onClick={loadMorePhrases} variant="outlined" color="primary">
-                Show 3 More Phrases
-              </Button>
-            )}
-            <Button onClick={() => setShowGeneratorModal(false)} variant="contained" sx={{ flex: 1 }}>
-              Close
-            </Button>
-          </Box>
-        )}
-      </DialogActions>
-    </Dialog>
-  );
-
-  const renderPredictionGenerator = () => (
+  const renderGeneratorSection = () => (
     <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)' }}>
       <Box sx={{ textAlign: 'center', mb: 3 }}>
         <RocketLaunchIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
@@ -1632,88 +1515,100 @@ const SecretPhrasesScreen: React.FC = () => {
           🚀 AI Secret Phrase Generator
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Generate custom secret phrases using advanced AI models
+          Generate custom secret phrases using real player prop data and advanced AI models
         </Typography>
-      </Box>
-
-      {/* Display remaining requests */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-        <Typography variant="body2" color="text.secondary">
-          Generator requests remaining: <strong>{remainingRequests}</strong>
-        </Typography>
-      </Box>
-
-      {/* NEW: Dropdown with 20 prompts for NBA, NHL, Golf, Tennis */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Quick Prompts (NBA, NHL, Golf, Tennis)
-        </Typography>
-        <FormControl fullWidth>
-          <InputLabel>Select a prompt</InputLabel>
-          <Select
-            value={selectedPrompt}
-            label="Select a prompt"
-            onChange={(e) => {
-              setSelectedPrompt(e.target.value);
-              setCustomQuery(e.target.value);
-            }}
-          >
-            {USEFUL_PROMPTS_EXTENDED.map((prompt, idx) => (
-              <MenuItem key={idx} value={prompt}>{prompt}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
       </Box>
 
       <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Quick Queries (Original Categories)
+        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <HistoryIcon color="primary" />
+          Secret Phrase Prompts
         </Typography>
-        <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
-          {USEFUL_PROMPTS.flatMap(cat => cat.prompts).slice(0, 8).map((query, index) => (
-            <Chip
-              key={index}
-              label={query}
-              onClick={() => setCustomQuery(query)}
-              icon={<SparklesIcon />}
-              sx={{
-                backgroundColor: 'primary.light',
-                color: 'white',
-                '&:hover': { backgroundColor: 'primary.main' }
+        
+        <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+          <FormControl size="small" sx={{ minWidth: 400 }}>
+            <Select
+              value={selectedPrompt}
+              onChange={(e) => {
+                setSelectedPrompt(e.target.value);
+                setCustomQuery(e.target.value);
               }}
-            />
-          ))}
+              displayEmpty
+              renderValue={(selected) => {
+                if (!selected) {
+                  return <em style={{ color: '#9ca3af' }}>Select a secret phrase prompt (30 available)...</em>;
+                }
+                return selected;
+              }}
+            >
+              <MenuItem value=""><em>Select a prompt...</em></MenuItem>
+              <MenuItem disabled sx={{ opacity: 0.7 }}>
+                <Typography variant="caption" color="text.secondary">───── INSIDER TIPS (5) ─────</Typography>
+              </MenuItem>
+              {SECRET_PHRASE_PROMPTS.slice(0, 5).map(prompt => (
+                <MenuItem key={prompt} value={prompt} sx={{ pl: 4 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <WhatshotIcon sx={{ fontSize: 16, color: '#ef4444' }} />
+                    {prompt}
+                  </Box>
+                </MenuItem>
+              ))}
+              <MenuItem disabled sx={{ opacity: 0.7 }}>
+                <Typography variant="caption" color="text.secondary">───── SHARP MONEY (5) ─────</Typography>
+              </MenuItem>
+              {SECRET_PHRASE_PROMPTS.slice(5, 10).map(prompt => (
+                <MenuItem key={prompt} value={prompt} sx={{ pl: 4 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TrendingUpIcon sx={{ fontSize: 16, color: '#10b981' }} />
+                    {prompt}
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <TextField
+            sx={{ flex: 1, minWidth: 300 }}
+            variant="outlined"
+            placeholder="Or type your own secret phrase query..."
+            value={customQuery}
+            onChange={(e) => setCustomQuery(e.target.value)}
+            size="small"
+          />
+          <Button
+            variant="contained"
+            onClick={() => {
+              // This would call the existing handleGeneratePredictions
+              setShowGeneratorModal(true);
+            }}
+            disabled={!customQuery.trim() || generating}
+            sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, minWidth: 120 }}
+          >
+            {generating ? 'Generating...' : 'Generate'}
+          </Button>
         </Box>
       </Box>
 
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Custom Query
-        </Typography>
-        <TextField
-          fullWidth
-          multiline
-          rows={3}
-          placeholder="Enter custom query (e.g., '26predictive clustering', 'insider tips for Lakers', 'easter egg')"
-          value={customQuery}
-          onChange={(e) => setCustomQuery(e.target.value)}
-          variant="outlined"
-          sx={{ mb: 2 }}
-        />
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          startIcon={<AutoAwesomeIcon />}
-          onClick={handleGeneratePredictions}
-          disabled={!customQuery.trim() || generating}
-        >
-          {generating ? 'Generating...' : 'Generate AI Secret Phrases'}
-        </Button>
+      <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
+        Quick prompts
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+        {SECRET_PHRASE_PROMPTS.slice(0, 8).map((prompt) => (
+          <Chip
+            key={prompt}
+            label={prompt.length > 30 ? prompt.substring(0, 30) + '...' : prompt}
+            onClick={() => {
+              setCustomQuery(prompt);
+              setShowGeneratorModal(true);
+            }}
+            icon={<SearchIcon />}
+            sx={{ cursor: 'pointer' }}
+          />
+        ))}
       </Box>
 
-      <Alert severity="info" icon={<PsychologyIcon />}>
-        Try special commands: "26predictive clustering", "26bayesian inference", "26gradient boosted models", or "easter egg" for hidden features.
+      <Alert severity="info" icon={<PsychologyIcon />} sx={{ mt: 3 }}>
+        Try special commands: "26predictive clustering", "26bayesian inference", or "easter egg" for hidden features.
       </Alert>
     </Paper>
   );
@@ -1729,28 +1624,11 @@ const SecretPhrasesScreen: React.FC = () => {
         </Box>
       </Box>
 
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Prompt Categories
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
-          {USEFUL_PROMPTS.map(cat => (
-            <Chip
-              key={cat.category}
-              label={cat.category}
-              onClick={() => setSelectedPromptCategory(cat.category)}
-              color={selectedPromptCategory === cat.category ? 'primary' : 'default'}
-              variant={selectedPromptCategory === cat.category ? 'filled' : 'outlined'}
-            />
-          ))}
-        </Box>
-      </Box>
-
       <Typography variant="h6" gutterBottom>
         Quick Prompts
       </Typography>
       <Grid container spacing={2}>
-        {USEFUL_PROMPTS.find(cat => cat.category === selectedPromptCategory)?.prompts.map((prompt, index) => (
+        {SECRET_PHRASE_PROMPTS.slice(0, 6).map((prompt, index) => (
           <Grid item xs={12} sm={6} md={4} key={index}>
             <Card
               sx={{
@@ -1764,14 +1642,14 @@ const SecretPhrasesScreen: React.FC = () => {
               }}
               onClick={() => {
                 setCustomQuery(prompt);
-                handleGeneratePredictions();
+                setShowGeneratorModal(true);
               }}
             >
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <SearchIcon sx={{ mr: 1, color: 'primary.main', fontSize: 16 }} />
                   <Typography variant="body2">
-                    {prompt}
+                    {prompt.length > 40 ? prompt.substring(0, 40) + '...' : prompt}
                   </Typography>
                 </Box>
               </CardContent>
@@ -1786,9 +1664,28 @@ const SecretPhrasesScreen: React.FC = () => {
     </Paper>
   );
 
-  // ============================================
-  // Loading & Error
-  // ============================================
+  // Simple generator modal placeholder
+  const renderGeneratorModal = () => (
+    <Dialog open={showGeneratorModal} onClose={() => setShowGeneratorModal(false)} maxWidth="md" fullWidth>
+      <DialogTitle>
+        AI Secret Phrase Generator
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ py: 2 }}>
+          <Typography variant="body1" gutterBottom>
+            Query: "{customQuery}"
+          </Typography>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            This feature is coming soon. Use the "Generate More Picks" button above to get additional picks with variations!
+          </Alert>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setShowGeneratorModal(false)}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+
   if (loading && !refreshing) {
     return (
       <Container maxWidth="lg">
@@ -1819,27 +1716,25 @@ const SecretPhrasesScreen: React.FC = () => {
     );
   }
 
-  // ============================================
-  // Main Render
-  // ============================================
   return (
     <Container maxWidth="lg">
       {renderHeader()}
+      {renderSubscriptionStatus()}
       {renderRefreshIndicator()}
       {renderSportSelector()}
       {renderFilters()}
       {renderCategoryTabs()}
-      {renderPhrasesList()}
-      {renderPredictionGenerator()}
+      {renderGeneratorSection()}
       {renderPrompts()}
+      {renderPhrasesSection()}
 
       <Paper sx={{ p: 3, mt: 4, textAlign: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
           <InfoIcon sx={{ mr: 1, color: 'info.main' }} />
           <Typography variant="body2" color="text.secondary">
             {phrases.length > 0
-              ? '✅ Connected to API • Using real secret phrases data (augmented with mock data)'
-              : '⚠️ Demo Mode • Connect to API for real-time data'}
+              ? `✅ Loaded ${phrases.length} secret phrases from ${apiSource}`
+              : '⚠️ No phrases available'}
           </Typography>
         </Box>
         <Button
@@ -1853,8 +1748,29 @@ const SecretPhrasesScreen: React.FC = () => {
       </Paper>
 
       {renderGeneratorModal()}
+      {renderUpgradeModal()}
+      {renderCreditsModal()}
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };
 
-export default SecretPhrasesScreen;
+const SecretPhraseScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="SecretPhrase">
+      <SecretPhraseContent />
+    </ProtectedRoute>
+  );
+};
+
+export default SecretPhraseScreen;

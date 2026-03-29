@@ -102,7 +102,7 @@ interface Selection {
   stat: string;
   line: number;
   projection: number;
-  odds: string;
+  odds: string | number; // Can be string or number
   confidence: number;
   edge: string;
   position?: string;
@@ -120,6 +120,7 @@ const fetchNBASelections = async (): Promise<Selection[]> => {
     return (response.data.selections || []).map((s: any) => ({
       ...s,
       sport: 'NBA',
+      odds: String(s.odds || '-110'), // Ensure odds is string
     }));
   } catch (error) {
     console.warn('Failed to fetch NBA selections', error);
@@ -156,7 +157,7 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
           stat,
           line,
           projection: proj,
-          odds,
+          odds: String(odds), // Ensure odds is string
           confidence: 70 + Math.floor(Math.random() * 15), // can be improved
           edge,
           position: player.position,
@@ -218,7 +219,7 @@ const fetchNHLSelections = async (): Promise<Selection[]> => {
           stat,
           line,
           projection: proj,
-          odds,
+          odds: String(odds), // Ensure odds is string
           confidence: 70 + Math.floor(Math.random() * 15),
           edge,
           position: player.position,
@@ -282,19 +283,28 @@ const generateAIParlaysFromSelections = (
 
   const suggestions: ParlaySuggestion[] = [];
 
-  // Helper to calculate total odds
+  // Helper to calculate total odds with proper string handling
   const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number } => {
     let decimal = 1.0;
     legs.forEach(leg => {
-      const oddsStr = leg.odds.replace('+', '');
-      const oddsNum = parseInt(oddsStr, 10);
+      // Convert odds to string if it's a number, otherwise use as is
+      const oddsStr = leg.odds ? String(leg.odds) : '-110';
+      
+      // Remove + sign if present
+      const cleanOddsStr = oddsStr.replace(/\+/g, '');
+      
+      const oddsNum = parseInt(cleanOddsStr, 10);
       if (!isNaN(oddsNum)) {
-        if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
-        else decimal *= 1 - 100 / Math.abs(oddsNum);
+        if (oddsNum > 0) {
+          decimal *= 1 + oddsNum / 100;
+        } else {
+          decimal *= 1 - 100 / Math.abs(oddsNum);
+        }
       } else {
         decimal *= 1.91; // -110 approx
       }
     });
+    
     const totalOdds = decimal >= 2.0
       ? `+${Math.round((decimal - 1) * 100)}`
       : Math.round(-100 / (decimal - 1)).toString();
@@ -320,7 +330,7 @@ const generateAIParlaysFromSelections = (
       return {
         id: `conf-${idx}-${Date.now()}`,
         description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: s.odds,
+        odds: String(s.odds), // Convert to string explicitly
         confidence: conf,
         sport: sportDisplay,
         market: 'player_props',
@@ -375,7 +385,7 @@ const generateAIParlaysFromSelections = (
       return {
         id: `edge-${idx}-${Date.now()}`,
         description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: s.odds,
+        odds: String(s.odds), // Convert to string explicitly
         confidence: conf,
         sport: sportDisplay,
         market: 'player_props',
@@ -427,7 +437,7 @@ const generateAIParlaysFromSelections = (
       return {
         id: `bal-${idx}-${Date.now()}`,
         description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: s.odds,
+        odds: String(s.odds), // Convert to string explicitly
         confidence: conf,
         sport: sportDisplay,
         market: 'player_props',
@@ -474,12 +484,13 @@ const generateAIParlaysFromSelections = (
 // Helper Components
 // ==============================
 
-const OddsChip = ({ odds }: { odds: string }) => {
-  const numericOdds = parseInt(odds, 10);
+const OddsChip = ({ odds }: { odds: string | number }) => {
+  const oddsStr = String(odds);
+  const numericOdds = parseInt(oddsStr, 10);
   const isFavorite = numericOdds < 0;
   return (
     <Chip
-      label={odds}
+      label={oddsStr}
       size="small"
       color={isFavorite ? 'success' : 'error'}
       variant="outlined"

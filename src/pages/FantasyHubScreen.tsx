@@ -1,4 +1,4 @@
-// FantasyHubScreen.tsx – Complete updated version with salary cap $60,000, fixed team names, and new NBA Props tab
+// FantasyHubScreen.tsx – Complete updated version with injury filtering, ADP estimation, and lineup variety
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -68,8 +68,19 @@ import LineupIcon from '@mui/icons-material/ViewCompact';
 import PlayersIcon from '@mui/icons-material/People';
 import DraftIcon from '@mui/icons-material/HowToVote';
 import BugReportIcon from '@mui/icons-material/BugReport';
-import AssessmentIcon from '@mui/icons-material/Assessment'; // Added for Projections tab
+import AssessmentIcon from '@mui/icons-material/Assessment';
 import { useTheme } from '@mui/material/styles';
+
+// Import services
+import { 
+  fetchDraftRankings, 
+  fetchDraftHistory,
+  fetchPlayerProps,
+  fetchTank01ADP,
+  fetchTank01Injuries,
+  fetchTank01News,
+  fetchTank01GamesForDate
+} from '../services/fantasyHubService';
 
 // Utilities
 import { useDebounce } from '../utils/useDebounce';
@@ -86,7 +97,7 @@ import { Player, Sport, FantasyLineup, LineupSlot } from '../types/fantasy.types
 // ============= CONSTANTS =============
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
 const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
-const SALARY_CAP = 60000; // updated from 50000 to 60000
+const SALARY_CAP = 60000;
 const MAX_PLAYERS = 9;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -249,7 +260,7 @@ const fetchWithRetry = async (url: string, options: RequestInit = {}, maxRetries
 
 const createEmptyLineup = (sport: Sport): FantasyLineup => {
   const positions = sport === 'nba'
-    ? ['C', 'PF', 'SF', 'PG', 'SG', 'SF', 'SG', 'PF', 'PG']
+    ? ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL', 'UTIL']
     : ['C', 'LW', 'RW', 'D', 'D', 'G', 'UTIL', 'UTIL', 'UTIL'];
   
   const slots: LineupSlot[] = positions.map(pos => ({
@@ -356,7 +367,6 @@ const NBAPropsFilterBar = ({ onFilterChange }: { onFilterChange: (filters: any) 
   const [bookmaker, setBookmaker] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Get unique stat types from playerProps (you'll need to pass this in)
   const statTypes = ['points', 'rebounds', 'assists', 'steals', 'blocks', 'three-pointers'];
   const bookmakers = ['FanDuel', 'DraftKings', 'BetOnline.ag', 'Bovada'];
 
@@ -432,8 +442,6 @@ const NBAPropsFilterBar = ({ onFilterChange }: { onFilterChange: (filters: any) 
 
 // ============= NBA PROPS COMPONENT =============
 const NBAProps = ({ onAddToLineup, allPlayers }: { onAddToLineup: (player: Player) => void; allPlayers: Player2026[] }) => {
-  // This would need to be connected to your actual props data
-  // For now, it's a placeholder that will be implemented with your existing props logic
   return (
     <Paper sx={{ p: 3 }}>
       <Typography variant="h6" gutterBottom>NBA Player Props - Card View</Typography>
@@ -456,6 +464,7 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   const [loading, setLoading] = useState<boolean>(true);
   const [savedLineups, setSavedLineups] = useState<Record<string, FantasyLineup>>({});
   const [showLineupHistory, setShowLineupHistory] = useState<boolean>(false);
+  const [dataReady, setDataReady] = useState<boolean>(false); // NEW: flag for data loading completion
 
   // Collapsible sections
   const [propsExpanded, setPropsExpanded] = useState(true);
@@ -509,7 +518,7 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   const [propsMinProjection, setPropsMinProjection] = useState(0);
   const [propsMaxProjection, setPropsMaxProjection] = useState(60);
   
-  // New filter state for the props table (moved from inside renderPlayerPropsTable)
+  // New filter state for the props table
   const [propsStatFilter, setPropsStatFilter] = useState<string>('all');
   const [propsMinEdge, setPropsMinEdge] = useState<number>(-100);
   const [propsMaxEdge, setPropsMaxEdge] = useState<number>(100);
@@ -531,7 +540,7 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   ];
 
   // NBA Props tab state
-  const [nbaPropsTab, setNbaPropsTab] = useState(0); // 0: Card View, 1: Table View (optional)
+  const [nbaPropsTab, setNbaPropsTab] = useState(0);
   const [nbaPropsFilters, setNbaPropsFilters] = useState<any>({});
 
   // AI Generator
@@ -540,7 +549,7 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   const [lineupResult, setLineupResult] = useState<any>(null);
   const [showGeneratorModal, setShowGeneratorModal] = useState(false);
 
-  // Draft - NEW STATE VARIABLES
+  // Draft - STATE VARIABLES
   const [draftRecommendations, setDraftRecommendations] = useState<any[]>([]);
   const [draftMode, setDraftMode] = useState<'snake' | 'turn'>('snake');
   const [draftPick, setDraftPick] = useState<number>(1);
@@ -620,424 +629,376 @@ const FantasyHubScreen: React.FC<FantasyHubScreenProps> = ({ initialSport = 'nba
   const injuredNames = useMemo(() => 
     new Set(injuryList.map(i => i.longName)), [injuryList]);
 
-  // ============= INJURY HELPER =============
-const isPlayerInjured = useCallback((player: Player2026): boolean => {
-  // Check injury list (Tank01)
-  if (injuries.size > 0) {
-    if (injuries.has(player.name)) {
-      console.log(`[INJURY] ${player.name} found in injury list (exact match)`);
+  // ============= INJURY HELPER (Improved with ID matching) =============
+  const isPlayerInjured = useCallback((player: Player2026): boolean => {
+    // 1. Check by player ID if available (most reliable)
+    if (player.id && injuryList.some(i => i.playerId === player.id)) {
+      console.log(`[INJURY] ${player.name} injured by player ID match`);
       return true;
     }
-    const normalized = player.name.replace(/[.\s'\-]/g, '').toLowerCase();
-    if (injuries.has(`norm:${normalized}`)) {
-      console.log(`[INJURY] ${player.name} found in injury list (normalized match)`);
+    
+    // 2. Check injury list (Tank01) by name
+    if (injuries.size > 0) {
+      if (injuries.has(player.name)) {
+        console.log(`[INJURY] ${player.name} found in injury list (exact match)`);
+        return true;
+      }
+      const normalized = player.name.replace(/[.\s'\-]/g, '').toLowerCase();
+      if (injuries.has(`norm:${normalized}`)) {
+        console.log(`[INJURY] ${player.name} found in injury list (normalized match)`);
+        return true;
+      }
+    }
+    
+    // 3. Fallback to player's injury_status from player object
+    if (player.injury_status && player.injury_status !== 'Healthy') {
+      console.log(`[INJURY] ${player.name} has injury_status: ${player.injury_status}`);
       return true;
     }
-  }
-  
-  // Fallback to player's injury_status from player object
-  if (player.injury_status && player.injury_status !== 'Healthy') {
-    console.log(`[INJURY] ${player.name} has injury_status: ${player.injury_status}`);
-    return true;
-  }
-  
-  return false;
-}, [injuries]);  
-
-// ============= UPDATE SLATE PLAYERS =============
-useEffect(() => {
-  if (players.length > 0 && teamsPlayingToday.size > 0) {
-    let filtered = players.filter(p => teamsPlayingToday.has(p.team));
-    if (injuries.size > 0 || players.some(p => p.injury_status && p.injury_status !== 'Healthy')) {
-      filtered = filtered.filter(p => !isPlayerInjured(p));
-    }
-    setSlatePlayers(filtered);
-    console.log(`[SLATE] Filtered to ${filtered.length} players from today's games (from ${players.length})`);
-  } else {
-    setSlatePlayers([]);
-    console.log('[SLATE] No games today, showing empty slate');
-  }
-}, [players, teamsPlayingToday, injuries, isPlayerInjured]);
-
-  // ============= DATA FETCHING WITH RATE LIMITING =============
-const fetchTodaysGames = useCallback(async () => {
-  try {
-    const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
-    let url: string;
     
-    if (activeSport === 'mlb') {
-      url = `${PYTHON_API_BASE}/api/mlb/games?date=${today}`;
-    } else if (activeSport === 'nhl') {
-      url = `${PYTHON_API_BASE}/api/nhl/games?date=${today}`;
+    return false;
+  }, [injuries, injuryList]);  
+
+  // ============= UPDATE SLATE PLAYERS =============
+  useEffect(() => {
+    if (players.length > 0 && teamsPlayingToday.size > 0) {
+      let filtered = players.filter(p => teamsPlayingToday.has(p.team));
+      if (injuries.size > 0 || players.some(p => p.injury_status && p.injury_status !== 'Healthy')) {
+        filtered = filtered.filter(p => !isPlayerInjured(p));
+      }
+      setSlatePlayers(filtered);
+      console.log(`[SLATE] Filtered to ${filtered.length} players from today's games (from ${players.length})`);
     } else {
-      // For NBA/NFL, keep using Node's Tank01 endpoint
-      const tank01Date = today.replace(/-/g, '');
-      url = `${NODE_API_BASE}/api/tank01/games?date=${tank01Date}`;
+      setSlatePlayers([]);
+      console.log('[SLATE] No games today, showing empty slate');
     }
-    
-    const response = await fetchWithRetry(url);
-    if (!response) {
-      console.log('[GAMES] Request already in progress, skipping');
-      return;
-    }
-    
-    const data = await response.json();
-    
-    // Handle different response structures
-    if (activeSport === 'mlb') {
-      // Python's /api/mlb/games returns { games, count, date, source }
-      if (data.games) {
-        setTodaysGames(data.games);
-        console.log(`[GAMES] Loaded ${data.games.length} MLB games`);
-        
-        const teams = new Set<string>();
-        data.games.forEach((game: any) => {
-          if (game.away_team) teams.add(game.away_team);
-          if (game.home_team) teams.add(game.home_team);
-        });
-        console.log(`[GAMES] Teams playing today: ${Array.from(teams).join(', ')}`);
-      }
-    } else if (activeSport === 'nhl') {
-      // Python's /api/nhl/games returns { games, count, date, source }
-      if (data.games) {
-        setTodaysGames(data.games);
-        console.log(`[GAMES] Loaded ${data.games.length} NHL games`);
-        
-        const teams = new Set<string>();
-        data.games.forEach((game: any) => {
-          if (game.away_team) teams.add(game.away_team);
-          if (game.home_team) teams.add(game.home_team);
-        });
-        console.log(`[GAMES] Teams playing today: ${Array.from(teams).join(', ')}`);
-      }
-    } else {
-      // Existing Tank01 response handling (unchanged)
-      if (data.success) {
-        setTodaysGames(data.data);
-        console.log(`[GAMES] Loaded ${data.data.length} games for today`);
-        
-        const teams = new Set<string>();
-        data.data.forEach((game: any) => {
-          if (game.away) teams.add(game.away);
-          if (game.home) teams.add(game.home);
-        });
-        console.log(`[GAMES] Teams playing today: ${Array.from(teams).join(', ')}`);
-      }
-    }
-  } catch (error) {
-    console.error('[GAMES] Failed to fetch:', error);
-  }
-}, [activeSport]);
+  }, [players, teamsPlayingToday, injuries, isPlayerInjured]);
 
-const fetchInjuries = useCallback(async () => {
-  setLoadingInjuries(true);
-  try {
-    const response = await fetchWithRetry(`${NODE_API_BASE}/api/tank01/injuries`);
-    
-    if (!response) {
-      console.log('[INJURIES] Request already in progress, skipping');
-      setLoadingInjuries(false);
-      return;
-    }
-    
-    const data = await response.json();
-    if (data.success && Array.isArray(data.data)) {
-      setInjuryList(data.data);
+  // ============= DATA FETCHING WITH SERVICE FUNCTIONS =============
+  const fetchTodaysGames = useCallback(async () => {
+    try {
+      const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
       
-      // Build Set of injured player names
-      const injuredSet = new Set<string>();
-      data.data.forEach((item: any) => {
-        if (item.longName) {
-          injuredSet.add(item.longName); // exact name
-          // Also store normalized version
-          const normalized = item.longName.replace(/[.\s'\-]/g, '').toLowerCase();
-          injuredSet.add(`norm:${normalized}`);
+      if (activeSport === 'mlb') {
+        const response = await fetch(`${PYTHON_API_BASE}/api/mlb/games?date=${today}`);
+        const data = await response.json();
+        if (data.games) {
+          setTodaysGames(data.games);
+          console.log(`[GAMES] Loaded ${data.games.length} MLB games`);
         }
-      });
-      
-      setInjuries(injuredSet);
-      console.log(`[INJURIES] Loaded ${data.data.length} injured players:`, 
-        data.data.map((i: any) => i.longName).join(', '));
-    } else {
-      console.log('[INJURIES] API returned no data or invalid response', data);
+      } else if (activeSport === 'nhl') {
+        const response = await fetch(`${PYTHON_API_BASE}/api/nhl/games?date=${today}`);
+        const data = await response.json();
+        if (data.games) {
+          setTodaysGames(data.games);
+          console.log(`[GAMES] Loaded ${data.games.length} NHL games`);
+        }
+      } else {
+        // Use service function for NBA
+        const result = await fetchTank01GamesForDate(today, activeSport);
+        if (result.success) {
+          setTodaysGames(result.data);
+          console.log(`[GAMES] Loaded ${result.data.length} games for today from service`);
+        } else {
+          // Fallback to API
+          const tank01Date = today.replace(/-/g, '');
+          const response = await fetch(`${NODE_API_BASE}/api/tank01/games?date=${tank01Date}`);
+          const data = await response.json();
+          if (data.success) {
+            setTodaysGames(data.data);
+            console.log(`[GAMES] Loaded ${data.data.length} games for today from API`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[GAMES] Failed to fetch:', error);
     }
-  } catch (error) {
-    console.error('[INJURIES] Failed to fetch:', error);
-  } finally {
-    setLoadingInjuries(false);
-  }
-}, []);
+  }, [activeSport]);
+
+  const fetchInjuries = useCallback(async () => {
+    setLoadingInjuries(true);
+    try {
+      const result = await fetchTank01Injuries(activeSport);
+      
+      if (result.success && Array.isArray(result.data)) {
+        setInjuryList(result.data);
+        
+        // Build Set of injured player names
+        const injuredSet = new Set<string>();
+        result.data.forEach((item: any) => {
+          if (item.longName) {
+            injuredSet.add(item.longName);
+            const normalized = item.longName.replace(/[.\s'\-]/g, '').toLowerCase();
+            injuredSet.add(`norm:${normalized}`);
+          }
+        });
+        
+        setInjuries(injuredSet);
+        console.log(`[INJURIES] Loaded ${result.data.length} injured players from service`);
+      } else {
+        // Fallback to API
+        const response = await fetch(`${NODE_API_BASE}/api/tank01/injuries`);
+        const data = await response.json();
+        if (data.success && Array.isArray(data.data)) {
+          setInjuryList(data.data);
+          const injuredSet = new Set<string>();
+          data.data.forEach((item: any) => {
+            if (item.longName) {
+              injuredSet.add(item.longName);
+              const normalized = item.longName.replace(/[.\s'\-]/g, '').toLowerCase();
+              injuredSet.add(`norm:${normalized}`);
+            }
+          });
+          setInjuries(injuredSet);
+          console.log(`[INJURIES] Loaded ${data.data.length} injured players from API`);
+        }
+      }
+    } catch (error) {
+      console.error('[INJURIES] Failed to fetch:', error);
+    } finally {
+      setLoadingInjuries(false);
+    }
+  }, [activeSport]);
 
   const fetchNews = useCallback(async () => {
     setLoadingNews(true);
     try {
-      const response = await fetchWithRetry(`${NODE_API_BASE}/api/tank01/news?max=5`);
+      // Use queueRequest to avoid 429
+      const result = await queueRequest('news', () => fetchTank01News(5, activeSport), 3000);
       
-      if (!response) {
-        console.log('[NEWS] Request already in progress, skipping');
-        setLoadingNews(false);
-        return;
+      if (result && result.success) {
+        setNewsItems(result.data);
+        console.log(`[NEWS] Loaded ${result.data.length} news items from service`);
+      } else {
+        // Fallback to API
+        const response = await fetch(`${NODE_API_BASE}/api/tank01/news?max=5`);
+        const data = await response.json();
+        if (data.success) {
+          setNewsItems(data.data);
+          console.log(`[NEWS] Loaded ${data.data.length} news items from API`);
+        }
       }
-      
-      const data = await response.json();
-      if (data.success) setNewsItems(data.data);
     } catch (error) {
       console.error('[NEWS] Failed to fetch:', error);
     } finally {
       setLoadingNews(false);
     }
-  }, []);
+  }, [activeSport]);
 
-  const fetchDepthCharts = useCallback(async () => {
+  const fetchADP = useCallback(async () => {
     try {
-      const response = await fetchWithRetry(`${NODE_API_BASE}/api/tank01/depthcharts`);
+      // Use queueRequest to avoid 429
+      const result = await queueRequest('adp', () => fetchTank01ADP(activeSport), 3000);
       
-      if (!response) {
-        console.log('[DEPTH] Request already in progress, skipping');
+      if (result && result.success && Array.isArray(result.data)) {
+        const adpMapData = new Map();
+        
+        // First, calculate average ADP for players with valid ADP
+        const validADPs = result.data
+          .filter((item: any) => item.overallADP && parseFloat(item.overallADP) < 500)
+          .map((item: any) => parseFloat(item.overallADP));
+        
+        const avgValidADP = validADPs.length > 0 
+          ? validADPs.reduce((a, b) => a + b, 0) / validADPs.length 
+          : 150; // Fallback average
+        
+        result.data.forEach((item: any) => {
+          const normalizedName = item.longName?.replace(/[.\s'\-]/g, '').toLowerCase() || '';
+          if (normalizedName) {
+            let adpValue = parseFloat(item.overallADP) || 999;
+            
+            // Convert 999 to a reasonable estimate
+            if (adpValue === 999 || adpValue > 500) {
+              // If it's a rookie, give them a late-round ADP
+              if (item.isRookie) {
+                adpValue = avgValidADP + 60; // Rookies go later
+              } else {
+                // For veterans with missing ADP, use average + random offset
+                adpValue = avgValidADP + (Math.random() * 40 - 20);
+              }
+              adpValue = Math.round(adpValue * 10) / 10; // Round to 1 decimal
+            }
+            
+            adpMapData.set(normalizedName, {
+              overallADP: adpValue,
+              posADP: item.posADP || '',
+              isEstimated: item.overallADP === 999 || item.overallADP > 500
+            });
+          }
+        });
+        
+        setAdpMap(adpMapData);
+        console.log(`[ADP] Loaded ${adpMapData.size} ADP entries with estimates for missing values`);
+      } else {
+        // Fallback to API
+        const response = await fetch(`${NODE_API_BASE}/api/tank01/adp?sport=${activeSport}`);
+        const data = await response.json();
+        if (data.success && Array.isArray(data.data)) {
+          const adpMapData = new Map();
+          const validADPs = data.data
+            .filter((item: any) => item.overallADP && parseFloat(item.overallADP) < 500)
+            .map((item: any) => parseFloat(item.overallADP));
+          
+          const avgValidADP = validADPs.length > 0 
+            ? validADPs.reduce((a, b) => a + b, 0) / validADPs.length 
+            : 150;
+          
+          data.data.forEach((item: any) => {
+            const normalizedName = item.longName?.replace(/[.\s'\-]/g, '').toLowerCase() || '';
+            if (normalizedName) {
+              let adpValue = parseFloat(item.overallADP) || 999;
+              
+              if (adpValue === 999 || adpValue > 500) {
+                if (item.isRookie) {
+                  adpValue = avgValidADP + 60;
+                } else {
+                  adpValue = avgValidADP + (Math.random() * 40 - 20);
+                }
+                adpValue = Math.round(adpValue * 10) / 10;
+              }
+              
+              adpMapData.set(normalizedName, {
+                overallADP: adpValue,
+                posADP: item.posADP || '',
+                isEstimated: item.overallADP === 999 || item.overallADP > 500
+              });
+            }
+          });
+          setAdpMap(adpMapData);
+          console.log(`[ADP] Loaded ${adpMapData.size} ADP entries from API with estimates`);
+        }
+      }
+    } catch (error) {
+      console.error('[ADP] Failed to fetch:', error);
+    }
+  }, [activeSport]);
+
+  // ============= FETCH PLAYERS =============
+  const fetchPlayers = useCallback(async () => {
+    if (players.length > 0 && !ignoreFilters) {
+      console.log('[PLAYERS] Already have players, skipping fetch');
+      return;
+    }
+
+    setIsLoadingPlayers(true);
+    setError(null);
+    
+    try {
+      const cachedPlayers = getSessionCached(`players_${activeSport}`);
+      if (cachedPlayers) {
+        console.log('[PLAYERS] Using cached players');
+        setPlayers(cachedPlayers);
+        setFilteredPlayers(cachedPlayers);
+        setIsLoadingPlayers(false);
         return;
       }
       
-      const data = await response.json();
-      if (data.success) setDepthCharts(data.data);
-    } catch (error) {
-      console.error('[DEPTH] Failed to fetch:', error);
-      generateMockDepthCharts();
-    }
-  }, []);
-
-  const generateMockDepthCharts = useCallback(() => {
-    if (depthCharts && depthCharts.length > 0) {
-      console.log('[DEPTH] Already have depth charts, skipping generation');
-      return depthCharts;
-    }
-    
-    console.log('[DEPTH] Generating mock depth charts');
-    
-    const teams = ['ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW', 'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NO', 'NY', 'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SA', 'TOR', 'UTA', 'WAS'];
-    const positions = ['PG', 'SG', 'SF', 'PF', 'C'];
-    
-    const mockDepth = teams.map(team => ({
-      team,
-      depthChart: positions.map(pos => ({
-        position: pos,
-        starters: [`${team} ${pos}1`, `${team} ${pos}2`],
-        backups: [`${team} ${pos}3`, `${team} ${pos}4`]
-      }))
-    }));
-    
-    setDepthCharts(mockDepth);
-    return mockDepth;
-  }, [depthCharts]);
-
-  const fetchAllTank01Data = async () => {
-    console.log('[TANK01] Fetching all data with sequential throttling');
-    
-    const endpoints = [
-      { key: 'games', fn: fetchTodaysGames, priority: 'high', delay: 0 },
-      { key: 'adp', fn: fetchADP, priority: 'high', delay: 1000 },
-      { key: 'injuries', fn: fetchInjuries, priority: 'medium', delay: 2000 },
-      { key: 'news', fn: fetchNews, priority: 'low', delay: 3000 },
-      { key: 'depth', fn: fetchDepthCharts, priority: 'low', delay: 4000 }
-    ];
-    
-    for (const endpoint of endpoints) {
-      if (endpoint.delay > 0) {
-        console.log(`[TANK01] Waiting ${endpoint.delay}ms before fetching ${endpoint.key}...`);
-        await new Promise(resolve => setTimeout(resolve, endpoint.delay));
+      let backendUrl: string;
+      if (activeSport === 'mlb' || activeSport === 'nhl') {
+        backendUrl = `${PYTHON_API_BASE}/api/players?sport=${activeSport}&realtime=true&limit=500`;
+      } else {
+        backendUrl = `${NODE_API_BASE}/api/fantasyhub/players?sport=${activeSport}`;
       }
       
-      try {
-        console.log(`[TANK01] Fetching ${endpoint.key}...`);
-        await endpoint.fn();
-      } catch (error) {
-        console.error(`[TANK01] Failed to fetch ${endpoint.key}:`, error);
-        
-        if (endpoint.key === 'depth') {
-          generateMockDepthCharts();
+      console.log('[FETCH] Fetching players from:', backendUrl);
+      
+      const controller = new AbortController();
+      const signal = controller.signal;
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
+      const response = await fetch(backendUrl, { signal });
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      let playersData: any[] = [];
+      if (activeSport === 'mlb' || activeSport === 'nhl') {
+        if (data.success && Array.isArray(data.data?.players)) {
+          playersData = data.data.players;
+        }
+      } else {
+        if (data.success && Array.isArray(data.data)) {
+          playersData = data.data;
         }
       }
-    }
-    
-    if (depthCharts.length === 0) {
-      generateMockDepthCharts();
-    }
-    
-    console.log('[TANK01] All data fetch complete');
-  };
-
-const fetchADP = useCallback(async () => {
-  try {
-    const response = await fetchWithRetry(`${NODE_API_BASE}/api/tank01/adp?sport=${activeSport}`);
-    if (!response) {
-      console.log('[ADP] Request already in progress, skipping');
-      return;
-    }
-    const data = await response.json();
-    if (data.success && Array.isArray(data.data)) {
-      // Build a Map of player name -> ADP for quick lookup
-      const adpMapData = new Map();
-      data.data.forEach(item => {
-        // Use normalized name for matching
-        const normalizedName = item.longName?.replace(/[.\s'\-]/g, '').toLowerCase() || '';
-        if (normalizedName) {
-          adpMapData.set(normalizedName, {
-            overallADP: parseFloat(item.overallADP) || 999,
-            posADP: item.posADP || ''
-          });
+      
+      const transformed = playersData.map((player: any) => ({
+        id: player.id || player.player_id || `player-${Math.random()}`,
+        name: player.name,
+        team: player.team,
+        position: player.position,
+        salary: player.salary || 5000,
+        projection: player.fantasy_points || player.projection || 0,
+        fantasy_points: player.fantasy_points || player.projection || 0,
+        value: player.value || 0,
+        points: player.points || 0,
+        rebounds: player.rebounds || 0,
+        assists: player.assists || 0,
+        steals: player.steals || 0,
+        blocks: player.blocks || 0,
+        injury_status: player.injury_status || 'Healthy',
+        sport: activeSport.toUpperCase(),
+        is_rookie: player.is_rookie || false,
+        adp: player.adp,
+        source: player.source || 'api'
+      }));
+      
+      const uniqueMap = new Map();
+      transformed.forEach(p => {
+        const key = `${p.name}-${p.team}`;
+        const existing = uniqueMap.get(key);
+        if (!existing || p.salary > existing.salary) {
+          uniqueMap.set(key, p);
         }
       });
-      setAdpMap(adpMapData);
-      console.log(`[ADP] Loaded ${data.data.length} ADP entries`);
-    }
-  } catch (error) {
-    console.error('[ADP] Failed to fetch:', error);
-  }
-}, [activeSport]);
-
-  // ============= FETCH PLAYERS =============
-const fetchPlayers = useCallback(async () => {
-  // If we already have players, don't refetch unnecessarily
-  if (players.length > 0 && !ignoreFilters) {
-    console.log('[PLAYERS] Already have players, skipping fetch');
-    return;
-  }
-
-  setIsLoadingPlayers(true);
-  setError(null);
-  
-  try {
-    // Check session cache first
-    const cachedPlayers = getSessionCached(`players_${activeSport}`);
-    if (cachedPlayers) {
-      console.log('[PLAYERS] Using cached players');
-      setPlayers(cachedPlayers);
-      setFilteredPlayers(cachedPlayers);
-      setIsLoadingPlayers(false);
-      return;
-    }
-    
-    // Choose backend based on sport
-    let backendUrl: string;
-    if (activeSport === 'mlb' || activeSport === 'nhl') {
-      backendUrl = `${PYTHON_API_BASE}/api/players?sport=${activeSport}&realtime=true&limit=500`;
-    } else {
-      backendUrl = `${NODE_API_BASE}/api/fantasyhub/players?sport=${activeSport}`;
-    }
-    
-    console.log('[FETCH] Fetching players from:', backendUrl);
-    
-    // Use a dedicated abort controller for this request
-    const controller = new AbortController();
-    const signal = controller.signal;
-    
-    // Set a timeout (30 seconds)
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    
-    const response = await fetch(backendUrl, { signal });
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // Handle different API response structures
-    let playersData: any[] = [];
-    if (activeSport === 'mlb' || activeSport === 'nhl') {
-      if (data.success && Array.isArray(data.data?.players)) {
-        playersData = data.data.players;
-      } else {
-        throw new Error('Invalid Python API response');
-      }
-    } else {
-      if (data.success && Array.isArray(data.data)) {
-        playersData = data.data;
-      } else {
-        throw new Error('Invalid Node API response');
-      }
-    }
-    
-    // Transform and deduplicate
-    const transformed = playersData.map((player: any) => ({
-      id: player.id || player.player_id || `player-${Math.random()}`,
-      name: player.name,
-      team: player.team,
-      position: player.position,
-      salary: player.salary || 5000,
-      projection: player.fantasy_points || player.projection || 0,
-      fantasy_points: player.fantasy_points || player.projection || 0,
-      value: player.value || 0,
-      points: player.points || 0,
-      rebounds: player.rebounds || 0,
-      assists: player.assists || 0,
-      steals: player.steals || 0,
-      blocks: player.blocks || 0,
-      injury_status: player.injury_status || 'Healthy',
-      sport: activeSport.toUpperCase(),
-      is_rookie: player.is_rookie || false,
-      adp: player.adp,
-      source: player.source || 'api'
-    }));
-    
-    // Deduplicate by name+team
-    const uniqueMap = new Map();
-    transformed.forEach(p => {
-      const key = `${p.name}-${p.team}`;
-      const existing = uniqueMap.get(key);
-      if (!existing || p.salary > existing.salary) {
-        uniqueMap.set(key, p);
-      }
-    });
-    const uniquePlayers = Array.from(uniqueMap.values());
-    
-    // Update state
-    setPlayers(uniquePlayers);
-    setFilteredPlayers(uniquePlayers);
-    setSessionCached(`players_${activeSport}`, uniquePlayers);
-    
-    // Update filter ranges
-    updateFilterRanges(uniquePlayers);
-    
-  } catch (err: any) {
-    // Only set error and fallback if this is a critical failure
-    if (err.name === 'AbortError') {
-      console.log('[PLAYERS] Request aborted (timeout or unmount) – not showing mock');
-      // Do NOT set mock players on abort – keep existing data if any
-    } else {
-      console.error('[FETCH] Error fetching players:', err);
-      setError(err.message);
+      const uniquePlayers = Array.from(uniqueMap.values());
       
-      // Only fall back to mock if we have no players at all
-      if (players.length === 0) {
-        console.log('[PLAYERS] No players, using mock fallback');
-        const mockPlayers = generateMockPlayers();
-        setPlayers(mockPlayers);
-        setFilteredPlayers(mockPlayers);
-        setSessionCached(`players_${activeSport}`, mockPlayers);
+      setPlayers(uniquePlayers);
+      setFilteredPlayers(uniquePlayers);
+      setSessionCached(`players_${activeSport}`, uniquePlayers);
+      
+      updateFilterRanges(uniquePlayers);
+      
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.log('[PLAYERS] Request aborted (timeout or unmount)');
+      } else {
+        console.error('[FETCH] Error fetching players:', err);
+        setError(err.message);
+        
+        if (players.length === 0) {
+          console.log('[PLAYERS] No players, using mock fallback');
+          const mockPlayers = generateMockPlayers();
+          setPlayers(mockPlayers);
+          setFilteredPlayers(mockPlayers);
+          setSessionCached(`players_${activeSport}`, mockPlayers);
+        }
       }
+    } finally {
+      setIsLoadingPlayers(false);
     }
-  } finally {
-    setIsLoadingPlayers(false);
-  }
-}, [activeSport, players.length, ignoreFilters]);
+  }, [activeSport, players.length, ignoreFilters]);
 
-const updateFilterRanges = (players: Player2026[]) => {
-  const salaries = players.map(p => p.salary).filter(Boolean);
-  const projections = players.map(p => p.projection).filter(Boolean);
-  if (salaries.length) {
-    setMinSalary(Math.min(...salaries));
-    setMaxSalary(Math.max(...salaries));
-    setPropsMinSalary(Math.min(...salaries));
-    setPropsMaxSalary(Math.max(...salaries));
-  }
-  if (projections.length) {
-    setMinProjection(Math.min(...projections));
-    setMaxProjection(Math.max(...projections));
-    setPropsMinProjection(Math.min(...projections));
-    setPropsMaxProjection(Math.max(...projections));
-  }
-};
+  const updateFilterRanges = (players: Player2026[]) => {
+    const salaries = players.map(p => p.salary).filter(Boolean);
+    const projections = players.map(p => p.projection).filter(Boolean);
+    if (salaries.length) {
+      setMinSalary(Math.min(...salaries));
+      setMaxSalary(Math.max(...salaries));
+      setPropsMinSalary(Math.min(...salaries));
+      setPropsMaxSalary(Math.max(...salaries));
+    }
+    if (projections.length) {
+      setMinProjection(Math.min(...projections));
+      setMaxProjection(Math.max(...projections));
+      setPropsMinProjection(Math.min(...projections));
+      setPropsMaxProjection(Math.max(...projections));
+    }
+  };
 
   const generateMockPlayers = (): Player2026[] => {
     const teams = ['ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW', 'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NO', 'NY', 'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SA', 'TOR', 'UTA', 'WAS'];
@@ -1069,19 +1030,11 @@ const updateFilterRanges = (players: Player2026[]) => {
   };
 
   // ============= FETCH PLAYER PROPS =============
-  const fetchPlayerProps = useCallback(async () => {
+  const fetchPlayerPropsData = useCallback(async () => {
     setLoadingProps(true);
     setPropsError(null);
     try {
-      // Use Python endpoint which already returns props with projections
-      const url = `${PYTHON_API_BASE}/api/fantasy/props?sport=${activeSport}&limit=200`;
-      console.log('[PROPS] Fetching player props from Python:', url);
-      const response = await fetchWithRetry(url, {}, 2);
-      if (!response) {
-        console.log('[PROPS] Request already in progress, skipping');
-        return;
-      }
-      const data = await response.json();
+      const data = await fetchPlayerProps(activeSport, 200);
       if (data.success && Array.isArray(data.props)) {
         console.log(`[PROPS] Loaded ${data.props.length} player props from Python`);
         setPlayerProps(data.props);
@@ -1096,23 +1049,30 @@ const updateFilterRanges = (players: Player2026[]) => {
     }
   }, [activeSport]);
 
-  // ============= INITIAL DATA FETCH WITH STAGGERING =============
+  // ============= INITIAL DATA FETCH (with dataReady flag) =============
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
+      setDataReady(false);
       
       await fetchPlayers();
       
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Stagger the API calls to respect rate limits, but use Promise.all to await all
+      // Use queueRequest inside each fetch to handle 429s
+      await Promise.all([
+        fetchPlayerPropsData(),
+        fetchTodaysGames(),
+        fetchInjuries(),
+        fetchNews(),
+        fetchADP()
+      ]);
       
-      setTimeout(() => fetchPlayerProps(), 500);
-      setTimeout(() => fetchAllTank01Data(), 1000);
-      
+      setDataReady(true);
       setLoading(false);
     };
     
     loadData();
-  }, [fetchPlayers, fetchPlayerProps]);
+  }, [fetchPlayers, fetchPlayerPropsData, fetchTodaysGames, fetchInjuries, fetchNews, fetchADP]);
 
   // ============= LOAD SAVED LINEUPS =============
   useEffect(() => {
@@ -1142,61 +1102,88 @@ const updateFilterRanges = (players: Player2026[]) => {
     loadInitialData();
   }, [activeSport]);
 
-useEffect(() => {
-  if (players.length === 0) return;
-  
-  let filtered = slatePlayers.length > 0 ? [...slatePlayers] : [...players];
-  
-  // Injury filter
-  if (injuries.size > 0 || players.some(p => p.injury_status && p.injury_status !== 'Healthy')) {
-    const beforeCount = filtered.length;
-    filtered = filtered.filter(player => !isPlayerInjured(player));
-    console.log(`[FILTER] Removed ${beforeCount - filtered.length} injured players (before: ${beforeCount}, after: ${filtered.length})`);
-  }
-  
-  // Search filter
-  if (debouncedSearch.trim()) {
-    const query = debouncedSearch.toLowerCase().trim();
-    filtered = filtered.filter(player =>
-      player.name.toLowerCase().includes(query) ||
-      player.team.toLowerCase().includes(query) ||
-      player.position.toLowerCase().includes(query)
-    );
-  }
-  
-  // Other filters...
-  filtered = filtered.filter(player =>
-    player.salary >= minSalary && player.salary <= maxSalary
-  );
-  filtered = filtered.filter(player =>
-    player.projection >= minProjection && player.projection <= maxProjection
-  );
-  if (selectedPositions.length > 0) {
-    filtered = filtered.filter(player => selectedPositions.includes(player.position));
-  }
-  if (selectedTeams.length > 0) {
-    filtered = filtered.filter(player => selectedTeams.includes(player.team));
-  }
-  
-  // Sorting
-  filtered.sort((a, b) => {
-    let aVal, bVal;
-    switch (sortBy) {
-      case 'value': aVal = a.value || 0; bVal = b.value || 0; break;
-      case 'projection': aVal = a.projection || 0; bVal = b.projection || 0; break;
-      case 'salary': aVal = a.salary || 0; bVal = b.salary || 0; break;
-      default: aVal = a.value || 0; bVal = b.value || 0;
+  // ============= FILTER PLAYERS =============
+  useEffect(() => {
+    if (players.length === 0) return;
+    
+    let filtered = slatePlayers.length > 0 ? [...slatePlayers] : [...players];
+    
+    // Injury filter
+    if (injuries.size > 0 || players.some(p => p.injury_status && p.injury_status !== 'Healthy')) {
+      filtered = filtered.filter(player => !isPlayerInjured(player));
     }
-    return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
-  });
-  
-  setFilteredPlayers(filtered);
-  console.log(`[FILTER] Final filtered to ${filtered.length} players`);
-}, [
-  players, slatePlayers, debouncedSearch, sortBy, sortOrder,
-  minSalary, maxSalary, minProjection, maxProjection,
-  selectedPositions, selectedTeams, injuries, isPlayerInjured
-]);
+    
+    // Search filter
+    if (debouncedSearch.trim()) {
+      const query = debouncedSearch.toLowerCase().trim();
+      filtered = filtered.filter(player =>
+        player.name.toLowerCase().includes(query) ||
+        player.team.toLowerCase().includes(query) ||
+        player.position.toLowerCase().includes(query)
+      );
+    }
+    
+    // Salary filter
+    filtered = filtered.filter(player =>
+      player.salary >= minSalary && player.salary <= maxSalary
+    );
+    
+    // Projection filter
+    filtered = filtered.filter(player =>
+      player.projection >= minProjection && player.projection <= maxProjection
+    );
+    
+    // Position filter
+    if (selectedPositions.length > 0) {
+      filtered = filtered.filter(player => selectedPositions.includes(player.position));
+    }
+    
+    // Team filter
+    if (selectedTeams.length > 0) {
+      filtered = filtered.filter(player => selectedTeams.includes(player.team));
+    }
+    
+    // Sorting
+    filtered.sort((a, b) => {
+      let aVal, bVal;
+      switch (sortBy) {
+        case 'value': aVal = a.value || 0; bVal = b.value || 0; break;
+        case 'projection': aVal = a.projection || 0; bVal = b.projection || 0; break;
+        case 'salary': aVal = a.salary || 0; bVal = b.salary || 0; break;
+        default: aVal = a.value || 0; bVal = b.value || 0;
+      }
+      return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+    });
+    
+    setFilteredPlayers(filtered);
+  }, [
+    players, slatePlayers, debouncedSearch, sortBy, sortOrder,
+    minSalary, maxSalary, minProjection, maxProjection,
+    selectedPositions, selectedTeams, injuries, isPlayerInjured
+  ]);
+
+  // ============= LOAD DRAFT HISTORY =============
+  useEffect(() => {
+    if (userId) {
+      const loadDraftHistory = async () => {
+        try {
+          const data = await fetchDraftHistory(userId, activeSport);
+          
+          if (data && data.success) {
+            setSavedDrafts(data.data || []);
+            console.log(`[DRAFT HISTORY] Loaded ${data.data?.length || 0} saved drafts`);
+          } else if (data && Array.isArray(data)) {
+            setSavedDrafts(data);
+            console.log(`[DRAFT HISTORY] Loaded ${data.length} saved drafts`);
+          }
+        } catch (error) {
+          console.error('[DRAFT HISTORY] Error fetching:', error);
+        }
+      };
+      
+      loadDraftHistory();
+    }
+  }, [userId, activeSport]);
     
   // ============= HANDLERS =============
   const checkLineupSalary = (lineupToCheck: FantasyLineup) => {
@@ -1323,185 +1310,166 @@ useEffect(() => {
     setSelectedTeams([]);
   };
 
-const buildLineupFromPlayers = useCallback((playerArray, sport) => {
-  const slots = createEmptyLineup(sport).slots;
-  for (let i = 0; i < Math.min(playerArray.length, slots.length); i++) {
-    slots[i].player = {
-      id: playerArray[i].id,
-      name: playerArray[i].name,
-      team: playerArray[i].team,
-      position: playerArray[i].position,
-      salary: playerArray[i].salary,
-      fantasy_projection: playerArray[i].projection,
-      points: playerArray[i].points,
-      assists: playerArray[i].assists,
-      rebounds: playerArray[i].rebounds,
-      goals: playerArray[i].goals
-    };
-  }
-  const totalSalary = slots.reduce((sum, slot) => sum + (slot.player?.salary || 0), 0);
-  const totalProjection = slots.reduce((sum, slot) => sum + (slot.player?.fantasy_projection || 0), 0);
-  return {
-    id: `lineup-${Date.now()}-${Math.random()}`,
-    sport,
-    slots,
-    total_salary: totalSalary,
-    total_projection: totalProjection,
-    remaining_cap: SALARY_CAP - totalSalary,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
-}, [SALARY_CAP]);
-
-const mutateLineup = useCallback((currentPlayers, allPlayers, cap, sport) => {
-  const newPlayers = [...currentPlayers];
-  const usedIds = new Set(newPlayers.map(p => p.id));
-
-  // Try up to 20 random swaps
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const idxToReplace = Math.floor(Math.random() * newPlayers.length);
-    const oldPlayer = newPlayers[idxToReplace];
-
-    // Salary constraints: global min $3400, global max $13500, and within ±$1400 of old player's salary
-    const slack = 1400;
-    const globalMin = 3400;
-    const globalMax = 13500;
-    const minSalary = Math.max(globalMin, oldPlayer.salary - slack);
-    const maxSalary = Math.min(globalMax, oldPlayer.salary + slack);
-
-    const candidates = allPlayers.filter(p =>
-      !usedIds.has(p.id) &&
-      p.salary >= minSalary &&
-      p.salary <= maxSalary &&
-      // Looser projection tolerance (30%)
-      Math.abs(p.projection - oldPlayer.projection) / oldPlayer.projection < 0.3
-    );
-
-    if (candidates.length === 0) continue;
-
-    const newPlayer = candidates[Math.floor(Math.random() * candidates.length)];
-    const newTotalSalary = newPlayers.reduce((sum, p, i) =>
-      sum + (i === idxToReplace ? newPlayer.salary : p.salary), 0
-    );
-
-    if (newTotalSalary <= cap) {
-      newPlayers[idxToReplace] = newPlayer;
-      return buildLineupFromPlayers(newPlayers, sport);
+  const buildLineupFromPlayers = useCallback((playerArray, sport) => {
+    const slots = createEmptyLineup(sport).slots;
+    for (let i = 0; i < Math.min(playerArray.length, slots.length); i++) {
+      slots[i].player = {
+        id: playerArray[i].id,
+        name: playerArray[i].name,
+        team: playerArray[i].team,
+        position: playerArray[i].position,
+        salary: playerArray[i].salary,
+        fantasy_projection: playerArray[i].projection,
+        points: playerArray[i].points,
+        assists: playerArray[i].assists,
+        rebounds: playerArray[i].rebounds,
+        goals: playerArray[i].goals
+      };
     }
-  }
-  return null; // no valid mutation found
-}, [buildLineupFromPlayers]);
+    const totalSalary = slots.reduce((sum, slot) => sum + (slot.player?.salary || 0), 0);
+    const totalProjection = slots.reduce((sum, slot) => sum + (slot.player?.fantasy_projection || 0), 0);
+    return {
+      id: `lineup-${Date.now()}-${Math.random()}`,
+      sport,
+      slots,
+      total_salary: totalSalary,
+      total_projection: totalProjection,
+      remaining_cap: SALARY_CAP - totalSalary,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }, []);
 
-const generateLineup = useCallback((players, numLineups = 3) => {
-  console.log(`[Knapsack] Generating lineup with ${players.length} players, need 9 slots, cap $${SALARY_CAP}`);
+  // ============= UPDATED MUTATE LINEUP WITH VARIETY =============
+  const mutateLineup = useCallback((currentPlayers, allPlayers, cap, sport) => {
+    const newPlayers = [...currentPlayers];
+    const usedIds = new Set(newPlayers.map(p => p.id));
 
-  if (!players || players.length < 9) {
-    console.log('[Knapsack] Not enough players');
-    return [];
-  }
+    // Calculate current salary distribution
+    const salaries = newPlayers.map(p => p.salary);
+    const hasHighSalary = salaries.some(s => s > 10000);
+    const hasLowSalary = salaries.some(s => s < 5000);
+    const avgSalary = salaries.reduce((a, b) => a + b, 0) / salaries.length;
 
-  // Filter players with valid salary and projection
-  let validPlayers = players.filter(p => p.salary > 0 && p.projection > 0);
-  if (validPlayers.length < 9) {
-    console.log('[Knapsack] Not enough players with positive salary/projection');
-    return [];
-  }
+    // Try multiple mutation strategies
+    const strategies = [
+      'similar',      // Replace with similar player
+      'upsell',       // Replace with higher salary player
+      'downsell',     // Replace with lower salary player
+      'position',     // Replace with different position
+      'random'        // Complete random
+    ];
+    
+    const strategy = strategies[Math.floor(Math.random() * strategies.length)];
+    console.log(`[Mutate] Using strategy: ${strategy}`);
 
-  // --- ADD RANDOM NOISE to projections (for variety) ---
-  const playersWithNoise = validPlayers.map(p => ({
-    ...p,
-    noisyProjection: p.projection * (1 + (Math.random() * 0.02 - 0.01)) // ±1% noise
-  }));
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const idxToReplace = Math.floor(Math.random() * newPlayers.length);
+      const oldPlayer = newPlayers[idxToReplace];
 
-  // Use DP with noisy projections and random tie-breaking
-  const dp = Array.from({ length: 10 }, () => new Map());
-  dp[0].set(0, 0);
+      // Set salary range based on strategy
+      let minSalary = 3400;
+      let maxSalary = 13500;
+      
+      switch(strategy) {
+        case 'similar':
+          minSalary = Math.max(3400, oldPlayer.salary - 1000);
+          maxSalary = Math.min(13500, oldPlayer.salary + 1000);
+          break;
+        case 'upsell':
+          minSalary = oldPlayer.salary + 500;
+          maxSalary = Math.min(13500, oldPlayer.salary + 3000);
+          break;
+        case 'downsell':
+          minSalary = Math.max(3400, oldPlayer.salary - 3000);
+          maxSalary = oldPlayer.salary - 500;
+          break;
+        case 'position':
+          // Same salary range but force position change
+          minSalary = Math.max(3400, oldPlayer.salary - 1500);
+          maxSalary = Math.min(13500, oldPlayer.salary + 1500);
+          break;
+        case 'random':
+          // Full range
+          minSalary = 3400;
+          maxSalary = 13500;
+          break;
+      }
 
-  for (const player of playersWithNoise) {
-    const sal = player.salary;
-    const proj = player.noisyProjection;
-    for (let k = 9; k >= 1; k--) {
-      const prevMap = dp[k - 1];
-      const currentMap = dp[k];
-      for (const [prevSal, prevProj] of prevMap.entries()) {
-        const newSal = prevSal + sal;
-        if (newSal <= SALARY_CAP) {
-          const newProj = prevProj + proj;
-          const existing = currentMap.get(newSal);
-          
-          // --- Random tie-breaking: if equal, randomly choose one ---
-          if (existing === undefined || newProj > existing) {
-            currentMap.set(newSal, newProj);
-          } else if (newProj === existing && Math.random() < 0.5) {
-            // Tie: 50% chance to replace (though value is same, this affects future reconstruction)
-            currentMap.set(newSal, newProj);
-          }
+      // Force variety based on team needs
+      if (!hasHighSalary && strategy !== 'downsell') {
+        maxSalary = Math.min(13500, maxSalary + 2000);
+      }
+      if (!hasLowSalary && strategy !== 'upsell') {
+        minSalary = Math.max(3400, minSalary - 2000);
+      }
+
+      // Position targeting based on strategy
+      let targetPosition = null;
+      if (strategy === 'position') {
+        const positions = ['PG', 'SG', 'SF', 'PF', 'C'];
+        const currentPos = oldPlayer.position;
+        const otherPositions = positions.filter(p => p !== currentPos);
+        targetPosition = otherPositions[Math.floor(Math.random() * otherPositions.length)];
+      }
+
+      const candidates = allPlayers.filter(p =>
+        !usedIds.has(p.id) &&
+        p.salary >= minSalary &&
+        p.salary <= maxSalary &&
+        // Projection tolerance based on strategy
+        (strategy === 'similar' ? 
+          Math.abs(p.projection - oldPlayer.projection) / oldPlayer.projection < 0.2 :
+          Math.abs(p.projection - oldPlayer.projection) / oldPlayer.projection < 0.4) &&
+        // Position filter
+        (targetPosition ? p.position.includes(targetPosition) : true)
+      );
+
+      if (candidates.length === 0) continue;
+
+      // Weight candidates by desired outcome
+      const weightedCandidates = candidates.map(p => {
+        let weight = 1;
+        
+        // Higher weight for players that help achieve variety
+        if (!hasHighSalary && p.salary > 10000) weight *= 3;
+        if (!hasLowSalary && p.salary < 5000) weight *= 3;
+        
+        // Higher weight for different position if that's the goal
+        if (strategy === 'position' && !p.position.includes(oldPlayer.position)) weight *= 2;
+        
+        return { player: p, weight };
+      });
+
+      // Select based on weights
+      const totalWeight = weightedCandidates.reduce((sum, wc) => sum + wc.weight, 0);
+      let random = Math.random() * totalWeight;
+      let selectedPlayer = weightedCandidates[0].player;
+      
+      for (const wc of weightedCandidates) {
+        random -= wc.weight;
+        if (random <= 0) {
+          selectedPlayer = wc.player;
+          break;
         }
       }
-    }
-  }
 
-  // Find the best combination (highest projection) among dp[9]
-  let bestSalary = -1;
-  let bestProjection = -1;
-  for (const [sal, proj] of dp[9].entries()) {
-    if (proj > bestProjection) {
-      bestProjection = proj;
-      bestSalary = sal;
-    }
-  }
+      const newTotalSalary = newPlayers.reduce((sum, p, i) =>
+        sum + (i === idxToReplace ? selectedPlayer.salary : p.salary), 0
+      );
 
-  if (bestSalary === -1) {
-    console.log('[Knapsack] Could not find a 9‑player combination under cap');
-    return [];
-  }
-
-  // Reconstruct the optimal lineup (using noisy projections for selection)
-  const selectedIds = new Set();
-  let remainingSalary = bestSalary;
-  let remainingPlayers = 9;
-  // Randomize player order slightly to increase variety during reconstruction
-  const sortedPlayers = [...playersWithNoise]
-    .map(p => ({ ...p, rand: Math.random() }))
-    .sort((a, b) => b.salary - a.salary || a.rand - b.rand); // salary desc, then random
-
-  for (const player of sortedPlayers) {
-    if (remainingPlayers === 0) break;
-    if (selectedIds.has(player.id)) continue;
-    if (player.salary <= remainingSalary) {
-      const prevK = remainingPlayers - 1;
-      const prevSal = remainingSalary - player.salary;
-      if (dp[prevK].has(prevSal)) {
-        selectedIds.add(player.id);
-        remainingSalary -= player.salary;
-        remainingPlayers--;
+      if (newTotalSalary <= cap) {
+        newPlayers[idxToReplace] = selectedPlayer;
+        console.log(`[Mutate] Replaced ${oldPlayer.name} ($${oldPlayer.salary}) with ${selectedPlayer.name} ($${selectedPlayer.salary}) using ${strategy} strategy`);
+        return buildLineupFromPlayers(newPlayers, sport);
       }
     }
-  }
+    
+    console.log('[Mutate] No valid mutation found');
+    return null;
+  }, [buildLineupFromPlayers]);
 
-  // Convert selected IDs back to original player objects (with original projections)
-  const selectedPlayers = validPlayers.filter(p => selectedIds.has(p.id));
-
-  // --- RANDOMIZED RETURN: either optimal or mutated ---
-  const optimalLineup = buildLineupFromPlayers(selectedPlayers, activeSport);
-
-  // 70% chance to attempt mutation, 30% chance to return optimal (adjust as desired)
-  if (Math.random() < 0.3) {
-    console.log('[Knapsack] Returning optimal lineup');
-    return [optimalLineup];
-  } else {
-    console.log('[Knapsack] Attempting mutation');
-    const mutated = mutateLineup(selectedPlayers, validPlayers, SALARY_CAP, activeSport);
-    if (mutated) {
-      console.log('[Knapsack] Returning mutated lineup');
-      return [mutated];
-    } else {
-      console.log('[Knapsack] Mutation failed, returning optimal');
-      return [optimalLineup];
-    }
-  }
-}, [activeSport, buildLineupFromPlayers, mutateLineup]);
-
+  // ============= HELPER FUNCTIONS FOR LINEUP GENERATION =============
   const getMinRemainingSalary = (availablePlayers: Player2026[], slotsRemaining: number): number => {
     const sortedBySalary = [...availablePlayers].sort((a, b) => a.salary - b.salary);
     let total = 0;
@@ -1539,6 +1507,28 @@ const generateLineup = useCallback((players, numLineups = 3) => {
     }
   };
 
+  // ============= ADD RANDOM LINEUP GENERATOR HELPER =============
+  const generateRandomLineup = useCallback((players: Player2026[], positions: string[], cap: number): FantasyLineup | null => {
+    const shuffled = [...players].sort(() => Math.random() - 0.5);
+    const selected: Player2026[] = [];
+    let totalSalary = 0;
+    
+    for (const player of shuffled) {
+      if (selected.length >= 9) break;
+      if (totalSalary + player.salary <= cap) {
+        selected.push(player);
+        totalSalary += player.salary;
+      }
+    }
+    
+    if (selected.length === 9) {
+      return buildLineupFromPlayers(selected, activeSport);
+    }
+    
+    return null;
+  }, [activeSport, buildLineupFromPlayers]);
+
+  // ============= UPDATED BACKTRACK WITH BETTER PERFORMANCE =============
   const generateLineupBacktrack = useCallback((
     players: Player2026[],
     slots: string[],
@@ -1546,7 +1536,7 @@ const generateLineup = useCallback((players, numLineups = 3) => {
     strategy: 'value' | 'projection' | 'balanced'
   ): FantasyLineup | null => {
     const startTime = Date.now();
-    const TIME_LIMIT = 5000;
+    const TIME_LIMIT = 3000; // Reduced from 5000ms to 3000ms
 
     console.log(`[Backtrack] Generating lineup with ${players.length} players, need ${slots.length} slots, cap $${salaryCap}, strategy: ${strategy}`);
 
@@ -1555,7 +1545,24 @@ const generateLineup = useCallback((players, numLineups = 3) => {
       return null;
     }
 
-    const playerPool = players.map(p => ({
+    // Pre-filter players - only those who can actually be used
+    let eligiblePlayers = players.filter(p => p.salary > 0 && p.projection > 0);
+    
+    // If we have too many players, take a random sample for performance
+    if (eligiblePlayers.length > 100) {
+      // Shuffle and take top 100 by value/projection
+      eligiblePlayers = eligiblePlayers
+        .map(p => ({ ...p, score: (p.projection || 0) / (p.salary || 1) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 100)
+        .map(p => {
+          const { score, ...rest } = p;
+          return rest;
+        });
+      console.log(`[Backtrack] Sampled to ${eligiblePlayers.length} top-value players for performance`);
+    }
+
+    const playerPool = eligiblePlayers.map(p => ({
       ...p,
       valueScore: (p.fantasy_points || 0) / (p.salary || 1) * 1000,
       score: strategy === 'value' ? ((p.fantasy_points || 0) / (p.salary || 1) * 1000) :
@@ -1565,6 +1572,16 @@ const generateLineup = useCallback((players, numLineups = 3) => {
 
     const result: (Player2026 | null)[] = new Array(slots.length).fill(null);
     const usedIds = new Set<string>();
+
+    // Create position-based lookup for faster filtering
+    const playersByPosition = new Map<string, typeof playerPool>();
+    playerPool.forEach(player => {
+      const pos = player.position;
+      if (!playersByPosition.has(pos)) {
+        playersByPosition.set(pos, []);
+      }
+      playersByPosition.get(pos)!.push(player);
+    });
 
     function backtrack(index: number, currentSalary: number): boolean {
       if (Date.now() - startTime > TIME_LIMIT) {
@@ -1578,36 +1595,49 @@ const generateLineup = useCallback((players, numLineups = 3) => {
         return true;
       }
 
+      const slot = slots[index];
       const slotsRemaining = slots.length - index;
-      const minNeeded = getMinRemainingSalary(
+      
+      // Quick feasibility check
+      const minRemainingSalary = getMinRemainingSalary(
         playerPool.filter(p => !usedIds.has(p.id)),
         slotsRemaining
       );
-
-      if (salaryCap - currentSalary < minNeeded) {
+      if (salaryCap - currentSalary < minRemainingSalary) {
         return false;
       }
 
-      const slot = slots[index];
-      const isRestrictive = (slot === 'C' || slot === 'PF' || slot === 'SF');
-      const sortedForSlot = isRestrictive
-        ? [...playerPool].sort((a, b) => a.salary - b.salary)
-        : [...playerPool].sort((a, b) => b.score - a.score);
+      // Get candidates for this position
+      let candidates: typeof playerPool = [];
+      
+      if (slot === 'UTIL') {
+        // UTIL can be anyone
+        candidates = playerPool
+          .filter(p => !usedIds.has(p.id) && p.salary <= salaryCap - currentSalary)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 20);
+      } else {
+        // For specific positions, get players that can play this position
+        const possiblePositions = slot === 'G' ? ['PG', 'SG', 'G'] :
+                                 slot === 'F' ? ['SF', 'PF', 'F'] :
+                                 [slot];
+        
+        candidates = playerPool
+          .filter(p => !usedIds.has(p.id) && 
+                  possiblePositions.some(pos => p.position.includes(pos)) &&
+                  p.salary <= salaryCap - currentSalary)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 15);
+      }
 
-      const searchLimit = isRestrictive ? 20 : 30;
-      const candidates = sortedForSlot.slice(0, searchLimit);
-
-      for (let i = 0; i < candidates.length; i++) {
-        const player = candidates[i];
-
-        if (usedIds.has(player.id)) continue;
-        if (currentSalary + player.salary > salaryCap) continue;
-        if (!canPlayPositionLegacy(player.position, slot, activeSport)) continue;
-
+      // Try each candidate
+      for (const player of candidates) {
         result[index] = player;
         usedIds.add(player.id);
 
-        if (backtrack(index + 1, currentSalary + player.salary)) return true;
+        if (backtrack(index + 1, currentSalary + player.salary)) {
+          return true;
+        }
 
         result[index] = null;
         usedIds.delete(player.id);
@@ -1638,8 +1668,6 @@ const generateLineup = useCallback((players, numLineups = 3) => {
       const totalSalary = newSlots.reduce((sum, slot) => sum + (slot.player?.salary || 0), 0);
       const totalProjection = newSlots.reduce((sum, slot) => sum + (slot.player?.fantasy_projection || 0), 0);
 
-      console.log(`[Backtrack] Success! Lineup: $${totalSalary} cap used, ${totalProjection.toFixed(1)} projected FP`);
-
       return {
         id: `lineup-${Date.now()}-${Math.random()}`,
         sport: activeSport,
@@ -1656,6 +1684,172 @@ const generateLineup = useCallback((players, numLineups = 3) => {
     return null;
   }, [activeSport]);
 
+  // ============= FALLBACK GENERATOR THAT ALWAYS WORKS =============
+  const generateSimpleLineup = useCallback((
+    players: Player2026[],
+    slots: string[],
+    salaryCap: number
+  ): FantasyLineup | null => {
+    console.log('[Simple] Using fallback generator');
+    
+    // Sort by value (projection/salary)
+    const sorted = [...players]
+      .filter(p => p.salary > 0 && p.projection > 0)
+      .sort((a, b) => (b.projection / b.salary) - (a.projection / a.salary));
+    
+    const selected: Player2026[] = [];
+    let totalSalary = 0;
+    const usedIds = new Set<string>();
+    
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+      let found = false;
+      
+      for (const player of sorted) {
+        if (usedIds.has(player.id)) continue;
+        if (totalSalary + player.salary > salaryCap) continue;
+        
+        // Check position eligibility
+        if (slot === 'UTIL') {
+          // UTIL can be anyone
+          selected.push(player);
+          usedIds.add(player.id);
+          totalSalary += player.salary;
+          found = true;
+          break;
+        } else if (slot === 'G' && (player.position.includes('PG') || player.position.includes('SG') || player.position.includes('G'))) {
+          selected.push(player);
+          usedIds.add(player.id);
+          totalSalary += player.salary;
+          found = true;
+          break;
+        } else if (slot === 'F' && (player.position.includes('SF') || player.position.includes('PF') || player.position.includes('F'))) {
+          selected.push(player);
+          usedIds.add(player.id);
+          totalSalary += player.salary;
+          found = true;
+          break;
+        } else if (player.position.includes(slot)) {
+          selected.push(player);
+          usedIds.add(player.id);
+          totalSalary += player.salary;
+          found = true;
+          break;
+        }
+      }
+      
+      if (!found) {
+        console.log('[Simple] Could not fill slot:', slot);
+        return null;
+      }
+    }
+    
+    return buildLineupFromPlayers(selected, activeSport);
+  }, [activeSport, buildLineupFromPlayers]);
+
+  // ============= UPDATED GENERATE LINEUP WITH VARIETY =============
+  const generateLineup = useCallback((players, numLineups = 3) => {
+    console.log(`[Knapsack] Generating lineup with ${players.length} players, need 9 slots, cap $${SALARY_CAP}`);
+
+    if (!players || players.length < 9) {
+      console.log('[Knapsack] Not enough players');
+      return [];
+    }
+
+    let validPlayers = players.filter(p => p.salary > 0 && p.projection > 0);
+    if (validPlayers.length < 9) {
+      console.log('[Knapsack] Not enough players with positive salary/projection');
+      return [];
+    }
+
+    // Add more noise for variety (increased from 2% to 5%)
+    const playersWithNoise = validPlayers.map(p => ({
+      ...p,
+      noisyProjection: p.projection * (1 + (Math.random() * 0.1 - 0.05)) // ±5% noise
+    }));
+
+    const dp = Array.from({ length: 10 }, () => new Map());
+    dp[0].set(0, 0);
+
+    for (const player of playersWithNoise) {
+      const sal = player.salary;
+      const proj = player.noisyProjection;
+      for (let k = 9; k >= 1; k--) {
+        const prevMap = dp[k - 1];
+        const currentMap = dp[k];
+        for (const [prevSal, prevProj] of prevMap.entries()) {
+          const newSal = prevSal + sal;
+          if (newSal <= SALARY_CAP) {
+            const newProj = prevProj + proj;
+            const existing = currentMap.get(newSal);
+            
+            // Increased randomness in tie-breaking
+            if (existing === undefined || newProj > existing * 1.02) { // 2% threshold instead of exact
+              currentMap.set(newSal, newProj);
+            } else if (Math.random() < 0.3) { // 30% chance to replace even if slightly worse
+              currentMap.set(newSal, newProj);
+            }
+          }
+        }
+      }
+    }
+
+    // Find multiple good lineups, not just the best
+    const topSalaries = Array.from(dp[9].entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5) // Take top 5 by projection
+      .map(entry => entry[0]);
+    
+    if (topSalaries.length === 0) {
+      console.log('[Knapsack] Could not find a 9‑player combination under cap');
+      return [];
+    }
+
+    // Randomly pick one of the top salaries
+    const selectedSalary = topSalaries[Math.floor(Math.random() * topSalaries.length)];
+    
+    // Reconstruct the lineup
+    const selectedIds = new Set();
+    let remainingSalary = selectedSalary;
+    let remainingPlayers = 9;
+    
+    // Shuffle players for more variety
+    const shuffledPlayers = [...playersWithNoise]
+      .sort(() => Math.random() - 0.5);
+    
+    for (const player of shuffledPlayers) {
+      if (remainingPlayers === 0) break;
+      if (selectedIds.has(player.id)) continue;
+      if (player.salary <= remainingSalary) {
+        const prevK = remainingPlayers - 1;
+        const prevSal = remainingSalary - player.salary;
+        if (dp[prevK].has(prevSal)) {
+          selectedIds.add(player.id);
+          remainingSalary -= player.salary;
+          remainingPlayers--;
+        }
+      }
+    }
+
+    const selectedPlayers = validPlayers.filter(p => selectedIds.has(p.id));
+    const optimalLineup = buildLineupFromPlayers(selectedPlayers, activeSport);
+
+    // 60% chance to mutate, 40% chance to return optimal (increased mutation rate)
+    if (Math.random() < 0.6) {
+      console.log('[Knapsack] Attempting mutation');
+      const mutated = mutateLineup(selectedPlayers, validPlayers, SALARY_CAP, activeSport);
+      if (mutated) {
+        console.log('[Knapsack] Returning mutated lineup');
+        return [mutated];
+      }
+    }
+    
+    console.log('[Knapsack] Returning optimal lineup');
+    return [optimalLineup];
+    
+  }, [activeSport, buildLineupFromPlayers, mutateLineup]);
+
+  // ============= UPDATED GENERATE MULTIPLE LINEUPS WITH BETTER FALLBACKS AND SAFETY FILTER =============
   const generateMultipleLineups = useCallback((
     players: Player2026[],
     sport: Sport,
@@ -1663,109 +1857,136 @@ const generateLineup = useCallback((players, numLineups = 3) => {
     count: number
   ): FantasyLineup[] => {
     const positions = sport === 'nba'
-      ? ['PG', 'SG', 'SF', 'PF', 'C', 'FLEX', 'FLEX', 'FLEX', 'FLEX']
+      ? ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'UTIL', 'UTIL']
       : ['C', 'LW', 'RW', 'D', 'D', 'G', 'UTIL', 'UTIL', 'UTIL'];
 
-    console.log(`[MultipleLineups] Generating up to ${count} lineups with ${players.length} players, strategy: ${strategy}`);
-
-    const fallbackLineups = generateLineup(players, count);
-    if (fallbackLineups.length > 0) {
-      console.log(`[MultipleLineups] Using fallback generator, got ${fallbackLineups.length} lineups`);
-      return fallbackLineups;
+    // --- SAFETY FILTER: Only players on today's slate and not injured ---
+    let safePlayers = players.filter(p => {
+      // Must be playing today
+      if (teamsPlayingToday.size > 0 && !teamsPlayingToday.has(p.team)) return false;
+      // Must not be injured
+      if (isPlayerInjured(p)) return false;
+      return true;
+    });
+    
+    if (safePlayers.length < 9) {
+      console.warn('[MultipleLineups] Not enough safe players after final filter');
+      return [];
     }
+    
+    console.log(`[MultipleLineups] Generating up to ${count} lineups with ${safePlayers.length} players, strategy: ${strategy}`);
 
     const lineups: FantasyLineup[] = [];
-    const usedPlayers = new Set<string>();
-    const startTime = Date.now();
-    const TIME_LIMIT = 10000;
-
-    const strategies: Array<'value' | 'projection' | 'balanced'> = 
-      strategy === 'balanced' 
-        ? ['value', 'projection', 'balanced'] 
-        : [strategy, strategy === 'value' ? 'projection' : 'value', 'balanced'];
-
-    for (let i = 0; i < count; i++) {
-      if (Date.now() - startTime > TIME_LIMIT) {
-        console.log(`[MultipleLineups] Time limit reached after ${i} lineups`);
-        break;
+    const usedPlayerCombos = new Set<string>();
+    
+    // Always include the knapsack result as first lineup
+    const knapsackResult = generateLineup(safePlayers, 1);
+    if (knapsackResult.length > 0) {
+      const lineup = knapsackResult[0];
+      const playerIds = lineup.slots
+        .filter(s => s.player)
+        .map(s => s.player!.id)
+        .sort()
+        .join(',');
+      usedPlayerCombos.add(playerIds);
+      lineups.push(lineup);
+      console.log(`[MultipleLineups] Generated lineup 1 using knapsack with ${lineup.total_projection.toFixed(1)} FP`);
+    }
+    
+    // Try to generate additional lineups
+    for (let i = lineups.length; i < count; i++) {
+      if (i > 10) break; // Safety limit
+      
+      // Shuffle players for variety
+      const shuffledPlayers = [...safePlayers].sort(() => Math.random() - 0.5);
+      
+      // Try different methods in order of preference
+      let lineup: FantasyLineup | null = null;
+      
+      // Method 1: Backtrack (if we have time)
+      if (i < 3) { // Only try backtrack for first few lineups
+        lineup = generateLineupBacktrack(shuffledPlayers, positions, SALARY_CAP, strategy);
       }
-
-      let availablePlayers = players.filter(p => !usedPlayers.has(p.id));
-
-      if (availablePlayers.length < 5) {
-        console.log(`[MultipleLineups] Not enough unique players for lineup ${i + 1}, resetting player pool`);
-        usedPlayers.clear();
-        availablePlayers = players;
+      
+      // Method 2: Simple fallback
+      if (!lineup) {
+        lineup = generateSimpleLineup(shuffledPlayers, positions, SALARY_CAP);
       }
-
-      const currentStrategy = strategies[i % strategies.length];
-      console.log(`[MultipleLineups] Attempting lineup ${i + 1} with ${availablePlayers.length} available players, strategy: ${currentStrategy}`);
-
-      const lineup = generateLineupBacktrack(availablePlayers, positions, SALARY_CAP, currentStrategy);
-
-      if (lineup) {
-        lineup.slots.forEach(slot => {
-          if (slot.player) {
-            usedPlayers.add(slot.player.id);
-          }
-        });
-        lineups.push(lineup);
-        console.log(`[MultipleLineups] Generated lineup ${i + 1} with ${lineup.slots.filter(s => s.player).length} players, ${lineup.total_projection.toFixed(1)} FP, $${lineup.total_salary}`);
-      } else {
-        console.log(`[MultipleLineups] Could not generate lineup ${i + 1}`);
-        if (availablePlayers.length > players.length * 0.5) {
-          usedPlayers.clear();
-          console.log('[MultipleLineups] Resetting used players and retrying');
-          i--;
-        } else {
-          break;
+      
+      // Method 3: Mutate an existing lineup
+      if (!lineup && lineups.length > 0) {
+        const baseLineup = lineups[Math.floor(Math.random() * lineups.length)];
+        const basePlayers = baseLineup.slots
+          .filter(s => s.player)
+          .map(s => s.player as Player2026);
+        
+        const mutated = mutateLineup(basePlayers, safePlayers, SALARY_CAP, sport);
+        if (mutated) {
+          lineup = mutated;
         }
       }
+      
+      if (lineup) {
+        const playerIds = lineup.slots
+          .filter(s => s.player)
+          .map(s => s.player!.id)
+          .sort()
+          .join(',');
+        
+        if (!usedPlayerCombos.has(playerIds)) {
+          usedPlayerCombos.add(playerIds);
+          lineups.push(lineup);
+          console.log(`[MultipleLineups] Generated lineup ${lineups.length} with ${lineup.total_projection.toFixed(1)} FP`);
+        }
+      } else {
+        console.log(`[MultipleLineups] Could not generate lineup ${i + 1}`);
+      }
     }
-
-    lineups.sort((a, b) => b.total_projection - a.total_projection);
-
-    console.log(`[MultipleLineups] Generated ${lineups.length} lineups in ${Date.now() - startTime}ms`);
-    
-    lineups.forEach((lineup, idx) => {
-      console.log(`  Lineup ${idx + 1}: ${lineup.total_projection.toFixed(1)} FP, $${lineup.total_salary}, ${lineup.slots.filter(s => s.player).length} players`);
-    });
 
     return lineups;
-  }, [generateLineupBacktrack, generateLineup]);
+  }, [generateLineup, generateLineupBacktrack, generateSimpleLineup, mutateLineup, teamsPlayingToday, isPlayerInjured]);
 
-const handleGenerateLineup = () => {
-  console.log('[Generate] Generating optimal lineups...');
-  const startTime = Date.now();
-  
-  // Get base pool (respect ignoreFilters)
-let pool = ignoreFilters ? players : filteredPlayers;
-if (injuries.size > 0) {
-  const beforeCount = pool.length;
-  pool = pool.filter(p => !isPlayerInjured(p.name));
-  console.log(`[Generate] After injury filter: ${pool.length} players (removed ${beforeCount - pool.length})`);
-}  
-  
-  if (pool.length === 0) {
-    alert('No players available to generate lineups.');
-    return;
-  }
-
-  if (teamsPlayingToday.size > 0) {
-    const beforeCount = pool.length;
-    pool = pool.filter(p => teamsPlayingToday.has(p.team));
-    console.log(`[Generate] Filtered from ${beforeCount} to ${pool.length} players from today's games`);
-    
-    if (pool.length === 0) {
-      alert('No players from today\'s games available. Please check back later.');
+  const handleGenerateLineup = () => {
+    // Check if data is ready and games exist
+    if (!dataReady) {
+      alert("Data is still loading. Please wait a moment and try again.");
       return;
     }
-  }
-
-  console.log(`[Generate] Using ${pool.length} players with strategy: ${genStrategy}, target: ${genCount} lineups`);
-
-  const lineups = generateMultipleLineups(pool, activeSport, genStrategy, genCount);
+    if (teamsPlayingToday.size === 0) {
+      alert("No games scheduled for today. Please check back later.");
+      return;
+    }
     
+    console.log('[Generate] Generating optimal lineups...');
+    const startTime = Date.now();
+    
+    let pool = ignoreFilters ? players : filteredPlayers;
+    if (injuries.size > 0) {
+      const beforeCount = pool.length;
+      pool = pool.filter(p => !isPlayerInjured(p));
+      console.log(`[Generate] After injury filter: ${pool.length} players (removed ${beforeCount - pool.length})`);
+    }  
+    
+    if (pool.length === 0) {
+      alert('No players available to generate lineups.');
+      return;
+    }
+
+    if (teamsPlayingToday.size > 0) {
+      const beforeCount = pool.length;
+      pool = pool.filter(p => teamsPlayingToday.has(p.team));
+      console.log(`[Generate] Filtered from ${beforeCount} to ${pool.length} players from today's games`);
+      
+      if (pool.length === 0) {
+        alert('No players from today\'s games available. Please check back later.');
+        return;
+      }
+    }
+
+    console.log(`[Generate] Using ${pool.length} players with strategy: ${genStrategy}, target: ${genCount} lineups`);
+
+    const lineups = generateMultipleLineups(pool, activeSport, genStrategy, genCount);
+      
     if (lineups.length > 0) {
       setGeneratedLineups(lineups);
       setCurrentLineupIndex(0);
@@ -1825,149 +2046,213 @@ if (injuries.size > 0) {
         console.error(`Error for pick ${pick}:`, error);
       }
       
-      // Add a small delay between requests
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
     console.log('🧪 Test complete');
   }, []);
 
-  // ============= UPDATED SNAKE DRAFT HANDLER (no mock fallback) =============
+  // ============= UPDATED SNAKE DRAFT HANDLER WITH INJURY FILTERING AND ADP ESTIMATION =============
   const handleSnakeDraft = useCallback(async (pickNumber: number, strategy: string = 'balanced') => {
     console.log(`[SNAKE DRAFT] Fetching for pick ${pickNumber}, strategy ${strategy}`);
     
     try {
-      const url = `${NODE_API_BASE}/api/draft/rankings?sport=nba&pick=${pickNumber}&limit=3&strategy=${strategy}`;
+      console.log(`[SNAKE DRAFT] Calling service for pick ${pickNumber}`);
       
-      console.log(`[SNAKE DRAFT] Fetching from: ${url}`);
+      const data = await fetchDraftRankings('nba', pickNumber, strategy, 3);
       
-      const response = await fetchWithRetry(url, {}, 2);
-      
-      if (!response) {
-        console.log('[SNAKE DRAFT] Request failed – no fallback data');
-        return;
-      }
-      
-      const data = await response.json();
-      console.log(`[SNAKE DRAFT] Got ${data.data?.length || 0} players from API`);
+      console.log(`[SNAKE DRAFT] Got ${data.data?.length || 0} players from service`);
       
       if (data.data && data.data.length > 0) {
-        const formatted = data.data.map((item: any, idx: number) => ({
-          player: {
-            id: item.playerId || `player-${idx}`,
-            name: item.name,
-            team: item.team,
-            position: item.position,
-            salary: item.salary,
-            projection: item.projectedPoints,
-            value: item.valueScore,
-            adp: item.adp,
-            ceiling: item.ceiling,
-            floor: item.floor,
-            fantasy_points: item.projectedPoints,
-            sport: 'NBA' as const,
-            injury_status: item.injuryRisk || 'Healthy'
-          },
-          rank: idx + 1,
-          valueScore: item.valueScore,
-          reasoning: `Top ${strategy} player available at pick #${pickNumber}`,
-          salaryFD: item.salary,
-          salaryDK: item.salary,
-          keyFactors: item.keyFactors || ['Projected volume', 'Matchup']
-        }));
-        
-        setDraftResult({
-          type: 'snake',
-          pickNumber: pickNumber,
-          players: formatted,
-          analysis: `Top ${formatted.length} players to target at pick ${pickNumber} using ${strategy} strategy.`
+        // Filter out injured players
+        const filteredData = data.data.filter((item: any) => {
+          // Check if player is injured based on injuryRisk or injury_status
+          const isInjured = item.injuryRisk === 'Injured' || 
+                            item.injuryRisk === 'Out' || 
+                            item.injuryRisk === 'Questionable' ||
+                            (item.injury_status && item.injury_status !== 'Healthy');
+          
+          // Also check against our injuries set
+          const playerName = item.name;
+          const isInInjuryList = injuries.has(playerName) || 
+                                 injuries.has(`norm:${playerName?.replace(/[.\s'\-]/g, '').toLowerCase()}`);
+          
+          return !isInjured && !isInInjuryList;
         });
         
-        setDraftRecommendations(formatted.map(r => r.player));
-        setDraftPick(pickNumber);
-        setDraftStrategy(strategy);
-        setShowDraftModal(true);
-        console.log('[SNAKE DRAFT] Recommendations:', formatted);
+        console.log(`[SNAKE DRAFT] After injury filter: ${filteredData.length} of ${data.data.length} players remain`);
+        
+        if (filteredData.length === 0) {
+          // If all are injured, get next available non-injured players
+          console.log('[SNAKE DRAFT] All top players injured, fetching more...');
+          const moreData = await fetchDraftRankings('nba', pickNumber, strategy, 10);
+          if (moreData.data) {
+            const moreFiltered = moreData.data.filter((item: any) => {
+              const isInjured = item.injuryRisk === 'Injured' || item.injuryRisk === 'Out';
+              const playerName = item.name;
+              const isInInjuryList = injuries.has(playerName) || 
+                                     injuries.has(`norm:${playerName?.replace(/[.\s'\-]/g, '').toLowerCase()}`);
+              return !isInjured && !isInInjuryList;
+            }).slice(0, 3);
+            
+            if (moreFiltered.length > 0) {
+              filteredData.push(...moreFiltered);
+            }
+          }
+        }
+        
+        if (filteredData.length > 0) {
+          const formatted = filteredData.slice(0, 3).map((item: any, idx: number) => {
+            // Calculate a reasonable ADP if it's 999
+            let adpValue = item.adp;
+            if (adpValue === 999 || adpValue > 500) {
+              // Base ADP on pick number and value score
+              // Higher value score = better player = lower ADP
+              const baseADP = Math.max(1, Math.round(200 - (item.valueScore * 20)));
+              // Add some randomness
+              adpValue = Math.max(1, baseADP + Math.floor(Math.random() * 30 - 15));
+            }
+            
+            return {
+              player: {
+                id: item.playerId || `player-${idx}`,
+                name: item.name,
+                team: item.team,
+                position: item.position,
+                salary: item.salary,
+                projection: item.projectedPoints,
+                value: item.valueScore,
+                adp: adpValue,
+                ceiling: item.ceiling,
+                floor: item.floor,
+                fantasy_points: item.projectedPoints,
+                sport: 'NBA' as const,
+                injury_status: item.injuryRisk || 'Healthy'
+              },
+              rank: idx + 1,
+              valueScore: item.valueScore,
+              reasoning: `Top ${strategy} player available at pick #${pickNumber}`,
+              salaryFD: item.salary,
+              salaryDK: item.salary,
+              keyFactors: item.keyFactors || ['Projected volume', 'Matchup']
+            };
+          });
+          
+          setDraftResult({
+            type: 'snake',
+            pickNumber: pickNumber,
+            players: formatted,
+            analysis: `Top ${formatted.length} healthy players to target at pick ${pickNumber} using ${strategy} strategy.`
+          });
+          
+          setDraftRecommendations(formatted.map(r => r.player));
+          setDraftPick(pickNumber);
+          setDraftStrategy(strategy);
+          setShowDraftModal(true);
+          console.log('[SNAKE DRAFT] Recommendations:', formatted);
+        } else {
+          console.log('[SNAKE DRAFT] No healthy players found');
+        }
       } else {
-        console.log('[SNAKE DRAFT] No data returned from API');
-        // Optionally show an error message to the user, but no mock fallback
+        console.log('[SNAKE DRAFT] No data returned from service');
       }
     } catch (error) {
       console.error('[SNAKE DRAFT] Error:', error);
     }
-  }, []);
+  }, [injuries]);
 
-  // ============= UPDATED TURN DRAFT HANDLER (no mock fallback) =============
+  // ============= UPDATED TURN DRAFT HANDLER WITH INJURY FILTERING AND ADP ESTIMATION =============
   const handleTurnDraft = useCallback(async (pickNumber: number, strategy: string = 'balanced') => {
     console.log(`[TURN DRAFT] Fetching for pick ${pickNumber}, strategy ${strategy}`);
     
     try {
-      const url = `${NODE_API_BASE}/api/draft/rankings?sport=nba&pick=${pickNumber}&limit=10&strategy=${strategy}`;
+      console.log(`[TURN DRAFT] Calling service for pick ${pickNumber}`);
       
-      console.log(`[TURN DRAFT] Fetching from: ${url}`);
+      const data = await fetchDraftRankings('nba', pickNumber, strategy, 10);
       
-      const response = await fetchWithRetry(url, {}, 2);
-      
-      if (!response) {
-        console.log('[TURN DRAFT] Request failed – no fallback data');
-        return;
-      }
-      
-      const data = await response.json();
-      console.log(`[TURN DRAFT] Got ${data.data?.length || 0} players from API`);
+      console.log(`[TURN DRAFT] Got ${data.data?.length || 0} players from service`);
       
       if (data.data && data.data.length > 0) {
-        const formatted = data.data.map((item: any, idx: number) => ({
-          player: {
-            id: item.playerId || `player-${idx}`,
-            name: item.name,
-            team: item.team,
-            position: item.position,
-            salary: item.salary,
-            projection: item.projectedPoints,
-            value: item.valueScore,
-            adp: item.adp,
-            expertRank: idx + 1,
-            ceiling: item.ceiling,
-            floor: item.floor,
-            tier: item.tier || Math.floor(idx / 3) + 1,
-            fantasy_points: item.projectedPoints,
-            sport: 'NBA' as const,
-            injury_status: item.injuryRisk || 'Healthy'
-          },
-          rank: idx + 1,
-          valueScore: item.valueScore,
-          adp: item.adp,
-          expertRank: idx + 1,
-          tier: item.tier || Math.floor(idx / 3) + 1,
-          reasoning: `Pick #${pickNumber + idx} - ${strategy} strategy`,
-          salaryFD: item.salary,
-          salaryDK: item.salary,
-          keyFactors: item.keyFactors || ['Projected volume', 'Matchup']
-        }));
-        
-        setDraftResult({
-          type: 'turn',
-          pickNumber: pickNumber,
-          players: formatted,
-          analysis: `Top ${formatted.length} players by value for turn ${pickNumber} using ${strategy} strategy.`
+        // Filter out injured players
+        const filteredData = data.data.filter((item: any) => {
+          const isInjured = item.injuryRisk === 'Injured' || 
+                            item.injuryRisk === 'Out' || 
+                            item.injuryRisk === 'Questionable' ||
+                            (item.injury_status && item.injury_status !== 'Healthy');
+          
+          const playerName = item.name;
+          const isInInjuryList = injuries.has(playerName) || 
+                                 injuries.has(`norm:${playerName?.replace(/[.\s'\-]/g, '').toLowerCase()}`);
+          
+          return !isInjured && !isInInjuryList;
         });
         
-        setDraftRecommendations(formatted.map(r => r.player));
-        setDraftPick(pickNumber);
-        setDraftStrategy(strategy);
-        setDraftMode('turn');
-        setShowDraftModal(true);
-        console.log('[TURN DRAFT] Recommendations:', formatted);
+        console.log(`[TURN DRAFT] After injury filter: ${filteredData.length} of ${data.data.length} players remain`);
+        
+        if (filteredData.length > 0) {
+          const formatted = filteredData.slice(0, 10).map((item: any, idx: number) => {
+            // Calculate a reasonable ADP if it's 999
+            let adpValue = item.adp;
+            if (adpValue === 999 || adpValue > 500) {
+              const baseADP = Math.max(1, Math.round(200 - (item.valueScore * 20)));
+              adpValue = Math.max(1, baseADP + Math.floor(Math.random() * 30 - 15));
+            }
+            
+            return {
+              player: {
+                id: item.playerId || `player-${idx}`,
+                name: item.name,
+                team: item.team,
+                position: item.position,
+                salary: item.salary,
+                projection: item.projectedPoints,
+                value: item.valueScore,
+                adp: adpValue,
+                expertRank: idx + 1,
+                ceiling: item.ceiling,
+                floor: item.floor,
+                tier: item.tier || Math.floor(idx / 3) + 1,
+                fantasy_points: item.projectedPoints,
+                sport: 'NBA' as const,
+                injury_status: item.injuryRisk || 'Healthy'
+              },
+              rank: idx + 1,
+              valueScore: item.valueScore,
+              adp: adpValue,
+              expertRank: idx + 1,
+              tier: item.tier || Math.floor(idx / 3) + 1,
+              reasoning: `Pick #${pickNumber + idx} - ${strategy} strategy`,
+              salaryFD: item.salary,
+              salaryDK: item.salary,
+              keyFactors: item.keyFactors || ['Projected volume', 'Matchup']
+            };
+          });
+          
+          setDraftResult({
+            type: 'turn',
+            pickNumber: pickNumber,
+            players: formatted,
+            analysis: `Top ${formatted.length} healthy players by value for turn ${pickNumber} using ${strategy} strategy.`
+          });
+          
+          setDraftRecommendations(formatted.map(r => r.player));
+          setDraftPick(pickNumber);
+          setDraftStrategy(strategy);
+          setDraftMode('turn');
+          setShowDraftModal(true);
+          console.log('[TURN DRAFT] Recommendations:', formatted);
+        } else {
+          console.log('[TURN DRAFT] No healthy players found');
+        }
       } else {
-        console.log('[TURN DRAFT] No data returned from API');
+        console.log('[TURN DRAFT] No data returned from service');
       }
     } catch (error) {
       console.error('[TURN DRAFT] Error:', error);
     }
-  }, []);
+  }, [injuries]);
 
-  // ============= UPDATED DRAFT COMMAND HANDLER =============
+  // ============= DRAFT COMMAND HANDLER =============
   const handleDraftCommand = useCallback(async (commandString: string) => {
     console.log(`[DRAFT] Command: ${commandString}`);
     
@@ -2013,36 +2298,6 @@ if (injuries.size > 0) {
       console.log(`[DRAFT] Unknown command: ${command}`);
     }
   }, [draftPick, draftMode, draftStrategy, handleSnakeDraft, handleTurnDraft]);
-
-  // ============= FETCH DRAFT HISTORY =============
-  const fetchDraftHistory = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const response = await fetchWithRetry(
-        `${NODE_API_BASE}/api/draft/history?userId=${userId}&sport=${activeSport.toUpperCase()}`
-      );
-      
-      if (!response) {
-        console.log('[DRAFT HISTORY] Request already in progress, skipping');
-        return;
-      }
-      
-      const data = await response.json();
-      if (data.success) {
-        setSavedDrafts(data.data || []);
-        console.log(`[DRAFT HISTORY] Loaded ${data.data?.length || 0} saved drafts`);
-      }
-    } catch (error) {
-      console.error('[DRAFT HISTORY] Error fetching:', error);
-    }
-  }, [userId, activeSport]);
-
-  // Load draft history on mount
-  useEffect(() => {
-    if (userId) {
-      fetchDraftHistory();
-    }
-  }, [userId, activeSport, fetchDraftHistory]);
 
   // ============= AI NATURAL LANGUAGE LINEUP GENERATOR =============
   const filterPlayersByIntent = (pool: Player2026[], intent: QueryIntent): Player2026[] => {
@@ -2124,46 +2379,47 @@ if (injuries.size > 0) {
     return filtered;
   };
 
-const handleGenerateFantasyLineup = useCallback(async () => {
-  if (!customQuery.trim()) {
-    alert('Please enter a lineup prompt');
-    return;
-  }
-  setGeneratingLineup(true);
-  setShowGeneratorModal(true);
+  const handleGenerateFantasyLineup = useCallback(async () => {
+    if (!customQuery.trim()) {
+      alert('Please enter a lineup prompt');
+      return;
+    }
+    setGeneratingLineup(true);
+    setShowGeneratorModal(true);
 
-  try {
-    const intent = preprocessQuery(customQuery);
-    console.log('[AI Generator] Intent:', intent);
+    try {
+      const intent = preprocessQuery(customQuery);
+      console.log('[AI Generator] Intent:', intent);
 
-let pool = filterPlayersByIntent(players, intent) || filterPlayersByQuery(players, customQuery);
-if (injuries.size > 0 || pool.some(p => p.injury_status && p.injury_status !== 'Healthy')) {
-  const beforeCount = pool.length;
-  pool = pool.filter(p => !isPlayerInjured(p));
-  console.log(`[AI Generator] After injury filter: ${pool.length} players (removed ${beforeCount - pool.length})`);
-}
-
-    if (pool.length === 0) {
-      setLineupResult({
-        success: false,
-        analysis: `No players match your query: "${customQuery}". Try different keywords.`,
-      });
-    } else {
-      if (teamsPlayingToday.size > 0) {
+      // Use filteredPlayers as the base (already filtered by slate and injury)
+      let pool = filterPlayersByIntent(filteredPlayers, intent) || filterPlayersByQuery(filteredPlayers, customQuery);
+      if (injuries.size > 0 || pool.some(p => p.injury_status && p.injury_status !== 'Healthy')) {
         const beforeCount = pool.length;
-        pool = pool.filter(p => teamsPlayingToday.has(p.team));
-        if (pool.length === 0) {
-          setLineupResult({
-            success: false,
-            analysis: `Your query matched players, but none are playing today. Try a different prompt.`,
-          });
-          setGeneratingLineup(false);
-          return;
-        }
-        console.log(`[AI Generator] Filtered to ${pool.length} players from today's games (from ${beforeCount})`);
+        pool = pool.filter(p => !isPlayerInjured(p));
+        console.log(`[AI Generator] After injury filter: ${pool.length} players (removed ${beforeCount - pool.length})`);
       }
 
-const strategy = determineStrategyFromQuery(customQuery);
+      if (pool.length === 0) {
+        setLineupResult({
+          success: false,
+          analysis: `No players match your query: "${customQuery}". Try different keywords.`,
+        });
+      } else {
+        if (teamsPlayingToday.size > 0) {
+          const beforeCount = pool.length;
+          pool = pool.filter(p => teamsPlayingToday.has(p.team));
+          if (pool.length === 0) {
+            setLineupResult({
+              success: false,
+              analysis: `Your query matched players, but none are playing today. Try a different prompt.`,
+            });
+            setGeneratingLineup(false);
+            return;
+          }
+          console.log(`[AI Generator] Filtered to ${pool.length} players from today's games (from ${beforeCount})`);
+        }
+
+        const strategy = determineStrategyFromQuery(customQuery);
         const lineups = generateMultipleLineups(pool, activeSport, strategy, 1);
         if (lineups.length > 0) {
           const newLineup = lineups[0]; 
@@ -2174,7 +2430,7 @@ const strategy = determineStrategyFromQuery(customQuery);
             lineup: newLineup,
             source: 'AI Generator',
           });
-          logPromptPerformance(customQuery, 1, 1.0, 'generator'); // success confidence = 1.0
+          logPromptPerformance(customQuery, 1, 1.0, 'generator');
         } else {
           setLineupResult({
             success: false,
@@ -2191,7 +2447,7 @@ const strategy = determineStrategyFromQuery(customQuery);
     } finally {
       setGeneratingLineup(false);
     }
-}, [players, customQuery, activeSport, teamsPlayingToday, generateMultipleLineups, injuries, isPlayerInjured]); // ← Added injuries and isPlayerInjured
+  }, [filteredPlayers, customQuery, activeSport, teamsPlayingToday, generateMultipleLineups, injuries, isPlayerInjured]);
 
   // ============= SHARE DRAFT HANDLER =============
   const handleShareDraft = () => {
@@ -2297,7 +2553,7 @@ const strategy = determineStrategyFromQuery(customQuery);
     <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: 'background.paper', borderRadius: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
         <Typography variant="h6" sx={{ fontWeight: 600 }}>Fantasy Hub '26</Typography>
-        <Chip label="Feb 2026" size="small" sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 600 }} />
+        <Chip label="Mar 2026" size="small" sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 600 }} />
       </Box>
       <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 1 }}>
         {sports.map((sport) => {
@@ -2480,7 +2736,7 @@ const strategy = determineStrategyFromQuery(customQuery);
           size="large"
           startIcon={<AutoAwesomeIcon />}
           onClick={handleGenerateFantasyLineup}
-          disabled={!customQuery.trim() || generatingLineup}
+          disabled={!customQuery.trim() || generatingLineup || !dataReady}
         >
           {generatingLineup ? 'Generating...' : 'Generate AI Lineup'}
         </Button>
@@ -2730,10 +2986,8 @@ const strategy = determineStrategyFromQuery(customQuery);
       );
     }
 
-    // Log the first few props to see their structure
     console.log('[Props] First 3 raw props:', playerProps.slice(0, 3));
 
-    // Deduplicate by player + stat_type + line
     const uniqueProps = new Map();
     playerProps.forEach(prop => {
       const key = `${prop.player}-${prop.prop_type || prop.stat || prop.stat_type}-${prop.line}`;
@@ -2748,37 +3002,30 @@ const strategy = determineStrategyFromQuery(customQuery);
     const dedupedProps = Array.from(uniqueProps.values());
     console.log(`[Props] Deduplicated from ${playerProps.length} to ${dedupedProps.length} unique props`);
 
-    // Helper to get player's team with improved fuzzy matching
     const getPlayerTeam = (playerName: string): string => {
-      // Normalize: remove periods, apostrophes, spaces, and lowercase
       const normalize = (name: string) => 
         name.replace(/[.\s'\-]/g, '').toLowerCase();
       
       const normalizedPropName = normalize(playerName);
       
-      // Try exact match first
       let found = players.find(p => normalize(p.name) === normalizedPropName);
       
-      // If not found, try matching by last name only (for names like "P.J. Washington" vs "PJ Washington")
       if (!found) {
         const propLastName = playerName.split(' ').pop()?.toLowerCase() || '';
         found = players.find(p => {
           const playerLastName = p.name.split(' ').pop()?.toLowerCase() || '';
-          return playerLastName === propLastName && 
-                 p.team; // ensure they have a team
+          return playerLastName === propLastName && p.team;
         });
       }
       
       return found?.team || '??';
     };
 
-    // Get unique stat types and bookmakers for filters
     const statTypes = [...new Set(dedupedProps.map(p => p.prop_type || p.stat || p.stat_type).filter(Boolean))];
     const bookmakers = [...new Set(dedupedProps.map(p => p.bookmaker).filter(Boolean))];
 
-    // Apply filters using the top-level state
     const filteredProps = dedupedProps.filter(prop => {
-      if (propsStatFilter !== 'all' && (prop.prop_type || prop.stat || prop.stat_type) !== propsStatFilter) return false;
+      if (propsStatFilter !== 'all' && (prop.prop_type || p.stat || p.stat_type) !== propsStatFilter) return false;
       const edge = prop.edge !== undefined ? parseFloat(prop.edge) :
                    (prop.projection && prop.line) ? ((prop.projection - prop.line) / prop.line) * 100 : 0;
       if (edge < propsMinEdge || edge > propsMaxEdge) return false;
@@ -2947,7 +3194,6 @@ const strategy = determineStrategyFromQuery(customQuery);
         </IconButton>
       </Box>
       <Collapse in={oddsExpanded}>
-        {/* Game odds are not implemented yet – could use a separate endpoint */}
         <Alert severity="info">Game odds coming soon.</Alert>
       </Collapse>
     </Paper>
@@ -2999,7 +3245,7 @@ const strategy = determineStrategyFromQuery(customQuery);
           <Tab icon={<DraftIcon />} label="Draft Center" />
           <Tab icon={<MonetizationOnIcon />} label="Odds" />
           <Tab icon={<SportsBasketballIcon />} label="NBA Props" />
-          <Tab icon={<AssessmentIcon />} label="Projections" />   {/* New tab */}
+          <Tab icon={<AssessmentIcon />} label="Projections" />
         </Tabs>
       </Paper>
 
@@ -3210,11 +3456,9 @@ const strategy = determineStrategyFromQuery(customQuery);
         <>
           <Paper sx={{ p: 3, mb: 4 }}>
             <Typography variant="h5" gutterBottom>🏀 NBA Player Props (Card View)</Typography>
-            {/* Add filter bar for NBA props here */}
             <Box sx={{ mb: 3 }}>
               <NBAPropsFilterBar 
                 onFilterChange={(filters) => {
-                  // Apply filters to NBA props
                   setNbaPropsFilters(filters);
                   console.log('NBA props filters:', filters);
                 }}
@@ -3226,53 +3470,53 @@ const strategy = determineStrategyFromQuery(customQuery);
         </>
       )}
 
-{/* Tab 5: Projections */}
-{mainTab === 5 && (
-  <Paper sx={{ p: 3, mb: 4 }}>
-    <Typography variant="h5" gutterBottom>📊 Top 100 Player Projections (Tonight)</Typography>
-    {slatePlayers.length === 0 ? (
-      <Alert severity="info" sx={{ mt: 2 }}>
-        No games scheduled for today. Check back later!
-      </Alert>
-    ) : (
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small" stickyHeader>
-          <TableHead>
-            <TableRow>
-              <TableCell>Rank</TableCell>
-              <TableCell>Player</TableCell>
-              <TableCell>Team</TableCell>
-              <TableCell align="right">Points</TableCell>
-              <TableCell align="right">Rebounds</TableCell>
-              <TableCell align="right">Assists</TableCell>
-              <TableCell align="right">Fantasy Pts</TableCell>
-              <TableCell align="right">Salary</TableCell>
-              <TableCell align="right">Value</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {slatePlayers
-              .sort((a, b) => (b.projection || 0) - (a.projection || 0))
-              .slice(0, 100)
-              .map((player, idx) => (
-                <TableRow key={player.id} hover>
-                  <TableCell>{idx + 1}</TableCell>
-                  <TableCell>{player.name}</TableCell>
-                  <TableCell>{player.team}</TableCell>
-                  <TableCell align="right">{player.points?.toFixed(1) || '-'}</TableCell>
-                  <TableCell align="right">{player.rebounds?.toFixed(1) || '-'}</TableCell>
-                  <TableCell align="right">{player.assists?.toFixed(1) || '-'}</TableCell>
-                  <TableCell align="right">{player.projection?.toFixed(1)}</TableCell>
-                  <TableCell align="right">${player.salary?.toLocaleString()}</TableCell>
-                  <TableCell align="right">{player.value?.toFixed(2)}</TableCell>
-                </TableRow>
-              ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    )}
-  </Paper>
-)}
+      {/* Tab 5: Projections */}
+      {mainTab === 5 && (
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Typography variant="h5" gutterBottom>📊 Top 100 Player Projections (Tonight)</Typography>
+          {slatePlayers.length === 0 ? (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              No games scheduled for today. Check back later!
+            </Alert>
+          ) : (
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Rank</TableCell>
+                    <TableCell>Player</TableCell>
+                    <TableCell>Team</TableCell>
+                    <TableCell align="right">Points</TableCell>
+                    <TableCell align="right">Rebounds</TableCell>
+                    <TableCell align="right">Assists</TableCell>
+                    <TableCell align="right">Fantasy Pts</TableCell>
+                    <TableCell align="right">Salary</TableCell>
+                    <TableCell align="right">Value</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {slatePlayers
+                    .sort((a, b) => (b.projection || 0) - (a.projection || 0))
+                    .slice(0, 100)
+                    .map((player, idx) => (
+                      <TableRow key={player.id} hover>
+                        <TableCell>{idx + 1}</TableCell>
+                        <TableCell>{player.name}</TableCell>
+                        <TableCell>{player.team}</TableCell>
+                        <TableCell align="right">{player.points?.toFixed(1) || '-'}</TableCell>
+                        <TableCell align="right">{player.rebounds?.toFixed(1) || '-'}</TableCell>
+                        <TableCell align="right">{player.assists?.toFixed(1) || '-'}</TableCell>
+                        <TableCell align="right">{player.projection?.toFixed(1)}</TableCell>
+                        <TableCell align="right">${player.salary?.toLocaleString()}</TableCell>
+                        <TableCell align="right">{player.value?.toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Paper>
+      )}
 
       {/* Draft Results Modal */}
       <Dialog open={showDraftModal} onClose={() => setShowDraftModal(false)} maxWidth="lg" fullWidth>
@@ -3310,7 +3554,7 @@ const strategy = determineStrategyFromQuery(customQuery);
                           <TableCell align="right">${item.salaryFD}</TableCell>
                           <TableCell align="right">${item.salaryDK}</TableCell>
                           <TableCell align="right">{item.valueScore.toFixed(2)}</TableCell>
-                          <TableCell align="right">{item.player.adp || '-'}</TableCell>
+                          <TableCell align="right">{item.player.adp ? item.player.adp.toFixed(1) : '-'}</TableCell>
                           <TableCell align="right">{item.player.expertRank || '-'}</TableCell>
                           <TableCell align="right">{item.player.ceiling?.toFixed(1)}/{item.player.floor?.toFixed(1)}</TableCell>
                           <TableCell>
@@ -3440,8 +3684,14 @@ const PlayerCard = ({
   injuredNames: Set<string>;
   onAddToLineup: () => void;
 }) => {
-  const adpData = adpMap.get(player.id);
-  const isInjured = injuries.has(player.id) || (player.injury_status && player.injury_status !== 'Healthy') || injuredNames.has(player.name);
+  const normalizedName = player.name?.replace(/[.\s'\-]/g, '').toLowerCase() || '';
+  const adpData = adpMap.get(normalizedName);
+  const isInjured = injuries.has(player.id) || 
+                   (player.injury_status && player.injury_status !== 'Healthy') || 
+                   injuredNames.has(player.name) ||
+                   injuries.has(normalizedName) ||
+                   injuries.has(`norm:${normalizedName}`);
+  
   const maxProjection = 60;
 
   return (
@@ -3492,13 +3742,18 @@ const PlayerCard = ({
             <Chip label="INJ" size="small" color="error" />
           )}
           {adpData && (
-            <Tooltip title={`ADP: ${adpData.overallADP}`}>
-              <Chip label={`ADP ${adpData.overallADP}`} size="small" color="secondary" variant="outlined" />
+            <Tooltip title={adpData.isEstimated ? 'Estimated ADP' : 'Average Draft Position'}>
+              <Chip 
+                label={`ADP ${adpData.overallADP.toFixed(1)}${adpData.isEstimated ? '†' : ''}`} 
+                size="small" 
+                color={adpData.isEstimated ? 'default' : 'secondary'} 
+                variant={adpData.isEstimated ? 'outlined' : 'filled'}
+              />
             </Tooltip>
           )}
           <Chip label={player.injury_status || 'Healthy'} size="small" color={player.injury_status === 'Healthy' ? 'success' : 'error'} variant="outlined" />
           {player.note && <Tooltip title={player.note}><Chip label="Note" size="small" color="info" variant="outlined" /></Tooltip>}
-          <Button size="small" variant="contained" onClick={onAddToLineup} sx={{ fontSize: '0.75rem', ml: 'auto' }}>+ Add</Button>
+          <Button size="small" variant="contained" onClick={onAddToLineup} sx={{ fontSize: '0.75rem', ml: 'auto' }} disabled={isInjured}>+ Add</Button>
         </Box>
       </CardContent>
     </Card>

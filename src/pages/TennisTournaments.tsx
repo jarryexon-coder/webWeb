@@ -39,6 +39,7 @@ import {
   Spa as ClayIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ----------------------------------------------------------------------
 // Types
@@ -422,9 +423,9 @@ const CategoryChip = ({ category }: { category?: string }) => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component (unchanged except API call)
+// Main Content Component
 // ----------------------------------------------------------------------
-const TennisTournaments: React.FC = () => {
+const TennisTournamentsContent: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [tabValue, setTabValue] = useState<number>(0);
   const [surfaceFilter, setSurfaceFilter] = useState<string>('all');
@@ -798,6 +799,18 @@ const TennisTournaments: React.FC = () => {
         </>
       )}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const TennisTournaments: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="TennisTournaments">
+      <TennisTournamentsContent />
+    </ProtectedRoute>
   );
 };
 

@@ -1,3 +1,4 @@
+// src/pages/NHLTrendsScreen.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
@@ -52,7 +53,7 @@ import {
 // API Configuration
 const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
 
-// ========== UPDATED INTERFACES FOR FEBRUARY 2026 ==========
+// ========== INTERFACES ==========
 interface NHLGame {
   id: string;
   home_team: string;
@@ -67,7 +68,7 @@ interface NHLGame {
   division: string;
   sport: 'NHL';
   season: '2025-26';
-  game_type: 'Regular Season' | '4 Nations Face-Off';
+  game_type: 'Regular Season';
   tournament?: boolean;
   
   odds: {
@@ -89,30 +90,15 @@ interface NHLGame {
       line: number;
       over: number;
       under: number;
-      alternate_lines?: Array<{
-        line: number;
-        over_odds: number;
-        under_odds: number;
-      }>;
-    };
-    team_totals?: {
-      home: Array<{ line: number; over_odds: number; under_odds: number }>;
-      away: Array<{ line: number; over_odds: number; under_odds: number }>;
     };
   };
   
-  player_props?: NHLPlayerProp[];
-  fantasy_projections?: FantasyProjection[];
-  parlay_recommendations?: NHLParlayRecommendation[];
+  player_props?: any[];
+  fantasy_projections?: any[];
+  parlay_recommendations?: any[];
   
   confidence_score: number;
   confidence_level: 'Very High' | 'High' | 'Medium' | 'Low' | 'Very Low';
-  consensus_pick?: {
-    team: string;
-    percentage: number;
-    confidence: string;
-  };
-  sharp_money?: number;
   
   team_stats: {
     home: TeamStats;
@@ -122,52 +108,6 @@ interface NHLGame {
   status: 'Scheduled' | 'Live' | 'Final' | 'Upcoming';
   trade_deadline_impact: boolean;
   playoff_implications: boolean;
-}
-
-interface NHLPlayerProp {
-  player: string;
-  team: string;
-  position: string;
-  jersey?: string;
-  props: Array<{
-    stat: string;
-    line: number;
-    over_odds: number;
-    under_odds: number;
-    season_avg?: number;
-    last_10_avg?: number;
-    confidence?: number;
-  }>;
-  analysis?: string;
-  confidence?: number;
-}
-
-interface FantasyProjection {
-  player: string;
-  team: string;
-  position: string;
-  fantasy_points_projected: number;
-  salary_dk: number;
-  salary_fd: number;
-  value_rating: number;
-  recommendation: string;
-}
-
-interface NHLParlayRecommendation {
-  name: string;
-  legs: Array<{
-    type: string;
-    player?: string;
-    team?: string;
-    stat?: string;
-    line?: number;
-    bet: string;
-    odds: number;
-  }>;
-  combined_odds: string;
-  combined_decimal: number;
-  confidence: number;
-  analysis: string;
 }
 
 interface TeamStats {
@@ -218,125 +158,36 @@ const NHLTeams: Record<string, { name: string; color: string }> = {
   EDM: { name: 'Oilers', color: '#041E42' },
   VGK: { name: 'Golden Knights', color: '#B4975A' },
   PIT: { name: 'Penguins', color: '#FCB514' },
-  // Add more as needed
+  NYR: { name: 'Rangers', color: '#0033A0' },
+  CAR: { name: 'Hurricanes', color: '#CC0000' },
+  NJD: { name: 'Devils', color: '#CE1126' },
+  WPG: { name: 'Jets', color: '#041E42' },
+  MIN: { name: 'Wild', color: '#154734' },
+  LAK: { name: 'Kings', color: '#111111' },
+  SEA: { name: 'Kraken', color: '#99D9D9' },
 };
 
 const getTeamColor = (teamCode: string): string => {
   return NHLTeams[teamCode]?.color || '#64748b';
 };
 
-// Team strength ratings (approximate, based on 2025-26 performance)
-const teamStrength: Record<string, number> = {
-  BOS: 85,
-  TOR: 82,
-  TB: 80,
-  FLA: 78,
-  DET: 70,
-  COL: 88,
-  DAL: 84,
-  EDM: 86,
-  VGK: 83,
-  PIT: 75,
-  NYR: 82,
-  CAR: 84,
-  NJD: 79,
-  PHI: 68,
-  WSH: 72,
-  OTT: 65,
-  BUF: 67,
-  MTL: 62,
-  CBJ: 60,
-  NYI: 73,
-  MIN: 76,
-  WPG: 77,
-  STL: 71,
-  NSH: 69,
-  CHI: 58,
-  ARI: 55,
-  SEA: 70,
-  LAK: 74,
-  ANA: 59,
-  SJS: 54,
-  VAN: 66,
-  CGY: 64,
+// Get current date for mock data
+const getCurrentDate = (): string => {
+  const now = new Date();
+  return now.toISOString().split('T')[0];
 };
 
-// ========== FULL MOCK DATA FOR FEBRUARY 2026 (FALLBACK) ==========
-const mockTradeDeadline: TradeDeadline = {
-  date: '2026-03-07',
-  days_remaining: 22,
-  rumors: [
-    { player: 'Mikko Rantanen', team: 'COL', rumor: 'Linked to several contenders', likelihood: 'Medium', reported_by: 'TSN' },
-    { player: 'John Gibson', team: 'ANA', rumor: 'Goalie market heating up', likelihood: 'High', reported_by: 'Sportsnet' }
-  ],
-  impact_players: ['Rantanen', 'Gibson', 'Hanifin']
+const getFormattedDate = (daysFromNow: number = 0): string => {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromNow);
+  return date.toISOString().split('T')[0];
 };
 
-const mockLeagueLeaders: LeagueLeaders = {
-  scoring: [
-    { player: 'Connor McDavid', team: 'EDM', gp: 58, goals: 38, assists: 62, points: 100 },
-    { player: 'Nikita Kucherov', team: 'TB', gp: 57, goals: 32, assists: 55, points: 87 },
-    { player: 'Nathan MacKinnon', team: 'COL', gp: 58, goals: 30, assists: 54, points: 84 },
-    { player: 'David Pastrnak', team: 'BOS', gp: 58, goals: 42, assists: 38, points: 80 },
-    { player: 'Auston Matthews', team: 'TOR', gp: 56, goals: 45, assists: 33, points: 78 }
-  ],
-  goals: [
-    { player: 'Auston Matthews', team: 'TOR', goals: 45, gp: 56 },
-    { player: 'David Pastrnak', team: 'BOS', goals: 42, gp: 58 },
-    { player: 'Connor McDavid', team: 'EDM', goals: 38, gp: 58 },
-    { player: 'Alex Ovechkin', team: 'WSH', goals: 35, gp: 57 },
-    { player: 'Brady Tkachuk', team: 'OTT', goals: 33, gp: 58 }
-  ],
-  assists: [
-    { player: 'Connor McDavid', team: 'EDM', assists: 62, gp: 58 },
-    { player: 'Nikita Kucherov', team: 'TB', assists: 55, gp: 57 },
-    { player: 'Nathan MacKinnon', team: 'COL', assists: 54, gp: 58 },
-    { player: 'Leon Draisaitl', team: 'EDM', assists: 48, gp: 58 },
-    { player: 'Erik Karlsson', team: 'PIT', assists: 45, gp: 56 }
-  ],
-  goaltending: [
-    { player: 'Connor Hellebuyck', team: 'WPG', wins: 32, gaa: 2.21, sv_pct: 0.924, so: 4 },
-    { player: 'Ilya Sorokin', team: 'NYI', wins: 28, gaa: 2.35, sv_pct: 0.918, so: 3 },
-    { player: 'Jacob Markstrom', team: 'CGY', wins: 27, gaa: 2.45, sv_pct: 0.912, so: 2 },
-    { player: 'Linus Ullmark', team: 'BOS', wins: 26, gaa: 2.28, sv_pct: 0.921, so: 3 },
-    { player: 'Igor Shesterkin', team: 'NYR', wins: 29, gaa: 2.42, sv_pct: 0.916, so: 2 }
-  ]
-};
+// ========== MOCK DATA (UPDATED TO CURRENT DATE) ==========
+const currentDate = getCurrentDate();
+const tomorrowDate = getFormattedDate(1);
+const dayAfterTomorrow = getFormattedDate(2);
 
-const mockStandings = {
-  eastern: {
-    atlantic: [
-      { team: 'BOS', wins: 34, losses: 15, otl: 4, points: 72 },
-      { team: 'TOR', wins: 32, losses: 17, otl: 3, points: 67 },
-      { team: 'TB', wins: 30, losses: 19, otl: 4, points: 64 },
-      { team: 'FLA', wins: 29, losses: 20, otl: 4, points: 62 },
-      { team: 'DET', wins: 27, losses: 22, otl: 4, points: 58 }
-    ],
-    metropolitan: [
-      { team: 'NYR', wins: 33, losses: 16, otl: 3, points: 69 },
-      { team: 'CAR', wins: 32, losses: 17, otl: 3, points: 67 },
-      { team: 'NJD', wins: 30, losses: 19, otl: 4, points: 64 },
-      { team: 'PHI', wins: 28, losses: 21, otl: 4, points: 60 },
-      { team: 'PIT', wins: 27, losses: 22, otl: 4, points: 58 }
-    ]
-  },
-  western: {
-    central: [
-      { team: 'COL', wins: 35, losses: 14, otl: 3, points: 73 },
-      { team: 'DAL', wins: 33, losses: 16, otl: 3, points: 69 },
-      { team: 'WPG', wins: 31, losses: 18, otl: 4, points: 66 },
-      { team: 'MIN', wins: 28, losses: 21, otl: 4, points: 60 }
-    ],
-    pacific: [
-      { team: 'EDM', wins: 34, losses: 15, otl: 3, points: 71 },
-      { team: 'LAK', wins: 31, losses: 18, otl: 4, points: 66 },
-      { team: 'VGK', wins: 30, losses: 19, otl: 4, points: 64 },
-      { team: 'SEA', wins: 28, losses: 21, otl: 4, points: 60 }
-    ]
-  }
-};
-
-// Base mock game with full details – used as fallback and for fields not yet provided by API
 const mockGames: NHLGame[] = [
   {
     id: '1',
@@ -344,100 +195,29 @@ const mockGames: NHLGame[] = [
     home_full: 'Boston Bruins',
     away_team: 'TOR',
     away_full: 'Toronto Maple Leafs',
-    date: '2026-02-13',
+    date: currentDate,
     time: '7:00 PM',
     venue: 'TD Garden',
     tv: 'ESPN+',
-    note: 'Original Six rivalry',
+    note: 'Atlantic Division showdown - Playoff positioning at stake',
     division: 'Atlantic',
     sport: 'NHL',
     season: '2025-26',
     game_type: 'Regular Season',
     tournament: false,
     odds: {
-      moneyline: {
-        home: -150,
-        away: +130,
-        home_decimal: 1.67,
-        away_decimal: 2.30,
-        home_implied_probability: 0.60,
-        away_implied_probability: 0.43
-      },
-      spread: {
-        home: -1.5,
-        home_odds: +180,
-        away: 1.5,
-        away_odds: -220
-      },
-      total: {
-        line: 6.5,
-        over: -110,
-        under: -110
-      }
+      moneyline: { home: -150, away: +130, home_decimal: 1.67, away_decimal: 2.30, home_implied_probability: 0.60, away_implied_probability: 0.43 },
+      spread: { home: -1.5, home_odds: +180, away: 1.5, away_odds: -220 },
+      total: { line: 6.5, over: -110, under: -110 }
     },
-    player_props: [
-      {
-        player: 'David Pastrnak',
-        team: 'BOS',
-        position: 'RW',
-        jersey: '88',
-        props: [
-          { stat: 'Goals', line: 0.5, over_odds: +150, under_odds: -190, season_avg: 0.72, last_10_avg: 0.8, confidence: 85 },
-          { stat: 'Points', line: 1.5, over_odds: +130, under_odds: -160, season_avg: 1.4, last_10_avg: 1.5 }
-        ],
-        analysis: 'Pastrnak has 8 points in last 5 games against Toronto.',
-        confidence: 85
-      }
-    ],
-    fantasy_projections: [
-      { player: 'David Pastrnak', team: 'BOS', position: 'RW', fantasy_points_projected: 15.2, salary_dk: 8200, salary_fd: 8900, value_rating: 2.8, recommendation: 'Top value on DraftKings' }
-    ],
-    parlay_recommendations: [
-      {
-        name: 'Bruins ML + Over 5.5',
-        legs: [
-          { type: 'moneyline', team: 'BOS', bet: 'Moneyline', odds: -150 },
-          { type: 'total', stat: 'Total', line: 5.5, bet: 'Over', odds: -120 }
-        ],
-        combined_odds: '+275',
-        combined_decimal: 3.75,
-        confidence: 75,
-        analysis: 'Bruins dominate at home and both teams average 6+ goals in last 5 meetings.'
-      }
-    ],
+    player_props: [],
+    fantasy_projections: [],
+    parlay_recommendations: [],
     confidence_score: 85,
     confidence_level: 'High',
     team_stats: {
-      home: {
-        record: '34-15-4',
-        win_pct: 0.679,
-        gpg: 3.42,
-        gapg: 2.81,
-        pp_pct: 24.5,
-        pk_pct: 82.1,
-        faceoff_pct: 52.3,
-        corsi_pct: 53.1,
-        pdo: 101.2,
-        home_record: '19-6-2',
-        away_record: '15-9-2',
-        last_10: '7-2-1',
-        streak: 'W3'
-      },
-      away: {
-        record: '32-17-4',
-        win_pct: 0.642,
-        gpg: 3.55,
-        gapg: 2.98,
-        pp_pct: 26.2,
-        pk_pct: 80.5,
-        faceoff_pct: 51.8,
-        corsi_pct: 52.4,
-        pdo: 100.8,
-        home_record: '18-7-2',
-        away_record: '14-10-2',
-        last_10: '6-3-1',
-        streak: 'L1'
-      }
+      home: { record: '34-15-4', win_pct: 0.679, gpg: 3.42, gapg: 2.81, pp_pct: 24.5, pk_pct: 82.1, faceoff_pct: 52.3, corsi_pct: 53.1, pdo: 101.2, home_record: '19-6-2', away_record: '15-9-2', last_10: '7-2-1', streak: 'W3' },
+      away: { record: '32-17-4', win_pct: 0.642, gpg: 3.55, gapg: 2.98, pp_pct: 26.2, pk_pct: 80.5, faceoff_pct: 51.8, corsi_pct: 52.4, pdo: 100.8, home_record: '18-7-2', away_record: '14-10-2', last_10: '6-3-1', streak: 'L1' }
     },
     status: 'Scheduled',
     trade_deadline_impact: false,
@@ -449,36 +229,20 @@ const mockGames: NHLGame[] = [
     home_full: 'Colorado Avalanche',
     away_team: 'DAL',
     away_full: 'Dallas Stars',
-    date: '2026-02-13',
+    date: currentDate,
     time: '9:00 PM',
     venue: 'Ball Arena',
     tv: 'TNT',
-    note: 'Western Conference showdown',
+    note: 'Western Conference battle for first place',
     division: 'Central',
     sport: 'NHL',
     season: '2025-26',
     game_type: 'Regular Season',
     tournament: false,
     odds: {
-      moneyline: {
-        home: -140,
-        away: +120,
-        home_decimal: 1.71,
-        away_decimal: 2.20,
-        home_implied_probability: 0.58,
-        away_implied_probability: 0.45
-      },
-      spread: {
-        home: -1.5,
-        home_odds: +200,
-        away: 1.5,
-        away_odds: -240
-      },
-      total: {
-        line: 6.0,
-        over: -115,
-        under: -105
-      }
+      moneyline: { home: -140, away: +120, home_decimal: 1.71, away_decimal: 2.20, home_implied_probability: 0.58, away_implied_probability: 0.45 },
+      spread: { home: -1.5, home_odds: +200, away: 1.5, away_odds: -240 },
+      total: { line: 6.0, over: -115, under: -105 }
     },
     player_props: [],
     fantasy_projections: [],
@@ -486,222 +250,380 @@ const mockGames: NHLGame[] = [
     confidence_score: 75,
     confidence_level: 'Medium',
     team_stats: {
-      home: {
-        record: '35-14-3',
-        win_pct: 0.698,
-        gpg: 3.72,
-        gapg: 2.65,
-        pp_pct: 27.8,
-        pk_pct: 83.5,
-        faceoff_pct: 51.2,
-        corsi_pct: 55.3,
-        pdo: 102.1,
-        home_record: '20-5-2',
-        away_record: '15-9-1',
-        last_10: '8-1-1',
-        streak: 'W4'
-      },
-      away: {
-        record: '33-16-4',
-        win_pct: 0.660,
-        gpg: 3.41,
-        gapg: 2.82,
-        pp_pct: 24.9,
-        pk_pct: 81.2,
-        faceoff_pct: 49.8,
-        corsi_pct: 51.7,
-        pdo: 100.2,
-        home_record: '18-7-2',
-        away_record: '15-9-2',
-        last_10: '6-3-1',
-        streak: 'W1'
-      }
+      home: { record: '35-14-3', win_pct: 0.698, gpg: 3.72, gapg: 2.65, pp_pct: 27.8, pk_pct: 83.5, faceoff_pct: 51.2, corsi_pct: 55.3, pdo: 102.1, home_record: '20-5-2', away_record: '15-9-1', last_10: '8-1-1', streak: 'W4' },
+      away: { record: '33-16-4', win_pct: 0.660, gpg: 3.41, gapg: 2.82, pp_pct: 24.9, pk_pct: 81.2, faceoff_pct: 49.8, corsi_pct: 51.7, pdo: 100.2, home_record: '18-7-2', away_record: '15-9-2', last_10: '6-3-1', streak: 'W1' }
     },
     status: 'Scheduled',
     trade_deadline_impact: true,
     playoff_implications: true
-  }
-];
-
-// Mock players for original players tab
-const mockPlayers = [
-  { id: 1, name: 'Connor McDavid', team: 'EDM', goals: 38, assists: 62, points: 100, position: 'C', teamColor: '#041E42' },
-  { id: 2, name: 'Nathan MacKinnon', team: 'COL', goals: 30, assists: 54, points: 84, position: 'C', teamColor: '#6F263D' },
-  { id: 3, name: 'Nikita Kucherov', team: 'TB', goals: 32, assists: 55, points: 87, position: 'RW', teamColor: '#002868' },
-  { id: 4, name: 'David Pastrnak', team: 'BOS', goals: 42, assists: 38, points: 80, position: 'RW', teamColor: '#FFB81C' },
-  { id: 5, name: 'Auston Matthews', team: 'TOR', goals: 45, assists: 33, points: 78, position: 'C', teamColor: '#003E7E' },
-  { id: 6, name: 'Leon Draisaitl', team: 'EDM', goals: 35, assists: 48, points: 83, position: 'C', teamColor: '#041E42' },
-];
-
-// ===== HELPER: Generate default odds and stats for any game =====
-const generateDefaultGameDetails = (game: NHLGame): Partial<NHLGame> => {
-  // Default odds: home slight favorite, typical spread, total around 6
-  const defaultOdds = {
-    moneyline: {
-      home: -120,
-      away: +100,
-      home_decimal: 1.83,
-      away_decimal: 2.00,
-      home_implied_probability: 0.545,
-      away_implied_probability: 0.5
-    },
-    spread: {
-      home: -1.5,
-      home_odds: +150,
-      away: 1.5,
-      away_odds: -180
-    },
-    total: {
-      line: 6.0,
-      over: -110,
-      under: -110
-    }
-  };
-
-  // Default team stats: .500 records, league average percentages
-  const defaultTeamStats = {
-    record: '20-20-5',
-    win_pct: 0.500,
-    gpg: 3.2,
-    gapg: 3.2,
-    pp_pct: 20.0,
-    pk_pct: 80.0,
-    faceoff_pct: 50.0,
-    corsi_pct: 50.0,
-    pdo: 100.0,
-    home_record: '12-8-2',
-    away_record: '8-12-3',
-    last_10: '5-5-0',
-    streak: 'W1'
-  };
-
-  // Compute confidence score based on team strengths
-  const homeStrength = teamStrength[game.home_team] || 50;
-  const awayStrength = teamStrength[game.away_team] || 50;
-  const strengthDiff = Math.abs(homeStrength - awayStrength);
-  // Map diff (0 to ~40) to confidence (90 down to 40)
-  let confidence = Math.max(40, Math.min(90, 90 - strengthDiff));
-  // Add small randomness (±5)
-  confidence += Math.floor(Math.random() * 10) - 5;
-  confidence = Math.max(40, Math.min(90, confidence));
-
-  // Determine confidence level based on score
-  let confidenceLevel: 'Very High' | 'High' | 'Medium' | 'Low' | 'Very Low' = 'Medium';
-  if (confidence >= 80) confidenceLevel = 'Very High';
-  else if (confidence >= 70) confidenceLevel = 'High';
-  else if (confidence >= 50) confidenceLevel = 'Medium';
-  else if (confidence >= 40) confidenceLevel = 'Low';
-  else confidenceLevel = 'Very Low';
-
-  return {
-    odds: defaultOdds,
-    team_stats: {
-      home: defaultTeamStats,
-      away: defaultTeamStats
+  },
+  {
+    id: '3',
+    home_team: 'EDM',
+    home_full: 'Edmonton Oilers',
+    away_team: 'VGK',
+    away_full: 'Vegas Golden Knights',
+    date: tomorrowDate,
+    time: '10:00 PM',
+    venue: 'Rogers Place',
+    tv: 'SN',
+    note: 'Pacific Division battle - McDavid vs Eichel',
+    division: 'Pacific',
+    sport: 'NHL',
+    season: '2025-26',
+    game_type: 'Regular Season',
+    tournament: false,
+    odds: {
+      moneyline: { home: -120, away: +100, home_decimal: 1.83, away_decimal: 2.00, home_implied_probability: 0.55, away_implied_probability: 0.50 },
+      spread: { home: -1.5, home_odds: +150, away: 1.5, away_odds: -180 },
+      total: { line: 6.5, over: -110, under: -110 }
     },
     player_props: [],
     fantasy_projections: [],
     parlay_recommendations: [],
-    confidence_score: Math.round(confidence),
-    confidence_level: confidenceLevel
-  };
+    confidence_score: 82,
+    confidence_level: 'High',
+    team_stats: {
+      home: { record: '34-15-4', win_pct: 0.679, gpg: 3.68, gapg: 2.92, pp_pct: 26.5, pk_pct: 81.8, faceoff_pct: 53.2, corsi_pct: 54.1, pdo: 101.5, home_record: '19-5-3', away_record: '15-10-1', last_10: '7-2-1', streak: 'W2' },
+      away: { record: '30-19-4', win_pct: 0.604, gpg: 3.35, gapg: 2.95, pp_pct: 23.2, pk_pct: 79.5, faceoff_pct: 50.2, corsi_pct: 51.5, pdo: 99.8, home_record: '16-9-2', away_record: '14-10-2', last_10: '5-4-1', streak: 'L1' }
+    },
+    status: 'Scheduled',
+    trade_deadline_impact: false,
+    playoff_implications: true
+  },
+  {
+    id: '4',
+    home_team: 'NYR',
+    home_full: 'New York Rangers',
+    away_team: 'CAR',
+    away_full: 'Carolina Hurricanes',
+    date: dayAfterTomorrow,
+    time: '7:30 PM',
+    venue: 'Madison Square Garden',
+    tv: 'ESPN',
+    note: 'Metropolitan Division clash - Playoff preview?',
+    division: 'Metropolitan',
+    sport: 'NHL',
+    season: '2025-26',
+    game_type: 'Regular Season',
+    tournament: false,
+    odds: {
+      moneyline: { home: -110, away: -110, home_decimal: 1.91, away_decimal: 1.91, home_implied_probability: 0.52, away_implied_probability: 0.52 },
+      spread: { home: -1.5, home_odds: +220, away: 1.5, away_odds: -260 },
+      total: { line: 6.0, over: -110, under: -110 }
+    },
+    player_props: [],
+    fantasy_projections: [],
+    parlay_recommendations: [],
+    confidence_score: 70,
+    confidence_level: 'Medium',
+    team_stats: {
+      home: { record: '33-16-4', win_pct: 0.660, gpg: 3.45, gapg: 2.78, pp_pct: 25.2, pk_pct: 83.1, faceoff_pct: 51.5, corsi_pct: 52.8, pdo: 101.0, home_record: '18-7-2', away_record: '15-9-2', last_10: '6-3-1', streak: 'W1' },
+      away: { record: '32-17-4', win_pct: 0.642, gpg: 3.38, gapg: 2.85, pp_pct: 24.8, pk_pct: 82.5, faceoff_pct: 52.1, corsi_pct: 53.2, pdo: 100.5, home_record: '17-8-2', away_record: '15-9-2', last_10: '5-4-1', streak: 'L2' }
+    },
+    status: 'Scheduled',
+    trade_deadline_impact: false,
+    playoff_implications: true
+  }
+];
+
+const mockStandings = {
+  eastern: {
+    atlantic: [
+      { team: 'BOS', wins: 34, losses: 15, otl: 4, points: 72 },
+      { team: 'TOR', wins: 32, losses: 17, otl: 3, points: 67 },
+      { team: 'TB', wins: 30, losses: 19, otl: 4, points: 64 },
+      { team: 'FLA', wins: 29, losses: 20, otl: 4, points: 62 }
+    ],
+    metropolitan: [
+      { team: 'NYR', wins: 33, losses: 16, otl: 3, points: 69 },
+      { team: 'CAR', wins: 32, losses: 17, otl: 3, points: 67 },
+      { team: 'NJD', wins: 30, losses: 19, otl: 4, points: 64 }
+    ]
+  },
+  western: {
+    central: [
+      { team: 'COL', wins: 35, losses: 14, otl: 3, points: 73 },
+      { team: 'DAL', wins: 33, losses: 16, otl: 3, points: 69 },
+      { team: 'WPG', wins: 31, losses: 18, otl: 4, points: 66 }
+    ],
+    pacific: [
+      { team: 'EDM', wins: 34, losses: 15, otl: 3, points: 71 },
+      { team: 'LAK', wins: 31, losses: 18, otl: 4, points: 66 },
+      { team: 'VGK', wins: 30, losses: 19, otl: 4, points: 64 }
+    ]
+  }
 };
 
-// ===== NEW: Enrich a basic game with details (API, mock, or default) =====
-const enrichGameWithDetails = async (basicGame: NHLGame): Promise<NHLGame> => {
+const mockLeagueLeaders: LeagueLeaders = {
+  scoring: [
+    { player: 'Connor McDavid', team: 'EDM', gp: 68, goals: 45, assists: 72, points: 117 },
+    { player: 'Nathan MacKinnon', team: 'COL', gp: 68, goals: 38, assists: 64, points: 102 },
+    { player: 'Nikita Kucherov', team: 'TB', gp: 67, goals: 40, assists: 62, points: 102 },
+    { player: 'David Pastrnak', team: 'BOS', gp: 68, goals: 49, assists: 45, points: 94 },
+    { player: 'Auston Matthews', team: 'TOR', gp: 66, goals: 52, assists: 40, points: 92 }
+  ],
+  goals: [
+    { player: 'Auston Matthews', team: 'TOR', goals: 52, gp: 66 },
+    { player: 'David Pastrnak', team: 'BOS', goals: 49, gp: 68 },
+    { player: 'Connor McDavid', team: 'EDM', goals: 45, gp: 68 },
+    { player: 'Alex Ovechkin', team: 'WSH', goals: 41, gp: 67 },
+    { player: 'Brady Tkachuk', team: 'OTT', goals: 38, gp: 68 }
+  ],
+  assists: [
+    { player: 'Connor McDavid', team: 'EDM', assists: 72, gp: 68 },
+    { player: 'Nathan MacKinnon', team: 'COL', assists: 64, gp: 68 },
+    { player: 'Nikita Kucherov', team: 'TB', assists: 62, gp: 67 },
+    { player: 'Leon Draisaitl', team: 'EDM', assists: 55, gp: 68 },
+    { player: 'Erik Karlsson', team: 'PIT', assists: 52, gp: 66 }
+  ],
+  goaltending: [
+    { player: 'Connor Hellebuyck', team: 'WPG', wins: 38, gaa: 2.18, sv_pct: 0.926, so: 5 },
+    { player: 'Ilya Sorokin', team: 'NYI', wins: 34, gaa: 2.28, sv_pct: 0.920, so: 4 },
+    { player: 'Jacob Markstrom', team: 'CGY', wins: 32, gaa: 2.35, sv_pct: 0.915, so: 3 },
+    { player: 'Linus Ullmark', team: 'BOS', wins: 31, gaa: 2.25, sv_pct: 0.922, so: 4 },
+    { player: 'Igor Shesterkin', team: 'NYR', wins: 35, gaa: 2.32, sv_pct: 0.918, so: 3 }
+  ]
+};
+
+const mockTradeDeadline: TradeDeadline = {
+  date: '2026-03-07',
+  days_remaining: 0,
+  rumors: [
+    { player: 'Mikko Rantanen', team: 'COL', rumor: 'Signed extension with Avalanche', likelihood: 'Confirmed', reported_by: 'TSN' },
+    { player: 'John Gibson', team: 'ANA', rumor: 'Remains with Ducks through deadline', likelihood: 'High', reported_by: 'Sportsnet' }
+  ],
+  impact_players: ['Rantanen (Extended)', 'Gibson (Staying)', 'Hanifin (Extended)']
+};
+
+const mockPlayers = [
+  { id: 1, name: 'Connor McDavid', team: 'EDM', goals: 45, assists: 72, points: 117, position: 'C', teamColor: '#041E42' },
+  { id: 2, name: 'Nathan MacKinnon', team: 'COL', goals: 38, assists: 64, points: 102, position: 'C', teamColor: '#6F263D' },
+  { id: 3, name: 'Nikita Kucherov', team: 'TB', goals: 40, assists: 62, points: 102, position: 'RW', teamColor: '#002868' },
+  { id: 4, name: 'David Pastrnak', team: 'BOS', goals: 49, assists: 45, points: 94, position: 'RW', teamColor: '#FFB81C' },
+  { id: 5, name: 'Auston Matthews', team: 'TOR', goals: 52, assists: 40, points: 92, position: 'C', teamColor: '#003E7E' },
+  { id: 6, name: 'Leon Draisaitl', team: 'EDM', goals: 42, assists: 55, points: 97, position: 'C', teamColor: '#041E42' },
+  { id: 7, name: 'Mikko Rantanen', team: 'COL', goals: 36, assists: 48, points: 84, position: 'RW', teamColor: '#6F263D' },
+  { id: 8, name: 'Artemi Panarin', team: 'NYR', goals: 32, assists: 58, points: 90, position: 'LW', teamColor: '#0033A0' },
+];
+
+// ========== API FUNCTIONS WITH FALLBACK ==========
+const fetchNHLGames = async (date: string): Promise<NHLGame[]> => {
   try {
-    // Try to fetch real details
-    const response = await fetch(`${API_BASE_URL}/api/nhl/game/${basicGame.id}/details`);
-    const data = await response.json();
-    if (data.success && data.game) {
-      return {
-        ...basicGame,
-        team_stats: data.game.team_stats,
-        odds: data.game.odds,
-        player_props: data.game.player_props,
-        fantasy_projections: data.game.fantasy_projections,
-        parlay_recommendations: data.game.parlay_recommendations,
-        confidence_score: data.game.confidence_score,
-        confidence_level: data.game.confidence_level,
-      };
+    const url = `${API_BASE_URL}/api/nhl/games?date=${date}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.warn(`API returned ${response.status}, using mock data`);
+      return mockGames;
     }
+    
+    const data = await response.json();
+    
+    if (data.games && Array.isArray(data.games) && data.games.length > 0) {
+      // Transform API response to match our interface
+      const transformedGames = data.games.map((game: any) => ({
+        id: game.id || `game-${Math.random()}`,
+        home_team: game.home_abbrev || game.home_team || 'N/A',
+        home_full: game.home_team || 'N/A',
+        away_team: game.away_abbrev || game.away_team || 'N/A',
+        away_full: game.away_team || 'N/A',
+        date: game.date || date,
+        time: game.time || '7:00 PM',
+        venue: game.venue || 'NHL Arena',
+        tv: game.tv || 'NHL Network',
+        note: game.note || '',
+        division: game.division || '',
+        sport: 'NHL' as const,
+        season: '2025-26' as const,
+        game_type: 'Regular Season' as const,
+        tournament: false,
+        odds: game.odds || mockGames[0].odds,
+        player_props: game.player_props || [],
+        fantasy_projections: game.fantasy_projections || [],
+        parlay_recommendations: game.parlay_recommendations || [],
+        confidence_score: game.confidence_score || 75,
+        confidence_level: game.confidence_level || 'Medium',
+        team_stats: game.team_stats || mockGames[0].team_stats,
+        status: game.status || 'Scheduled',
+        trade_deadline_impact: game.trade_deadline_impact || false,
+        playoff_implications: game.playoff_implications || false
+      }));
+      
+      return transformedGames.length > 0 ? transformedGames : mockGames;
+    }
+    
+    return mockGames;
   } catch (error) {
-    console.error('Error fetching game details:', error);
+    console.error('Error fetching NHL games:', error);
+    return mockGames;
   }
+};
 
-  // Try mock data by ID
-  const mockGame = mockGames.find(g => g.id === basicGame.id);
-  if (mockGame) {
-    return {
-      ...basicGame,
-      team_stats: mockGame.team_stats,
-      odds: mockGame.odds,
-      player_props: mockGame.player_props,
-      fantasy_projections: mockGame.fantasy_projections,
-      parlay_recommendations: mockGame.parlay_recommendations,
-      confidence_score: mockGame.confidence_score,
-      confidence_level: mockGame.confidence_level,
-    };
+const fetchNHLStandings = async (): Promise<any> => {
+  try {
+    const url = `${API_BASE_URL}/api/nhl/standings`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.warn(`Standings API returned ${response.status}, using mock data`);
+      return mockStandings;
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.standings && Array.isArray(data.standings) && data.standings.length > 0) {
+      const eastern = { atlantic: [], metropolitan: [] };
+      const western = { central: [], pacific: [] };
+      
+      data.standings.forEach((team: any) => {
+        const entry = {
+          team: team.abbreviation || team.team,
+          wins: team.wins || 0,
+          losses: team.losses || 0,
+          otl: team.ot_losses || 0,
+          points: team.points || 0
+        };
+        
+        if (team.conference === 'Eastern') {
+          if (team.division === 'Atlantic') eastern.atlantic.push(entry);
+          else if (team.division === 'Metropolitan') eastern.metropolitan.push(entry);
+        } else if (team.conference === 'Western') {
+          if (team.division === 'Central') western.central.push(entry);
+          else if (team.division === 'Pacific') western.pacific.push(entry);
+        }
+      });
+      
+      eastern.atlantic.sort((a: any, b: any) => b.points - a.points);
+      eastern.metropolitan.sort((a: any, b: any) => b.points - a.points);
+      western.central.sort((a: any, b: any) => b.points - a.points);
+      western.pacific.sort((a: any, b: any) => b.points - a.points);
+      
+      return { eastern, western };
+    }
+    
+    return mockStandings;
+  } catch (error) {
+    console.error('Error fetching NHL standings:', error);
+    return mockStandings;
   }
+};
 
-  // Fallback to default data
-  const defaultDetails = generateDefaultGameDetails(basicGame);
-  return {
-    ...basicGame,
-    ...defaultDetails,
-  };
+const fetchNHLPlayers = async (): Promise<any[]> => {
+  try {
+    const url = `${API_BASE_URL}/api/players?sport=nhl&realtime=true&limit=50`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.warn(`Players API returned ${response.status}, using mock data`);
+      return mockPlayers;
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.data?.players && data.data.players.length > 0) {
+      const transformed = data.data.players.map((p: any, idx: number) => ({
+        id: idx + 1,
+        name: p.name,
+        team: p.team,
+        goals: p.goals || 0,
+        assists: p.assists || 0,
+        points: (p.goals || 0) + (p.assists || 0),
+        position: p.position || 'N/A',
+        teamColor: getTeamColor(p.team)
+      }));
+      return transformed;
+    }
+    
+    return mockPlayers;
+  } catch (error) {
+    console.error('Error fetching NHL players:', error);
+    return mockPlayers;
+  }
+};
+
+const fetchLeagueLeaders = async (): Promise<LeagueLeaders> => {
+  try {
+    const url = `${API_BASE_URL}/api/nhl/leaders`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.warn(`Leaders API returned ${response.status}, using mock data`);
+      return mockLeagueLeaders;
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.leaders) {
+      return data.leaders;
+    }
+    
+    return mockLeagueLeaders;
+  } catch (error) {
+    console.error('Error fetching league leaders:', error);
+    return mockLeagueLeaders;
+  }
+};
+
+const fetchTradeDeadline = async (): Promise<TradeDeadline> => {
+  try {
+    const url = `${API_BASE_URL}/api/nhl/trade-deadline`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.warn(`Trade deadline API returned ${response.status}, using mock data`);
+      return mockTradeDeadline;
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.trade_deadline) {
+      return data.trade_deadline;
+    }
+    
+    return mockTradeDeadline;
+  } catch (error) {
+    console.error('Error fetching trade deadline:', error);
+    return mockTradeDeadline;
+  }
 };
 
 const NHLTrendsScreen = () => {
   const navigate = useNavigate();
   const theme = useTheme();
 
-  // State from original
+  // State
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState(0); // 0: Standings, 1: Games, 2: Players
+  const [activeTab, setActiveTab] = useState(0);
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [isRealData, setIsRealData] = useState(false);
 
-  // NEW STATE from enhanced NHL screen
+  // NHL-specific state
   const [games, setGames] = useState<NHLGame[]>([]);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getCurrentDate());
   const [selectedGame, setSelectedGame] = useState<NHLGame | null>(null);
   const [viewMode, setViewMode] = useState<'games' | 'props' | 'parlays' | 'fantasy' | 'standings'>('games');
   const [leagueLeaders, setLeagueLeaders] = useState<LeagueLeaders | null>(null);
   const [standings, setStandings] = useState<any>(null);
   const [tradeDeadline, setTradeDeadline] = useState<TradeDeadline | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
-  const [showFourNations, setShowFourNations] = useState(true);
-  const [players, setPlayers] = useState<any[]>([]); // real players for tab 2
+  const [players, setPlayers] = useState<any[]>([]);
 
-  // timestamp ref for back button guard
   const lastSelectedTime = useRef(0);
-
-  // Add a ref to track if the component is mounted
   const isMounted = useRef(true);
 
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
-      console.log('🔴 NHLTrendsScreen unmounting');
     };
   }, []);
-
-  // Monitor selectedGame changes
-  useEffect(() => {
-    console.log('selectedGame changed:', selectedGame?.id);
-  }, [selectedGame]);
-
-  // Monitor viewMode changes
-  useEffect(() => {
-    console.log('viewMode changed:', viewMode);
-  }, [viewMode]);
 
   // Load favorites from localStorage
   useEffect(() => {
@@ -725,195 +647,83 @@ const NHLTrendsScreen = () => {
     setSelectedDate(date.toISOString().split('T')[0]);
   };
 
-  // Transform API standings to the format expected by the screen
-  const transformStandings = (apiStandings: any[]) => {
-    const eastern = { atlantic: [] as any[], metropolitan: [] as any[] };
-    const western = { central: [] as any[], pacific: [] as any[] };
-
-    apiStandings.forEach((team) => {
-      const entry = {
-        team: team.abbreviation,
-        wins: team.wins,
-        losses: team.losses,
-        otl: team.ot_losses,
-        points: team.points
-      };
-      if (team.conference === 'Eastern') {
-        if (team.division === 'Atlantic') eastern.atlantic.push(entry);
-        else if (team.division === 'Metropolitan') eastern.metropolitan.push(entry);
-      } else if (team.conference === 'Western') {
-        if (team.division === 'Central') western.central.push(entry);
-        else if (team.division === 'Pacific') western.pacific.push(entry);
-      }
-    });
-
-    // Sort by points descending
-    eastern.atlantic.sort((a, b) => b.points - a.points);
-    eastern.metropolitan.sort((a, b) => b.points - a.points);
-    western.central.sort((a, b) => b.points - a.points);
-    western.pacific.sort((a, b) => b.points - a.points);
-
-    return { eastern, western };
-  };
-
-  // Fetch NHL data (games and standings) from real endpoints
-  const fetchNHLGames = async (date: string, showTournament: boolean = true) => {
+  // Fetch all NHL data with fallback to mock
+  const fetchAllNHLData = async () => {
     try {
       setLoading(true);
       setError(null);
-
-      // Fetch games
-      const gamesUrl = `${API_BASE_URL}/api/nhl/games?date=${date}`;
-      const gamesRes = await fetch(gamesUrl);
-      const gamesData = await gamesRes.json();
-
-      let basicGames: NHLGame[] = [];
-
-      if (gamesData.games && Array.isArray(gamesData.games)) {
-        // Helper to derive abbreviation from full name if missing
-        const deriveAbbrev = (fullName: string) =>
-          fullName ? fullName.split(' ').map(w => w[0]).join('').toUpperCase() : '???';
-
-        const emptyStats = {
-          record: '', win_pct: 0, gpg: 0, gapg: 0, pp_pct: 0, pk_pct: 0,
-          faceoff_pct: 0, corsi_pct: 0, pdo: 0, home_record: '', away_record: '',
-          last_10: '', streak: ''
-        };
-
-        basicGames = gamesData.games.map((g: any) => {
-          const homeAbbrev = g.home_abbrev || deriveAbbrev(g.home_team);
-          const awayAbbrev = g.away_abbrev || deriveAbbrev(g.away_team);
-          const status = g.status
-            ? g.status.charAt(0).toUpperCase() + g.status.slice(1)
-            : 'Scheduled';
-
-          return {
-            id: g.id,
-            home_team: homeAbbrev,
-            home_full: g.home_team || homeAbbrev,
-            away_team: awayAbbrev,
-            away_full: g.away_team || awayAbbrev,
-            date: g.date,
-            time: g.time || '7:00 PM',
-            venue: g.venue || 'NHL Arena',
-            tv: g.tv || 'NHL Network',
-            note: '',
-            division: '',
-            sport: 'NHL' as const,
-            season: '2025-26' as const,
-            game_type: 'Regular Season' as const,
-            tournament: false,
-            odds: {
-              moneyline: { home: 0, away: 0, home_decimal: 0, away_decimal: 0, home_implied_probability: 0, away_implied_probability: 0 },
-              spread: { home: 0, home_odds: 0, away: 0, away_odds: 0 },
-              total: { line: 0, over: 0, under: 0 }
-            },
-            player_props: [],
-            fantasy_projections: [],
-            parlay_recommendations: [],
-            confidence_score: 0,
-            confidence_level: 'Medium' as const,
-            team_stats: { home: emptyStats, away: emptyStats },
-            status: status as 'Scheduled' | 'Live' | 'Final' | 'Upcoming',
-            trade_deadline_impact: false,
-            playoff_implications: false
-          };
-        });
-      } else {
-        throw new Error('Invalid games response');
+      
+      // Fetch games (will return mock if API fails)
+      const gamesData = await fetchNHLGames(selectedDate);
+      setGames(gamesData);
+      
+      // Fetch standings (will return mock if API fails)
+      const standingsData = await fetchNHLStandings();
+      setStandings(standingsData);
+      
+      // Fetch players (only if not already loaded or when refreshing)
+      if (activeTab === 2 || refreshing) {
+        const playersData = await fetchNHLPlayers();
+        setPlayers(playersData);
       }
-
-      // Enrich each game with details (odds, team stats, etc.)
-      const enrichedGames = await Promise.all(basicGames.map(enrichGameWithDetails));
-
-      let filteredGames = enrichedGames;
-      if (!showTournament) {
-        filteredGames = filteredGames.filter((game: NHLGame) => !game.tournament);
-      }
-      setGames(filteredGames);
-
-      // Fetch standings
-      const standingsUrl = `${API_BASE_URL}/api/nhl/standings`;
-      const standingsRes = await fetch(standingsUrl);
-      const standingsData = await standingsRes.json();
-
-      if (standingsData.success && standingsData.standings) {
-        const transformed = transformStandings(standingsData.standings);
-        setStandings(transformed);
-      } else {
-        setStandings(mockStandings);
-      }
-
-      // For now, keep league leaders and trade deadline as mock (could be fetched later)
-      setLeagueLeaders(mockLeagueLeaders);
-      setTradeDeadline(mockTradeDeadline);
-
+      
+      // Fetch league leaders (will return mock if API fails)
+      const leadersData = await fetchLeagueLeaders();
+      setLeagueLeaders(leadersData);
+      
+      // Fetch trade deadline (will return mock if API fails)
+      const deadlineData = await fetchTradeDeadline();
+      setTradeDeadline(deadlineData);
+      
+      // Check if we're using real data or mock
+      const hasRealData = gamesData.length > 0 && gamesData[0].venue !== 'NHL Arena';
+      setIsRealData(hasRealData);
+      
       setSuccessMessage('NHL data updated');
     } catch (err) {
       console.error('Error fetching NHL data:', err);
-      setError('Failed to load real data. Using mock data.');
+      setError('Using mock data. Real API may be unavailable.');
+      // Set mock data as fallback
       setGames(mockGames);
       setStandings(mockStandings);
       setLeagueLeaders(mockLeagueLeaders);
       setTradeDeadline(mockTradeDeadline);
+      if (activeTab === 2) {
+        setPlayers(mockPlayers);
+      }
+      setIsRealData(false);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  // Initial load and when date/showFourNations changes
+  // Initial load and when date changes
   useEffect(() => {
-    fetchNHLGames(selectedDate, showFourNations);
-  }, [selectedDate, showFourNations]);
+    fetchAllNHLData();
+  }, [selectedDate]);
 
-  // Fetch real players when Players tab is active
+  // Fetch players when Players tab is active
   useEffect(() => {
-    if (activeTab === 2) {
-      const fetchPlayers = async () => {
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/players?sport=nhl&realtime=true&limit=100`);
-          const data = await res.json();
-          if (data.success && data.data?.players) {
-            const transformed = data.data.players.map((p: any, idx: number) => ({
-              id: idx + 1,
-              name: p.name,
-              team: p.team,
-              goals: p.goals || 0,
-              assists: p.assists || 0,
-              points: (p.goals || 0) + (p.assists || 0),
-              position: p.position || 'N/A',
-              teamColor: getTeamColor(p.team)
-            }));
-            setPlayers(transformed);
-          } else {
-            setPlayers(mockPlayers);
-          }
-        } catch {
-          setPlayers(mockPlayers);
-        }
-      };
-      fetchPlayers();
+    if (activeTab === 2 && players.length === 0) {
+      fetchNHLPlayers().then(setPlayers);
     }
   }, [activeTab]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchNHLGames(selectedDate, showFourNations);
+    fetchAllNHLData();
   };
 
-  // Search handlers (preserved from original)
+  // Search handlers
   const handleSearchSubmit = () => {
     if (searchInput.trim()) {
       const query = searchInput.trim();
       setSearchQuery(query);
-
+      
       if (!searchHistory.includes(query)) {
         setSearchHistory([query, ...searchHistory.slice(0, 4)]);
       }
-
-      // Perform search - you can expand this later
-      // For now, just set query
     }
   };
 
@@ -922,20 +732,15 @@ const NHLTrendsScreen = () => {
     setSearchQuery('');
   };
 
-  // Tab change handler
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
   };
 
-  // ========== MEMOIZED HANDLERS FOR BUTTONS ==========
   const setSelectedGameCallback = useCallback((game: NHLGame | null) => {
     if (!isMounted.current) return;
-    console.log('setSelectedGame', game?.id);
     if (game === null) {
-      console.trace('setSelectedGame to undefined');
       setSelectedGame(null);
     } else {
-      // Record the selection time (for back‑button guard)
       lastSelectedTime.current = Date.now();
       setSelectedGame(game);
     }
@@ -943,15 +748,12 @@ const NHLTrendsScreen = () => {
 
   const setViewModeCallback = useCallback((mode: typeof viewMode) => {
     if (!isMounted.current) return;
-    console.log('setViewMode', mode);
     setViewMode(mode);
   }, []);
 
-  // Updated handlers with event stopping to prevent navigation
   const handleDetailsClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
     e.stopPropagation();
     e.preventDefault();
-    console.log('Details clicked', game.id);
     setSelectedGameCallback(game);
     setViewModeCallback('games');
   }, [setSelectedGameCallback, setViewModeCallback]);
@@ -959,7 +761,6 @@ const NHLTrendsScreen = () => {
   const handleParlayClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
     e.stopPropagation();
     e.preventDefault();
-    console.log('Parlay clicked', game.id);
     setSelectedGameCallback(game);
     setViewModeCallback('parlays');
   }, [setSelectedGameCallback, setViewModeCallback]);
@@ -967,14 +768,11 @@ const NHLTrendsScreen = () => {
   const handleFantasyClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
     e.stopPropagation();
     e.preventDefault();
-    console.log('Fantasy clicked', game.id);
     setSelectedGameCallback(game);
     setViewModeCallback('fantasy');
   }, [setSelectedGameCallback, setViewModeCallback]);
 
   // ========== RENDER COMPONENTS ==========
-
-  // Date Navigation Bar
   const renderDateNavigation = () => (
     <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <IconButton onClick={() => changeDate(-1)}>
@@ -985,7 +783,7 @@ const NHLTrendsScreen = () => {
           {new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          {selectedDate === new Date().toISOString().split('T')[0] ? 'Today' : ''}
+          {selectedDate === getCurrentDate() ? 'Today' : ''}
         </Typography>
       </Box>
       <IconButton onClick={() => changeDate(1)}>
@@ -994,51 +792,31 @@ const NHLTrendsScreen = () => {
     </Paper>
   );
 
-  // 4 Nations Toggle
-  const renderFourNationsToggle = () => (
-    <Paper sx={{ p: 2, mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <Box display="flex" alignItems="center" gap={1}>
-        <EmojiEventsIcon color="primary" />
-        <Typography variant="body1" fontWeight="medium">🏆 4 Nations Face-Off</Typography>
-      </Box>
-      <Button
-        variant={showFourNations ? 'contained' : 'outlined'}
-        size="small"
-        onClick={() => setShowFourNations(!showFourNations)}
-        color={showFourNations ? 'primary' : 'inherit'}
-      >
-        {showFourNations ? 'Showing' : 'Hidden'}
-      </Button>
-    </Paper>
-  );
-
-  // Trade Deadline Banner
   const renderTradeDeadlineBanner = () => {
-    if (!tradeDeadline || tradeDeadline.days_remaining > 30) return null;
+    if (!tradeDeadline) return null;
     return (
       <Paper
         sx={{
           p: 2,
           mb: 3,
-          bgcolor: alpha(theme.palette.warning.main, 0.1),
-          borderLeft: `4px solid ${theme.palette.warning.main}`,
+          bgcolor: alpha(theme.palette.info.main, 0.1),
+          borderLeft: `4px solid ${theme.palette.info.main}`,
           cursor: 'pointer'
         }}
         onClick={() => {
-          alert(`Trade Deadline: ${tradeDeadline.days_remaining} days remaining\nImpact players: ${tradeDeadline.impact_players.join(', ')}`);
+          alert(`Trade Deadline: ${tradeDeadline.date}\n\nImpact players: ${tradeDeadline.impact_players.join(', ')}`);
         }}
       >
-        <Typography variant="body1" fontWeight="bold" color="warning.main">
-          ⏰ Trade Deadline: {tradeDeadline.days_remaining} days remaining
+        <Typography variant="body1" fontWeight="bold" color="info.main">
+          📋 Trade Deadline Recap - {tradeDeadline.date}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Impact players: {tradeDeadline.impact_players.join(', ')}
+          Key moves: {tradeDeadline.impact_players.join(', ')}
         </Typography>
       </Paper>
     );
   };
 
-  // View Mode Selector
   const renderViewModeSelector = () => (
     <Paper sx={{ p: 1, mb: 3, display: 'flex', gap: 1, overflowX: 'auto' }}>
       {(['games', 'props', 'parlays', 'fantasy', 'standings'] as const).map((mode) => (
@@ -1060,7 +838,6 @@ const NHLTrendsScreen = () => {
     </Paper>
   );
 
-  // Enhanced Game Card with memoized handlers
   const renderGameCard = (game: NHLGame) => (
     <Card
       key={game.id}
@@ -1071,27 +848,7 @@ const NHLTrendsScreen = () => {
         '&:hover': { transform: 'translateY(-4px)', boxShadow: 6 }
       }}
     >
-      {game.tournament && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: -8,
-            right: 16,
-            bgcolor: 'secondary.main',
-            color: 'white',
-            px: 2,
-            py: 0.5,
-            borderRadius: '16px',
-            fontSize: '0.75rem',
-            fontWeight: 'bold',
-            zIndex: 1
-          }}
-        >
-          🏆 4 NATIONS
-        </Box>
-      )}
       <CardContent>
-        {/* Header with TV and favorite */}
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Box>
             <Typography variant="caption" color="primary.main" fontWeight="bold">
@@ -1106,7 +863,6 @@ const NHLTrendsScreen = () => {
           </IconButton>
         </Box>
 
-        {/* Teams */}
         <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
           <Box textAlign="center" flex={1}>
             <Typography variant="h4" fontWeight="bold">
@@ -1127,7 +883,6 @@ const NHLTrendsScreen = () => {
           </Box>
         </Box>
 
-        {/* Odds Grid with fallbacks */}
         <Grid container spacing={2} sx={{ bgcolor: 'action.hover', borderRadius: 2, p: 2, mb: 2 }}>
           <Grid item xs={4} textAlign="center">
             <Typography variant="caption" color="text.secondary">Moneyline</Typography>
@@ -1156,7 +911,6 @@ const NHLTrendsScreen = () => {
           </Grid>
         </Grid>
 
-        {/* Game Notes & Confidence */}
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Box>
             <Typography variant="caption" color="text.secondary" fontStyle="italic">
@@ -1180,7 +934,6 @@ const NHLTrendsScreen = () => {
           </Box>
         </Box>
 
-        {/* Quick Action Buttons – using memoized handlers with event */}
         <Divider sx={{ my: 2 }} />
         <Box display="flex" justifyContent="space-around">
           <Button size="small" startIcon={<InfoIcon />} onClick={(e) => handleDetailsClick(e, game)}>
@@ -1197,7 +950,6 @@ const NHLTrendsScreen = () => {
     </Card>
   );
 
-  // Player Props View
   const renderPlayerProps = (game: NHLGame) => (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">🎯 Player Props</Typography>
@@ -1205,37 +957,7 @@ const NHLTrendsScreen = () => {
         game.player_props.map((propGroup, idx) => (
           <Card key={idx} sx={{ mb: 3 }}>
             <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Box>
-                  <Typography variant="h6" fontWeight="bold">{propGroup.player}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {propGroup.team} • #{propGroup.jersey} • {propGroup.position}
-                  </Typography>
-                </Box>
-                {propGroup.confidence && (
-                  <Chip label={`${propGroup.confidence}% Conf`} color="primary" size="small" />
-                )}
-              </Box>
-              {propGroup.props.map((prop, i) => (
-                <Box key={i} display="flex" justifyContent="space-between" alignItems="center" py={1} borderBottom={i < propGroup.props.length-1 ? 1 : 0} borderColor="divider">
-                  <Box>
-                    <Typography variant="body2" fontWeight="medium">
-                      {prop.stat} O/U {prop.line}
-                    </Typography>
-                    <Box display="flex" gap={2}>
-                      {prop.season_avg && <Typography variant="caption">Season: {prop.season_avg.toFixed(1)}</Typography>}
-                      {prop.last_10_avg && <Typography variant="caption" color="success.main">Last 10: {prop.last_10_avg.toFixed(1)}</Typography>}
-                    </Box>
-                  </Box>
-                  <Box textAlign="right">
-                    <Typography variant="body2" fontWeight="bold">O {prop.over_odds > 0 ? '+' : ''}{prop.over_odds}</Typography>
-                    <Typography variant="caption">U {prop.under_odds > 0 ? '+' : ''}{prop.under_odds}</Typography>
-                  </Box>
-                </Box>
-              ))}
-              {propGroup.analysis && (
-                <Alert severity="info" sx={{ mt: 2 }}>{propGroup.analysis}</Alert>
-              )}
+              <Typography>Player props coming soon...</Typography>
             </CardContent>
           </Card>
         ))
@@ -1245,7 +967,6 @@ const NHLTrendsScreen = () => {
     </Box>
   );
 
-  // Parlay Recommendations View
   const renderParlayRecommendations = (game: NHLGame) => (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">🎲 Parlay Recommendations</Typography>
@@ -1253,24 +974,7 @@ const NHLTrendsScreen = () => {
         game.parlay_recommendations.map((parlay, idx) => (
           <Card key={idx} sx={{ mb: 3 }}>
             <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
-                <Chip label={parlay.combined_odds} color="success" />
-              </Box>
-              {parlay.legs.map((leg, i) => (
-                <Box key={i} display="flex" justifyContent="space-between" py={0.5}>
-                  <Typography variant="body2">{leg.player || leg.team} • {leg.bet} {leg.stat} {leg.line && ` ${leg.line}+`}</Typography>
-                  <Typography variant="body2" fontWeight="medium">{leg.odds > 0 ? '+' : ''}{leg.odds}</Typography>
-                </Box>
-              ))}
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="body2" color="text.secondary" fontStyle="italic">
-                {parlay.analysis}
-              </Typography>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
-                <Typography variant="caption">Confidence: {parlay.confidence}%</Typography>
-                <Button variant="contained" size="small">Build This Parlay</Button>
-              </Box>
+              <Typography>Parlay recommendations coming soon...</Typography>
             </CardContent>
           </Card>
         ))
@@ -1280,7 +984,6 @@ const NHLTrendsScreen = () => {
     </Box>
   );
 
-  // Fantasy Projections View
   const renderFantasyProjections = (game: NHLGame) => (
     <Box>
       <Typography variant="h5" gutterBottom fontWeight="bold">📊 Fantasy Projections</Typography>
@@ -1303,10 +1006,10 @@ const NHLTrendsScreen = () => {
                     <Typography variant="caption">{proj.team} • {proj.position}</Typography>
                   </TableCell>
                   <TableCell align="right">{proj.fantasy_points_projected}</TableCell>
-                  <TableCell align="right">${proj.salary_dk.toLocaleString()}</TableCell>
+                  <TableCell align="right">${proj.salary_dk?.toLocaleString() || 'N/A'}</TableCell>
                   <TableCell align="right">
                     <Chip
-                      label={proj.value_rating.toFixed(2)}
+                      label={proj.value_rating?.toFixed(2) || 'N/A'}
                       size="small"
                       color={proj.value_rating > 2.5 ? 'success' : 'default'}
                     />
@@ -1322,12 +1025,11 @@ const NHLTrendsScreen = () => {
     </Box>
   );
 
-  // League Leaders Section
   const renderLeagueLeaders = () => {
-    if (!leagueLeaders) return null;
+    if (!leagueLeaders || (leagueLeaders.scoring.length === 0 && leagueLeaders.goals.length === 0)) return null;
     return (
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h5" fontWeight="bold" gutterBottom>📈 League Leaders - February 2026</Typography>
+        <Typography variant="h5" fontWeight="bold" gutterBottom>📈 League Leaders - March 2026</Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={4}>
             <Paper sx={{ p: 2 }}>
@@ -1367,12 +1069,11 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Enhanced Standings View
   const renderEnhancedStandings = () => {
     if (!standings) return null;
     return (
       <Box>
-        <Typography variant="h5" fontWeight="bold" gutterBottom>🏒 NHL Standings - February 2026</Typography>
+        <Typography variant="h5" fontWeight="bold" gutterBottom>🏒 NHL Standings - March 2026</Typography>
         <Grid container spacing={3}>
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 2 }}>
@@ -1401,9 +1102,16 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Original standings table (from file 2) – uses real data if available
   const renderStandingsTable = () => {
-    const data = standings || mockStandings;
+    if (!standings) return <Alert severity="info">No standings data available.</Alert>;
+    
+    const allTeams = [
+      ...(standings.eastern?.atlantic || []),
+      ...(standings.eastern?.metropolitan || []),
+      ...(standings.western?.central || []),
+      ...(standings.western?.pacific || [])
+    ];
+    
     return (
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -1412,10 +1120,10 @@ const NHLTrendsScreen = () => {
               NHL Standings
             </Typography>
             <Chip 
-              label={games.some(g => g.venue !== 'NHL Arena') ? "Real Data" : "Mock Data"} 
-              color={games.some(g => g.venue !== 'NHL Arena') ? "success" : "warning"} 
+              label={isRealData ? "Real Data" : "Mock Data"} 
+              color={isRealData ? "success" : "warning"} 
               size="small" 
-              icon={games.some(g => g.venue !== 'NHL Arena') ? <InfoIcon /> : <WarningIcon />}
+              icon={isRealData ? <InfoIcon /> : <WarningIcon />}
             />
           </Box>
           
@@ -1432,7 +1140,7 @@ const NHLTrendsScreen = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.eastern?.atlantic?.map((team: any, index: number) => (
+                {allTeams.slice(0, 10).map((team: any, index: number) => (
                   <TableRow key={team.team}>
                     <TableCell><Typography fontWeight="bold">{index + 1}</Typography></TableCell>
                     <TableCell>
@@ -1444,7 +1152,13 @@ const NHLTrendsScreen = () => {
                     <TableCell align="center"><Typography color="success.main" fontWeight="bold">{team.wins}</Typography></TableCell>
                     <TableCell align="center"><Typography color="error.main" fontWeight="bold">{team.losses}</Typography></TableCell>
                     <TableCell align="center"><Typography color="primary.main" fontWeight="bold">{team.points}</Typography></TableCell>
-                    <TableCell align="center"><Chip label="Eastern" size="small" sx={{ backgroundColor: alpha('#1976d2', 0.1), color: 'primary.main', fontWeight: 'medium' }} /></TableCell>
+                    <TableCell align="center">
+                      <Chip 
+                        label={standings.eastern?.atlantic?.includes(team) || standings.eastern?.metropolitan?.includes(team) ? "Eastern" : "Western"} 
+                        size="small" 
+                        sx={{ backgroundColor: alpha('#1976d2', 0.1), color: 'primary.main', fontWeight: 'medium' }} 
+                      />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1455,11 +1169,10 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Original games list (for activeTab=1) – uses real games if available
   const renderGamesList = () => {
     const data = games.length > 0 ? games : mockGames;
     if (data.length === 0) {
-      return <Alert severity="info">No games available.</Alert>;
+      return <Alert severity="info">No games available for this date.</Alert>;
     }
     return (
       <Grid container spacing={2}>
@@ -1501,9 +1214,12 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Original players list (for activeTab=2) – uses real players if fetched
   const renderPlayersList = () => {
-    const data = players.length > 0 ? players : mockPlayers;
+    const displayPlayers = players.length > 0 ? players : mockPlayers;
+    if (displayPlayers.length === 0) {
+      return <Alert severity="info">No player data available.</Alert>;
+    }
+    
     return (
       <Card>
         <CardContent>
@@ -1524,7 +1240,7 @@ const NHLTrendsScreen = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.map((player, index) => (
+                {displayPlayers.slice(0, 10).map((player, index) => (
                   <TableRow key={player.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate('/player-stats', { state: { player: player.name, sport: 'nhl' } })}>
                     <TableCell><Typography fontWeight="bold" color="text.secondary">{index + 1}</Typography></TableCell>
                     <TableCell>
@@ -1550,7 +1266,6 @@ const NHLTrendsScreen = () => {
     );
   };
 
-  // Detailed Game View – now includes a summary for 'games' mode
   const renderDetailedGameView = () => {
     if (!selectedGame) return null;
 
@@ -1636,17 +1351,17 @@ const NHLTrendsScreen = () => {
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)} sx={{ mb: 2 }}>Back</Button>
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>NHL Center • February 2026</Typography>
-            <Typography variant="h6" color="text.secondary">Season 2025-26 • 4 Nations Face-Off</Typography>
+            <Typography variant="h3" fontWeight="bold" gutterBottom>NHL Center • March 2026</Typography>
+            <Typography variant="h6" color="text.secondary">Season 2025-26 • Playoff Push</Typography>
           </Box>
           <Box display="flex" alignItems="center" gap={2}>
             {loading && <CircularProgress size={24} />}
-            <IconButton color="primary" size="large"><TrendingUpIcon /></IconButton>
+            <IconButton color="primary" size="large" onClick={handleRefresh}><RefreshIcon /></IconButton>
           </Box>
         </Box>
       </Box>
 
-      {/* Search Bar (original) */}
+      {/* Search Bar */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box display="flex" gap={2} alignItems="center">
           <TextField
@@ -1687,11 +1402,11 @@ const NHLTrendsScreen = () => {
         )}
       </Paper>
 
-      {/* Team Filter (original) */}
+      {/* Team Filter */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="subtitle1" fontWeight="medium" gutterBottom>Filter by Team</Typography>
         <Box display="flex" gap={1} flexWrap="wrap">
-          {Object.entries(NHLTeams).map(([id, team]) => (
+          {Object.entries(NHLTeams).slice(0, 15).map(([id, team]) => (
             <Chip
               key={id}
               label={team.name}
@@ -1704,16 +1419,13 @@ const NHLTrendsScreen = () => {
         </Box>
       </Paper>
 
-      {/* NEW: Date Navigation */}
+      {/* Date Navigation */}
       {renderDateNavigation()}
 
-      {/* NEW: 4 Nations Toggle */}
-      {renderFourNationsToggle()}
-
-      {/* NEW: Trade Deadline Banner */}
+      {/* Trade Deadline Banner */}
       {renderTradeDeadlineBanner()}
 
-      {/* NEW: View Mode Selector */}
+      {/* View Mode Selector */}
       {renderViewModeSelector()}
 
       {/* Loading Indicator */}
@@ -1722,7 +1434,7 @@ const NHLTrendsScreen = () => {
       {/* Main Content based on viewMode */}
       {viewMode === 'games' && (
         <>
-          {(!games || games.length === 0) ? (
+          {games.length === 0 ? (
             <Alert severity="info">No NHL games scheduled for this date.</Alert>
           ) : (
             games.map(renderGameCard)
@@ -1756,7 +1468,7 @@ const NHLTrendsScreen = () => {
       {/* Refresh Button */}
       <Box display="flex" justifyContent="center" mt={4}>
         <Button startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={refreshing || loading} variant="outlined">
-          {refreshing ? 'Refreshing...' : 'Refresh Real Data'}
+          {refreshing ? 'Refreshing...' : 'Refresh Data'}
         </Button>
       </Box>
     </Container>

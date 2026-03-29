@@ -58,6 +58,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // Import hooks
 import { useKalshiPredictions } from '../hooks/useKalshiPredictions';
@@ -378,9 +379,9 @@ const transformKalshiData = (kalshiPredictions: any[]): Prediction[] => {
 };
 
 // ==============================================
-// MAIN COMPONENT
+// MAIN CONTENT COMPONENT
 // ==============================================
-const KalshiPredictionsScreen = () => {
+const KalshiPredictionsContent = () => {
   const theme = useTheme();
   const navigate = useNavigate();
 
@@ -939,6 +940,18 @@ const KalshiPredictionsScreen = () => {
         </Paper>
       )}
     </>
+  );
+};
+
+// ==============================
+// Wrapped Component with ProtectedRoute
+// ==============================
+
+const KalshiPredictionsScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="KalshiPredictions">
+      <KalshiPredictionsContent />
+    </ProtectedRoute>
   );
 };
 

@@ -38,6 +38,7 @@ import {
   Star as ProspectIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ----------------------------------------------------------------------
 // Types
@@ -345,10 +346,10 @@ const ProspectChip = () => (
 );
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component
 // ----------------------------------------------------------------------
 
-const TennisPlayers: React.FC = () => {
+const TennisPlayersContent: React.FC = () => {
   const [tabValue, setTabValue] = useState<number>(0);
   const [tourFilter, setTourFilter] = useState<string>('all');
 
@@ -648,6 +649,18 @@ const TennisPlayers: React.FC = () => {
         <Alert severity="info">Country breakdown coming soon.</Alert>
       )}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const TennisPlayers: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="TennisPlayers">
+      <TennisPlayersContent />
+    </ProtectedRoute>
   );
 };
 

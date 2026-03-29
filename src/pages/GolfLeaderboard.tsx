@@ -26,6 +26,7 @@ import {
 import { Refresh as RefreshIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import api from '../services/api'; // adjust to your actual API service
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ----------------------------------------------------------------------
 // Types
@@ -168,10 +169,10 @@ const fetchLeaderboard = async (tournamentId: number): Promise<LeaderboardEntry[
 };
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component
 // ----------------------------------------------------------------------
 
-const GolfLeaderboard = () => {
+const GolfLeaderboardContent = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [selectedTournamentId, setSelectedTournamentId] = useState<number | ''>('');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -349,6 +350,18 @@ const GolfLeaderboard = () => {
         </Box>
       )}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const GolfLeaderboard: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="GolfLeaderboard">
+      <GolfLeaderboardContent />
+    </ProtectedRoute>
   );
 };
 

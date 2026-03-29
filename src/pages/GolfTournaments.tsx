@@ -38,6 +38,7 @@ import {
   MonetizationOn as PurseIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ----------------------------------------------------------------------
 // Types
@@ -380,10 +381,10 @@ const formatDate = (dateStr?: string): string => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component
 // ----------------------------------------------------------------------
 
-const GolfTournaments: React.FC = () => {
+const GolfTournamentsContent: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [tabValue, setTabValue] = useState<number>(0);
   const [tourFilter, setTourFilter] = useState<string>('all');
@@ -741,6 +742,18 @@ const GolfTournaments: React.FC = () => {
         </>
       )}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const GolfTournaments: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="GolfTournaments">
+      <GolfTournamentsContent />
+    </ProtectedRoute>
   );
 };
 

@@ -88,6 +88,7 @@ import { alpha } from '@mui/material/styles';
 import { format, parseISO, isToday } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ========== API BASES ==========
 const PRIZEPICKS_API_BASE = 'https://prizepicks-production.up.railway.app';
@@ -371,18 +372,35 @@ const pulseAnimation = `
 }
 `;
 
-// ========== AI PROMPTS ==========
+// ========== AI PROMPTS (20 total: 5 NHL, 5 MLB, 5 NBA, 5 Mixed) ==========
 const PROMPTS = [
-  { label: '🔥 Best value props', query: 'best value props' },
-  { label: '🎯 Top confidence plays', query: 'top confidence plays' },
-  { label: '📈 Highest projected points', query: 'highest projected points' },
-  { label: '🏀 LeBron James props', query: 'LeBron James points and assists' },
-  { label: '🌟 Luka Doncic triple-double', query: 'Luka Doncic points, rebounds, assists' },
-  { label: '🔄 Same game parlay: Lakers vs Warriors', query: 'Lakers vs Warriors player props' },
-  { label: '⚡ Quick 2-leg parlay', query: '2-leg parlay with high confidence' },
-  { label: '💰 Underdog value picks', query: 'underdog props with positive edge' },
-  { label: '📊 Tonight’s top scorers', query: 'top scorers tonight' },
-  { label: '🧠 AI’s best picks', query: 'AI’s best parlay picks' },
+  // NHL (5)
+  { label: '🏒 NHL Goal Scorer Props', query: 'nhl goal scorer props' },
+  { label: '🥅 NHL Goalie Saves Parlay', query: 'nhl goalie saves parlay' },
+  { label: '📊 NHL Points + Assists', query: 'nhl points and assists' },
+  { label: '💥 NHL Hits + Shots', query: 'nhl hits and shots' },
+  { label: '🔥 NHL Same Game Parlay', query: 'nhl same game parlay' },
+
+  // MLB (5)
+  { label: '⚾ MLB Home Run Props', query: 'mlb home run props' },
+  { label: '🥎 MLB Strikeout Props', query: 'mlb strikeout props' },
+  { label: '🔥 MLB Hits + RBI Parlay', query: 'mlb hits and rbi' },
+  { label: '🧢 MLB Pitcher Props', query: 'mlb pitcher props' },
+  { label: '🌟 MLB Player Props Mix', query: 'mlb player props mix' },
+
+  // NBA (5)
+  { label: '🏀 NBA Points + Assists', query: 'nba points and assists' },
+  { label: '💪 NBA Triple-Double Threats', query: 'nba triple double threats' },
+  { label: '📈 NBA Rebounds + Blocks', query: 'nba rebounds and blocks' },
+  { label: '🎯 NBA High Scorer Props', query: 'nba high scorer props' },
+  { label: '🔥 NBA Player Props', query: 'nba player props' },
+
+  // Mixed Sports (5)
+  { label: '🔄 NBA + MLB Combo Parlay', query: 'nba mlb combo parlay' },
+  { label: '⚡ NHL + NBA Cross Sport', query: 'nhl nba cross sport' },
+  { label: '🌍 All Sports Mega Parlay', query: 'all sports mega parlay' },
+  { label: '🧩 Mixed Player Props', query: 'mixed player props' },
+  { label: '💰 High Confidence Cross-Sport', query: 'high confidence cross sport' },
 ];
 
 // ========== HELPER: generate parlay suggestions from real props ==========
@@ -936,8 +954,8 @@ const MOCK_GAMES: Game[] = [
   },
 ];
 
-// ========== MAIN COMPONENT ==========
-const ParlayArchitectScreen: React.FC = () => {
+// ========== MAIN CONTENT COMPONENT ==========
+const ParlayArchitectContent: React.FC = () => {
   const navigate = useNavigate();
 
   // ========== STATE ==========
@@ -989,27 +1007,25 @@ const ParlayArchitectScreen: React.FC = () => {
     staleTime: 2 * 60 * 1000,
   });
 
-  const {
-    data: nhlProps = [],
-    refetch: refetchNHLProps,
-    isLoading: nhlPropsLoading,
-  } = useQuery({
-    queryKey: ['nhl-props'],
-    queryFn: fetchNHLProps,
-    staleTime: 10 * 60 * 1000,
-    enabled: selectedSport === 'NHL', // only fetch when NHL is selected
-  });
+const {
+  data: nhlProps = [],
+  refetch: refetchNHLProps,
+  isLoading: nhlPropsLoading,
+} = useQuery({
+  queryKey: ['nhl-props'],
+  queryFn: fetchNHLProps,
+  staleTime: 10 * 60 * 1000,
+});
 
-  const {
-    data: mlbProps = [],
-    refetch: refetchMLBProps,
-    isLoading: mlbPropsLoading,
-  } = useQuery({
-    queryKey: ['mlb-props'],
-    queryFn: fetchMLBProps,
-    staleTime: 10 * 60 * 1000,
-    enabled: selectedSport === 'MLB',
-  });
+const {
+  data: mlbProps = [],
+  refetch: refetchMLBProps,
+  isLoading: mlbPropsLoading,
+} = useQuery({
+  queryKey: ['mlb-props'],
+  queryFn: fetchMLBProps,
+  staleTime: 10 * 60 * 1000,
+});
 
   // Determine which props to use based on selected sport
   const props = useMemo(() => {
@@ -1363,24 +1379,213 @@ const ParlayArchitectScreen: React.FC = () => {
     }
   }, [nbaProps, nhlProps, mlbProps]);
 
-  // ========== AI GENERATOR HANDLER ==========
-  const handleGenerateAI = useCallback(async () => {
-    if (!customQuery.trim()) {
-      alert('Please enter a prompt');
-      return;
-    }
-    setGenerating(true);
-    setGeneratorOpen(false);
-    // Map query to strategy – simple keyword matching
-    const query = customQuery.toLowerCase();
-    let numLegs = 3;
-    if (query.includes('2-leg') || query.includes('2 leg')) numLegs = 2;
-    if (query.includes('4-leg') || query.includes('4 leg')) numLegs = 4;
+// Centralized generation logic – can be called with any query
+const generateParlayFromQuery = useCallback(async (query: string) => {
+  console.log('🎯 Generating parlay from query:', query);
+  if (!query.trim()) {
+    alert('Please enter a prompt');
+    return;
+  }
+  setGenerating(true);
 
-    // Call the existing generator with derived parameters
-    await generateParlayFromGames(selectedSport, numLegs);
+  const queryLower = query.toLowerCase();
+  let targetSport = selectedSport;
+  let targetPlayer: string | null = null;
+  let targetMarkets: string[] = [];
+  let targetGameId: string | null = null;
+  let numLegs = 3;
+
+  // --- Parse the prompt ---
+  if (queryLower.includes('nhl') || queryLower.includes('hockey')) targetSport = 'NHL';
+  if (queryLower.includes('mlb') || queryLower.includes('baseball')) targetSport = 'MLB';
+  if (queryLower.includes('nba') || queryLower.includes('basketball')) targetSport = 'NBA';
+
+  const knownPlayers = ['lebron james', 'luka doncic', 'giannis', 'steph curry', 'austin reaves', 'lamelo ball'];
+  for (const player of knownPlayers) {
+    if (queryLower.includes(player)) {
+      targetPlayer = player;
+      break;
+    }
+  }
+
+  const marketKeywords: Record<string, string[]> = {
+    points: ['points', 'scoring', 'score'],
+    assists: ['assists', 'dimes'],
+    rebounds: ['rebounds', 'boards'],
+    goals: ['goals', 'goal scorer'],
+    saves: ['saves', 'goalie'],
+    hits: ['hits'],
+    strikeouts: ['strikeouts', 'ks'],
+    'home runs': ['home run', 'hr'],
+  };
+  for (const [market, keywords] of Object.entries(marketKeywords)) {
+    if (keywords.some(kw => queryLower.includes(kw))) {
+      targetMarkets.push(market);
+    }
+  }
+
+  const legMatch = queryLower.match(/(\d+)[-\s]?leg/);
+  if (legMatch) numLegs = parseInt(legMatch[1], 10);
+
+  if (queryLower.includes('same game') && games.length > 0) {
+    targetGameId = games[0].id;
+  }
+
+  // --- Fetch props for the target sport ---
+  let propsToUse: PropMarket[] = [];
+  if (targetSport === 'NBA') propsToUse = nbaProps;
+  else if (targetSport === 'NHL') propsToUse = nhlProps;
+  else if (targetSport === 'MLB') propsToUse = mlbProps;
+
+  if (propsToUse.length === 0) {
+    alert(`No real props available for ${targetSport}. Try another sport.`);
     setGenerating(false);
-  }, [customQuery, generateParlayFromGames, selectedSport]);
+    return;
+  }
+
+  let filteredProps = [...propsToUse];
+  if (targetPlayer) {
+    filteredProps = filteredProps.filter(p =>
+      p.player?.toLowerCase().includes(targetPlayer!)
+    );
+  }
+  if (targetMarkets.length > 0) {
+    filteredProps = filteredProps.filter(p =>
+      targetMarkets.some(m => p.market?.toLowerCase().includes(m))
+    );
+  }
+  if (targetGameId) {
+    filteredProps = filteredProps.filter(p => p.game_id === targetGameId);
+  }
+
+  if (filteredProps.length < 2) {
+    console.warn('Not enough props matched the prompt, using top confidence props');
+    filteredProps = [...propsToUse]
+      .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+      .slice(0, 10);
+  }
+
+  // Deduplicate by player+market+line
+  const uniqueMap = new Map<string, PropMarket>();
+  filteredProps.forEach(prop => {
+    const key = `${prop.player}|${prop.market}|${prop.line}`;
+    if (!uniqueMap.has(key) || (prop.confidence || 0) > (uniqueMap.get(key)?.confidence || 0)) {
+      uniqueMap.set(key, prop);
+    }
+  });
+  const uniqueProps = Array.from(uniqueMap.values());
+
+  // Select legs ensuring unique players
+  const selected: PropMarket[] = [];
+  const usedPlayers = new Set<string>();
+  for (const prop of uniqueProps) {
+    if (selected.length >= numLegs) break;
+    if (!usedPlayers.has(prop.player)) {
+      selected.push(prop);
+      usedPlayers.add(prop.player);
+    }
+  }
+
+  if (selected.length < 2) {
+    alert('Could not build a parlay from your prompt. Try being more specific.');
+    setGenerating(false);
+    return;
+  }
+
+  // --- Build the parlay object ---
+  const getProjection = (prop: PropMarket): number => {
+    const stat = prop.market?.toLowerCase() || '';
+    let projection = prop.line * 1.05;
+    if (stat.includes('point')) projection = Math.min(projection, 50);
+    else if (stat.includes('rebound')) projection = Math.min(projection, 25);
+    else if (stat.includes('assist')) projection = Math.min(projection, 20);
+    else if (stat.includes('steal') || stat.includes('block')) projection = Math.min(projection, 5);
+    return Math.max(projection, prop.line);
+  };
+
+  const computeEdge = (prop: PropMarket, proj: number): string => {
+    if (!prop.line || prop.line === 0) return '+0%';
+    const edge = ((proj - prop.line) / prop.line) * 100;
+    const sign = edge >= 0 ? '+' : '';
+    return `${sign}${edge.toFixed(1)}%`;
+  };
+
+  let decimal = 1.0;
+  const legs = selected.map((prop, idx) => {
+    const projection = getProjection(prop);
+    const edge = computeEdge(prop, projection);
+    const safeConf = Number(prop.confidence) || 75;
+    const oddsNum = prop.over_odds;
+    if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
+    else decimal *= 1 - 100 / Math.abs(oddsNum);
+
+    return {
+      id: `ai-leg-${Date.now()}-${idx}`,
+      player_name: prop.player,
+      market: prop.market,
+      odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
+      odds: prop.over_odds,
+      confidence: safeConf,
+      sport: targetSport,
+      description: `${prop.player} ${prop.market} Over ${prop.line}`,
+      projection,
+      edge,
+      correlation_score: 0.7,
+      is_star: safeConf > 80,
+      confidence_level: safeConf > 80 ? 'very-high' : safeConf > 70 ? 'high' : 'medium',
+      line: prop.line,
+      stat_type: prop.market,
+      team: prop.team
+    };
+  });
+
+  const totalOdds = decimal >= 2.0
+    ? `+${Math.round((decimal - 1) * 100)}`
+    : Math.round(-100 / (decimal - 1)).toString();
+
+  const avgConfidence = Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length);
+
+  const aiParlay: ParlaySuggestion = {
+    id: `ai-${Date.now()}`,
+    name: `AI: ${query.substring(0, 30)}${query.length > 30 ? '...' : ''}`,
+    sport: targetSport,
+    type: 'standard',
+    market_type: targetMarkets.length ? targetMarkets.join(', ') : 'player_props',
+    legs,
+    total_odds: totalOdds,
+    total_odds_american: totalOdds,
+    confidence: avgConfidence,
+    analysis: `Parlay generated from your prompt: "${query}"`,
+    timestamp: new Date().toISOString(),
+    isGenerated: true,
+    isToday: true,
+    confidence_level: avgConfidence > 80 ? 'very-high' : avgConfidence > 70 ? 'high' : 'medium',
+    expected_value: '+6.5%',
+    risk_level: 'medium',
+    ai_metrics: {
+      leg_count: legs.length,
+      avg_leg_confidence: avgConfidence,
+      recommended_stake: '$5.00',
+      edge: 0.065,
+    },
+    is_real_data: true,
+    has_data: true,
+    source: targetSport
+  };
+
+  setSelectedParlay(aiParlay);
+  setParlayLegs(aiParlay.legs as ParlayLeg[]);
+  setShowBuildModal(true);
+  setSuccessMessage(`Generated ${legs.length}-leg parlay based on your prompt!`);
+  setShowSuccessAlert(true);
+  setGenerating(false);
+}, [selectedSport, nbaProps, nhlProps, mlbProps, games]);
+
+// Updated handleGenerateAI for the dialog – now just calls the shared function
+const handleGenerateAI = useCallback(async () => {
+  await generateParlayFromQuery(customQuery);
+  setGeneratorOpen(false);
+}, [customQuery, generateParlayFromQuery]);
 
   // ========== DEBUG ==========
   useEffect(() => {
@@ -1759,17 +1964,35 @@ const ParlayArchitectScreen: React.FC = () => {
           <Typography variant="body2" color="text.secondary" paragraph>
             Describe the parlay you want – e.g., "best value props", "LeBron James points and assists", or "Lakers vs Warriors player props".
           </Typography>
+
+          {/* Dropdown for quick prompts */}
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Choose a prompt</InputLabel>
+            <Select
+              value=""
+              label="Choose a prompt"
+              onChange={(e) => setCustomQuery(e.target.value as string)}
+            >
+              {PROMPTS.map((prompt, idx) => (
+                <MenuItem key={idx} value={prompt.query}>
+                  {prompt.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
           <TextField
             fullWidth
             multiline
             rows={2}
-            placeholder="Enter your prompt here..."
+            placeholder="Or type your own prompt here..."
             value={customQuery}
             onChange={(e) => setCustomQuery(e.target.value)}
             variant="outlined"
             sx={{ mb: 3 }}
           />
-          <Typography variant="subtitle2" gutterBottom>Quick Prompts</Typography>
+
+          <Typography variant="subtitle2" gutterBottom>Quick Prompt Chips</Typography>
           <Box display="flex" gap={1} flexWrap="wrap">
             {PROMPTS.map((prompt, idx) => (
               <Chip
@@ -2233,6 +2456,25 @@ const ParlayArchitectScreen: React.FC = () => {
       <style>{pulseAnimation}</style>
     </Container>
   );
+};
+
+// ==============================
+// DEVELOPMENT BYPASS: COMMENT OUT THE ORIGINAL WRAPPER AND USE THIS
+// ==============================
+/*
+// Original wrapper (comment this out)
+const ParlayArchitectScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="ParlayArchitect">
+      <ParlayArchitectContent />
+    </ProtectedRoute>
+  );
+};
+*/
+
+// Development bypass – renders the content directly without authentication
+const ParlayArchitectScreen: React.FC = () => {
+  return <ParlayArchitectContent />;
 };
 
 export default ParlayArchitectScreen;

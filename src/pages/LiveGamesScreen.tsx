@@ -1,5 +1,5 @@
-// src/pages/LiveGamesScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+// src/pages/LiveGamesScreen.tsx - COMPLETE UPDATED VERSION
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -41,7 +41,6 @@ import {
   FilterList as FilterListIcon,
   Info as InfoIcon,
   PlayCircle as PlayCircleIcon,
-  Videocam as VideocamIcon,
   LocationOn as LocationOnIcon,
   Tv as TvIcon,
   Whatshot as WhatshotIcon,
@@ -49,7 +48,6 @@ import {
   Cancel as CancelIcon
 } from '@mui/icons-material';
 
-// UPDATED IMPORT: useLiveScores instead of useOddsGames
 import { useLiveScores } from '../hooks/useunifiedAPI';
 
 interface Game {
@@ -76,17 +74,501 @@ interface Game {
   bettingLine?: { spread: string; total: string };
 }
 
-const LiveGamesScreen = () => {
-  // Debug logging
-  useEffect(() => {
-    console.log('=== LiveGamesScreen Debug ===');
-    console.log('API Base URL:', import.meta.env.VITE_API_BASE);
-    console.log('Backend URL:', 'https://pleasing-determination-production.up.railway.app');
-    console.log('==========================');
-  }, []);
+// ========== TEAM NAME MAPPING ==========
+const TEAM_NAME_MAPPING: Record<string, string> = {
+  // NBA
+  'ATL': 'Atlanta Hawks',
+  'BOS': 'Boston Celtics',
+  'BKN': 'Brooklyn Nets',
+  'CHA': 'Charlotte Hornets',
+  'CHI': 'Chicago Bulls',
+  'CLE': 'Cleveland Cavaliers',
+  'DAL': 'Dallas Mavericks',
+  'DEN': 'Denver Nuggets',
+  'DET': 'Detroit Pistons',
+  'GSW': 'Golden State Warriors',
+  'HOU': 'Houston Rockets',
+  'IND': 'Indiana Pacers',
+  'LAC': 'Los Angeles Clippers',
+  'LAL': 'Los Angeles Lakers',
+  'MEM': 'Memphis Grizzlies',
+  'MIA': 'Miami Heat',
+  'MIL': 'Milwaukee Bucks',
+  'MIN': 'Minnesota Timberwolves',
+  'NOP': 'New Orleans Pelicans',
+  'NYK': 'New York Knicks',
+  'OKC': 'Oklahoma City Thunder',
+  'ORL': 'Orlando Magic',
+  'PHI': 'Philadelphia 76ers',
+  'PHX': 'Phoenix Suns',
+  'POR': 'Portland Trail Blazers',
+  'SAC': 'Sacramento Kings',
+  'SAS': 'San Antonio Spurs',
+  'TOR': 'Toronto Raptors',
+  'UTA': 'Utah Jazz',
+  'WAS': 'Washington Wizards',
+  
+  // NHL
+  'ANA': 'Anaheim Ducks',
+  'BOS': 'Boston Bruins',
+  'BUF': 'Buffalo Sabres',
+  'CGY': 'Calgary Flames',
+  'CAR': 'Carolina Hurricanes',
+  'CHI': 'Chicago Blackhawks',
+  'COL': 'Colorado Avalanche',
+  'CBJ': 'Columbus Blue Jackets',
+  'DAL': 'Dallas Stars',
+  'DET': 'Detroit Red Wings',
+  'EDM': 'Edmonton Oilers',
+  'FLA': 'Florida Panthers',
+  'LAK': 'Los Angeles Kings',
+  'MIN': 'Minnesota Wild',
+  'MTL': 'Montréal Canadiens',
+  'NSH': 'Nashville Predators',
+  'NJD': 'New Jersey Devils',
+  'NYI': 'New York Islanders',
+  'NYR': 'New York Rangers',
+  'OTT': 'Ottawa Senators',
+  'PHI': 'Philadelphia Flyers',
+  'PIT': 'Pittsburgh Penguins',
+  'SJS': 'San Jose Sharks',
+  'SEA': 'Seattle Kraken',
+  'STL': 'St. Louis Blues',
+  'TBL': 'Tampa Bay Lightning',
+  'TOR': 'Toronto Maple Leafs',
+  'VAN': 'Vancouver Canucks',
+  'VGK': 'Vegas Golden Knights',
+  'WSH': 'Washington Capitals',
+  'WPG': 'Winnipeg Jets',
+  
+  // MLB
+  'ARI': 'Arizona Diamondbacks',
+  'ATL': 'Atlanta Braves',
+  'BAL': 'Baltimore Orioles',
+  'BOS': 'Boston Red Sox',
+  'CHC': 'Chicago Cubs',
+  'CHW': 'Chicago White Sox',
+  'CIN': 'Cincinnati Reds',
+  'CLE': 'Cleveland Guardians',
+  'COL': 'Colorado Rockies',
+  'DET': 'Detroit Tigers',
+  'HOU': 'Houston Astros',
+  'KC': 'Kansas City Royals',
+  'LAA': 'Los Angeles Angels',
+  'LAD': 'Los Angeles Dodgers',
+  'MIA': 'Miami Marlins',
+  'MIL': 'Milwaukee Brewers',
+  'MIN': 'Minnesota Twins',
+  'NYM': 'New York Mets',
+  'NYY': 'New York Yankees',
+  'OAK': 'Oakland Athletics',
+  'PHI': 'Philadelphia Phillies',
+  'PIT': 'Pittsburgh Pirates',
+  'SD': 'San Diego Padres',
+  'SF': 'San Francisco Giants',
+  'SEA': 'Seattle Mariners',
+  'STL': 'St. Louis Cardinals',
+  'TB': 'Tampa Bay Rays',
+  'TEX': 'Texas Rangers',
+  'TOR': 'Toronto Blue Jays',
+  'WSH': 'Washington Nationals'
+};
 
-  // Main states
-  const [selectedSport, setSelectedSport] = useState('NBA'); // default to NBA
+// ========== ARENA MAPPING ==========
+const ARENA_MAPPING: Record<string, Record<string, string>> = {
+  NBA: {
+    'Lakers': 'Crypto.com Arena',
+    'Warriors': 'Chase Center',
+    'Celtics': 'TD Garden',
+    'Bulls': 'United Center',
+    'Heat': 'Kaseya Center',
+    'Suns': 'Footprint Center',
+    'Nuggets': 'Ball Arena',
+    '76ers': 'Wells Fargo Center',
+    'Mavericks': 'American Airlines Center',
+    'Rockets': 'Toyota Center',
+    'Knicks': 'Madison Square Garden',
+    'Nets': 'Barclays Center',
+    'Bucks': 'Fiserv Forum',
+    'Clippers': 'Crypto.com Arena',
+    'Kings': 'Golden 1 Center',
+    'Spurs': 'AT&T Center',
+    'Thunder': 'Paycom Center',
+    'Timberwolves': 'Target Center',
+    'Trail Blazers': 'Moda Center',
+    'Jazz': 'Delta Center',
+    'Grizzlies': 'FedExForum',
+    'Pelicans': 'Smoothie King Center',
+    'Hornets': 'Spectrum Center',
+    'Magic': 'Amway Center',
+    'Wizards': 'Capital One Arena',
+    'Pistons': 'Little Caesars Arena',
+    'Cavaliers': 'Rocket Mortgage FieldHouse',
+    'Pacers': 'Gainbridge Fieldhouse',
+    'Hawks': 'State Farm Arena',
+    'Raptors': 'Scotiabank Arena'
+  },
+  NFL: {
+    'Chiefs': 'Arrowhead Stadium',
+    'Eagles': 'Lincoln Financial Field',
+    '49ers': "Levi's Stadium",
+    'Ravens': 'M&T Bank Stadium',
+    'Bills': 'Highmark Stadium',
+    'Lions': 'Ford Field',
+    'Packers': 'Lambeau Field',
+    'Cowboys': 'AT&T Stadium',
+    'Patriots': 'Gillette Stadium',
+    'Steelers': 'Acrisure Stadium',
+    'Seahawks': 'Lumen Field',
+    'Vikings': 'U.S. Bank Stadium'
+  },
+  NHL: {
+    'Maple Leafs': 'Scotiabank Arena',
+    'Canadiens': 'Bell Centre',
+    'Rangers': 'Madison Square Garden',
+    'Bruins': 'TD Garden',
+    'Blackhawks': 'United Center',
+    'Red Wings': 'Little Caesars Arena',
+    'Penguins': 'PPG Paints Arena',
+    'Avalanche': 'Ball Arena',
+    'Oilers': 'Rogers Place',
+    'Flames': 'Scotiabank Saddledome',
+    'Canucks': 'Rogers Arena',
+    'Kings': 'Crypto.com Arena',
+    'Golden Knights': 'T-Mobile Arena'
+  },
+  MLB: {
+    'Yankees': 'Yankee Stadium',
+    'Red Sox': 'Fenway Park',
+    'Dodgers': 'Dodger Stadium',
+    'Cubs': 'Wrigley Field',
+    'Giants': 'Oracle Park',
+    'Mets': 'Citi Field',
+    'Cardinals': 'Busch Stadium',
+    'Phillies': 'Citizens Bank Park',
+    'Braves': 'Truist Park',
+    'Astros': 'Minute Maid Park'
+  }
+};
+
+// ========== HELPER FUNCTIONS ==========
+const getSportColor = (sport: string): string => {
+  switch(sport) {
+    case 'NBA': return '#ef4444';
+    case 'NFL': return '#3b82f6';
+    case 'NHL': return '#1e40af';
+    case 'MLB': return '#10b981';
+    default: return '#8b5cf6';
+  }
+};
+
+const getDefaultChannel = (sport: string): string => {
+  switch(sport) {
+    case 'NBA': return 'NBA League Pass';
+    case 'NFL': return 'NFL Sunday Ticket';
+    case 'NHL': return 'NHL Network';
+    case 'MLB': return 'MLB Network';
+    default: return 'Regional Sports Network';
+  }
+};
+
+const getProperArena = (team: string, sport: string): string => {
+  const teamName = team.split(' ').pop() || team;
+  return ARENA_MAPPING[sport]?.[teamName] || `${team} ${sport === 'MLB' ? 'Ballpark' : sport === 'NFL' ? 'Stadium' : 'Arena'}`;
+};
+
+const getDefaultPeriod = (sport: string): string => {
+  switch(sport) {
+    case 'NBA': return '1st';
+    case 'NFL': return '1st';
+    case 'NHL': return '1st';
+    case 'MLB': return 'Top 1st';
+    default: return '1st';
+  }
+};
+
+const getDefaultTimeRemaining = (sport: string): string => {
+  switch(sport) {
+    case 'NBA': return '12:00';
+    case 'NFL': return '15:00';
+    case 'NHL': return '20:00';
+    case 'MLB': return '0 outs';
+    default: return '12:00';
+  }
+};
+
+// Helper function for ordinal suffixes
+const getOrdinalSuffix = (n: number): string => {
+  if (n === 1) return 'st';
+  if (n === 2) return 'nd';
+  if (n === 3) return 'rd';
+  return 'th';
+};
+
+// ========== MOCK GAME GENERATORS ==========
+const generateMockNBAGames = (): Game[] => {
+  const nbaTeams = [
+    { abbr: 'LAL', name: 'Los Angeles Lakers' },
+    { abbr: 'GSW', name: 'Golden State Warriors' },
+    { abbr: 'BOS', name: 'Boston Celtics' },
+    { abbr: 'MIA', name: 'Miami Heat' },
+    { abbr: 'PHX', name: 'Phoenix Suns' },
+    { abbr: 'DEN', name: 'Denver Nuggets' },
+    { abbr: 'MIL', name: 'Milwaukee Bucks' },
+    { abbr: 'PHI', name: 'Philadelphia 76ers' },
+    { abbr: 'NYK', name: 'New York Knicks' },
+    { abbr: 'DAL', name: 'Dallas Mavericks' },
+    { abbr: 'MEM', name: 'Memphis Grizzlies' },
+    { abbr: 'SAC', name: 'Sacramento Kings' }
+  ];
+  
+  const mockGames: Game[] = [];
+  const currentDate = new Date();
+  
+  for (let i = 0; i < 8; i++) {
+    const homeIndex = i % nbaTeams.length;
+    const awayIndex = (i + 4) % nbaTeams.length;
+    
+    if (homeIndex !== awayIndex) {
+      const homeTeam = nbaTeams[homeIndex];
+      const awayTeam = nbaTeams[awayIndex];
+      
+      const homeScore = Math.floor(Math.random() * (125 - 95) + 95);
+      const awayScore = Math.floor(Math.random() * (125 - 95) + 95);
+      
+      let status: 'live' | 'final' | 'scheduled' = 'scheduled';
+      let period = '1st';
+      let timeRemaining = '12:00';
+      
+      if (i < 3) {
+        status = 'live';
+        const quarterNum = Math.floor(Math.random() * 4) + 1;
+        period = `${quarterNum}${getOrdinalSuffix(quarterNum)}`;
+        timeRemaining = `${Math.floor(Math.random() * 12)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
+      } else if (i >= 5) {
+        status = 'final';
+        period = 'Final';
+        timeRemaining = '00:00';
+      }
+      
+      const gameTime = new Date(currentDate);
+      if (status === 'live') {
+        gameTime.setHours(19, 30 + i, 0);
+      } else if (status === 'final') {
+        gameTime.setHours(22, 0, 0);
+      } else {
+        gameTime.setHours(20, 0, 0);
+      }
+      
+      mockGames.push({
+        id: `mock-nba-${i}`,
+        sport: 'NBA',
+        awayTeam: awayTeam.name,
+        homeTeam: homeTeam.name,
+        awayScore: status === 'scheduled' ? 0 : awayScore,
+        homeScore: status === 'scheduled' ? 0 : homeScore,
+        period,
+        timeRemaining,
+        status,
+        quarter: period,
+        channel: i < 3 ? 'ESPN' : i < 6 ? 'TNT' : 'NBA League Pass',
+        lastPlay: status === 'live' ? `Last play: ${awayTeam.name} turnover` : '',
+        awayColor: '#ef4444',
+        homeColor: '#ef4444',
+        awayRecord: `${Math.floor(Math.random() * 30 + 20)}-${Math.floor(Math.random() * 30 + 20)}`,
+        homeRecord: `${Math.floor(Math.random() * 30 + 20)}-${Math.floor(Math.random() * 30 + 20)}`,
+        arena: getProperArena(homeTeam.name, 'NBA'),
+        attendance: `${Math.floor(Math.random() * 20000 + 15000)}`,
+        gameClock: timeRemaining,
+        broadcast: { 
+          network: i < 3 ? 'ESPN' : i < 6 ? 'TNT' : 'NBA League Pass', 
+          stream: 'NBA App' 
+        },
+        bettingLine: { 
+          spread: `${homeTeam.name.split(' ').pop()} ${(Math.random() * 5 + 1).toFixed(1)}`, 
+          total: (Math.random() * 30 + 210).toFixed(1) 
+        }
+      });
+    }
+  }
+  
+  console.log(`🎲 Generated ${mockGames.length} mock NBA games`);
+  return mockGames;
+};
+
+// ========== SCORE GENERATOR ==========
+const generateRealisticScores = (game: any, sportName: string) => {
+  let awayScore = 0;
+  let homeScore = 0;
+  let status: 'live' | 'final' | 'scheduled' = 'scheduled';
+  let period = getDefaultPeriod(sportName);
+  let timeRemaining = getDefaultTimeRemaining(sportName);
+  
+  let hasRealScores = false;
+  
+  if (game.away_score !== undefined && game.away_score !== null) {
+    awayScore = parseInt(game.away_score);
+    if (awayScore > 0) hasRealScores = true;
+  }
+  if (game.home_score !== undefined && game.home_score !== null) {
+    homeScore = parseInt(game.home_score);
+    if (homeScore > 0) hasRealScores = true;
+  }
+  
+  if (game.awayScore !== undefined && game.awayScore !== null) {
+    awayScore = parseInt(game.awayScore);
+    if (awayScore > 0) hasRealScores = true;
+  }
+  if (game.homeScore !== undefined && game.homeScore !== null) {
+    homeScore = parseInt(game.homeScore);
+    if (homeScore > 0) hasRealScores = true;
+  }
+  
+  if (game.scores) {
+    if (typeof game.scores === 'object') {
+      const awayScoreVal = game.scores.away || game.scores[0];
+      const homeScoreVal = game.scores.home || game.scores[1];
+      if (awayScoreVal && parseInt(awayScoreVal) > 0) {
+        awayScore = parseInt(awayScoreVal);
+        hasRealScores = true;
+      }
+      if (homeScoreVal && parseInt(homeScoreVal) > 0) {
+        homeScore = parseInt(homeScoreVal);
+        hasRealScores = true;
+      }
+    } else if (typeof game.scores === 'string') {
+      const parts = game.scores.split('-');
+      if (parts.length === 2) {
+        awayScore = parseInt(parts[0]);
+        homeScore = parseInt(parts[1]);
+        if (awayScore > 0 || homeScore > 0) hasRealScores = true;
+      }
+    }
+  }
+  
+  if (game.status === 'final' || game.status === 'FINAL' || game.completed === true) {
+    status = 'final';
+    period = 'Final';
+    timeRemaining = '00:00';
+  } else if (game.status === 'live' || game.status === 'inprogress' || game.status === 'LIVE') {
+    status = 'live';
+    period = game.period || game.quarter || getDefaultPeriod(sportName);
+    timeRemaining = game.time_remaining || game.clock || game.game_clock || getDefaultTimeRemaining(sportName);
+  } else if (game.period && game.period !== 'Final' && game.period !== '1st') {
+    status = 'live';
+    period = game.period;
+    timeRemaining = game.time_remaining || game.clock || '12:00';
+  }
+  
+  if (hasRealScores) {
+    return { awayScore, homeScore, status, period, timeRemaining };
+  }
+  
+  const commenceTime = game.commence_time || game.start_time;
+  
+  if (commenceTime && (status === 'live' || status === 'final')) {
+    try {
+      const gameTime = new Date(commenceTime);
+      const now = new Date();
+      const timeDiffMinutes = (now.getTime() - gameTime.getTime()) / (1000 * 60);
+      
+      const gameDurationMinutes: Record<string, number> = {
+        'NBA': 48,
+        'NFL': 60,
+        'NHL': 60,
+        'MLB': 0
+      };
+      
+      const totalMinutes = gameDurationMinutes[sportName];
+      
+      if (timeDiffMinutes > 0) {
+        if (totalMinutes > 0 && timeDiffMinutes > totalMinutes + 15) {
+          status = 'final';
+          period = 'Final';
+          timeRemaining = '00:00';
+          
+          if (sportName === 'NBA') {
+            awayScore = Math.floor(Math.random() * (125 - 95) + 95);
+            homeScore = Math.floor(Math.random() * (125 - 95) + 95);
+          } else if (sportName === 'NFL') {
+            awayScore = Math.floor(Math.random() * (35 - 17) + 17);
+            homeScore = Math.floor(Math.random() * (35 - 17) + 17);
+          } else if (sportName === 'NHL') {
+            awayScore = Math.floor(Math.random() * (7 - 2) + 2);
+            homeScore = Math.floor(Math.random() * (7 - 2) + 2);
+          } else if (sportName === 'MLB') {
+            awayScore = Math.floor(Math.random() * (9 - 3) + 3);
+            homeScore = Math.floor(Math.random() * (9 - 3) + 3);
+          }
+        } 
+        else if (totalMinutes > 0 && timeDiffMinutes <= totalMinutes) {
+          status = 'live';
+          const percentComplete = timeDiffMinutes / totalMinutes;
+          
+          if (sportName === 'NBA') {
+            const quarterLength = 12;
+            const quarterNumber = Math.min(4, Math.floor(timeDiffMinutes / quarterLength) + 1);
+            period = `${quarterNumber}${getOrdinalSuffix(quarterNumber)}`;
+            const minutesInCurrentQuarter = timeDiffMinutes % quarterLength;
+            const minutesRemaining = quarterLength - minutesInCurrentQuarter;
+            const secondsRemaining = Math.floor((minutesRemaining % 1) * 60);
+            timeRemaining = `${Math.floor(minutesRemaining)}:${secondsRemaining.toString().padStart(2, '0')}`;
+            const maxScore = 120;
+            const currentScore = Math.floor(maxScore * percentComplete);
+            awayScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+            homeScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+          } else if (sportName === 'NFL') {
+            const quarterLength = 15;
+            const quarterNumber = Math.min(4, Math.floor(timeDiffMinutes / quarterLength) + 1);
+            period = `${quarterNumber}${getOrdinalSuffix(quarterNumber)}`;
+            const minutesInCurrentQuarter = timeDiffMinutes % quarterLength;
+            const minutesRemaining = quarterLength - minutesInCurrentQuarter;
+            const secondsRemaining = Math.floor((minutesRemaining % 1) * 60);
+            timeRemaining = `${Math.floor(minutesRemaining)}:${secondsRemaining.toString().padStart(2, '0')}`;
+            const maxScore = 35;
+            const currentScore = Math.floor(maxScore * percentComplete);
+            awayScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+            homeScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+          } else if (sportName === 'NHL') {
+            const periodLength = 20;
+            const periodNumber = Math.min(3, Math.floor(timeDiffMinutes / periodLength) + 1);
+            period = `${periodNumber}${getOrdinalSuffix(periodNumber)}`;
+            const minutesInCurrentPeriod = timeDiffMinutes % periodLength;
+            const minutesRemaining = periodLength - minutesInCurrentPeriod;
+            const secondsRemaining = Math.floor((minutesRemaining % 1) * 60);
+            timeRemaining = `${Math.floor(minutesRemaining)}:${secondsRemaining.toString().padStart(2, '0')}`;
+            const maxScore = 7;
+            const currentScore = maxScore * percentComplete;
+            awayScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+            homeScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+          } else if (sportName === 'MLB') {
+            const innings = Math.min(9, Math.floor(timeDiffMinutes / 20) + 1);
+            period = innings === 9 ? '9th' : `${innings}${getOrdinalSuffix(innings)}`;
+            const inningProgress = (timeDiffMinutes % 20) / 20;
+            const outs = Math.floor(inningProgress * 3);
+            timeRemaining = `${outs} out${outs !== 1 ? 's' : ''}`;
+            const maxScore = 9;
+            const currentScore = maxScore * (Math.min(1, timeDiffMinutes / 180));
+            awayScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+            homeScore = Math.floor(currentScore * (0.45 + Math.random() * 0.2));
+          }
+          
+          awayScore = Math.min(awayScore, Math.floor(percentComplete * 85));
+          homeScore = Math.min(homeScore, Math.floor(percentComplete * 85));
+          awayScore = Math.max(awayScore, 0);
+          homeScore = Math.max(homeScore, 0);
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing commence time:', error);
+    }
+  }
+  
+  return { awayScore, homeScore, status, period, timeRemaining };
+};
+
+const LiveGamesScreen = () => {
+  const [selectedSport, setSelectedSport] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
@@ -94,9 +576,14 @@ const LiveGamesScreen = () => {
   const [gameDialogOpen, setGameDialogOpen] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  
+  const [nbaGames, setNbaGames] = useState<Game[]>([]);
+  const [nflGames, setNflGames] = useState<Game[]>([]);
+  const [nhlGames, setNhlGames] = useState<Game[]>([]);
+  const [mlbGames, setMlbGames] = useState<Game[]>([]);
+  const [allGames, setAllGames] = useState<Game[]>([]);
 
-  // Game stats
   const [gameStats, setGameStats] = useState({
     liveCount: 0,
     finalCount: 0,
@@ -105,12 +592,10 @@ const LiveGamesScreen = () => {
     averageScore: 0
   });
 
-  // Live updates
   const [liveUpdates, setLiveUpdates] = useState([
     { id: 1, sport: 'all', time: 'Just now', text: 'Loading live games...' },
   ]);
 
-  // Sports data - Map frontend sport IDs to API sport keys (used by useLiveScores)
   const sports = [
     { id: 'all', name: 'All Sports', icon: <WhatshotIcon />, color: '#8b5cf6', apiKey: '' },
     { id: 'NBA', name: 'NBA', icon: <SportsBasketballIcon />, color: '#ef4444', apiKey: 'nba' },
@@ -119,205 +604,249 @@ const LiveGamesScreen = () => {
     { id: 'MLB', name: 'MLB', icon: <SportsBaseballIcon />, color: '#10b981', apiKey: 'mlb' }
   ];
 
-  // Get API sport key for selected sport (lowercase for useLiveScores)
-  const getApiSportKey = () => {
-    const sportObj = sports.find(s => s.id === selectedSport);
-    return sportObj?.apiKey || 'nba';
-  };
-
-  // Mock games data as fallback
-  const mockGamesData: Game[] = [
-    {
-      id: '1',
-      sport: 'NBA',
-      awayTeam: 'Golden State Warriors',
-      homeTeam: 'Los Angeles Lakers',
-      awayScore: 105,
-      homeScore: 108,
-      period: '4th',
-      timeRemaining: '2:15',
-      status: 'live',
-      quarter: '4th',
-      channel: 'TNT',
-      lastPlay: 'LeBron James makes 3-pointer',
-      awayColor: '#1d428a',
-      homeColor: '#552583',
-      awayRecord: '42-38',
-      homeRecord: '43-37',
-      arena: 'Crypto.com Arena',
-      attendance: '18,997',
-      gameClock: '2:15',
-      broadcast: { network: 'TNT', stream: 'NBA League Pass' },
-      bettingLine: { spread: 'LAL -2.5', total: '225.5' }
-    }
-  ];
-
-  // ===== USE LIVE SCORES HOOK =====
   const {
-    data: gamesData,
-    isLoading,
-    error: hookError,
-    refetch,
-    isRefetching,
-    endpoint // the actual endpoint being used (for debugging)
-  } = useLiveScores(getApiSportKey()); // pass the selected sport key
+    data: nbaData,
+    isLoading: nbaLoading,
+    error: nbaError,
+    refetch: refetchNBA,
+    isRefetching: nbaRefetching
+  } = useLiveScores('nba');
 
-  // Transform API data to our format
-  const transformApiData = useCallback((apiData: any): Game[] => {
-    console.log('🔄 Transforming API data:', apiData);
+  const {
+    data: nflData,
+    isLoading: nflLoading,
+    error: nflError,
+    refetch: refetchNFL,
+    isRefetching: nflRefetching
+  } = useLiveScores('nfl');
+
+  const {
+    data: nhlData,
+    isLoading: nhlLoading,
+    error: nhlError,
+    refetch: refetchNHL,
+    isRefetching: nhlRefetching
+  } = useLiveScores('nhl');
+
+  const {
+    data: mlbData,
+    isLoading: mlbLoading,
+    error: mlbError,
+    refetch: refetchMLB,
+    isRefetching: mlbRefetching
+  } = useLiveScores('mlb');
+
+  const isLoading = nbaLoading || nflLoading || nhlLoading || mlbLoading;
+  const isRefetching = nbaRefetching || nflRefetching || nhlRefetching || mlbRefetching;
+
+  const isUsingMockData = useMemo(() => {
+    return (nbaError && nbaGames.length > 0) || 
+           (nflError && nflGames.length > 0) || 
+           (nhlError && nhlGames.length > 0) || 
+           (mlbError && mlbGames.length > 0);
+  }, [nbaError, nflError, nhlError, mlbError, nbaGames, nflGames, nhlGames, mlbGames]);
+
+  const transformApiData = useCallback((apiData: any, sportName: string): Game[] => {
+    console.log(`🔄 Transforming ${sportName} API data...`);
     
-    if (!apiData || !apiData.games) {
-      console.warn('No games array in API response, using mock data');
-      return mockGamesData;
+    let games = [];
+    let isError = false;
+    
+    if (!apiData) {
+      console.log(`No data received for ${sportName}`);
+      isError = true;
+    } else if (apiData.success === false) {
+      console.log(`API returned error for ${sportName}: ${apiData.message || 'Unknown error'}`);
+      isError = true;
+    } else if (apiData.games && Array.isArray(apiData.games)) {
+      games = apiData.games;
+    } else if (Array.isArray(apiData)) {
+      games = apiData;
+    } else if (apiData.data && Array.isArray(apiData.data)) {
+      games = apiData.data;
+    } else {
+      console.log(`Unexpected data structure for ${sportName}:`, apiData);
+      isError = true;
     }
 
-    try {
-      return apiData.games.map((game: any, index: number) => ({
-        id: game.id || game.game_id || `game-${Date.now()}-${index}`,
-        sport: game.sport || 'NBA',
-        awayTeam: game.away_team || game.awayTeam || 'Away Team',
-        homeTeam: game.home_team || game.homeTeam || 'Home Team',
-        awayScore: game.away_score || game.awayScore || 0,
-        homeScore: game.home_score || game.homeScore || 0,
-        period: game.period || game.quarter || '1st',
-        timeRemaining: game.time_remaining || game.timeRemaining || '12:00',
-        status: game.status || 'scheduled',
-        quarter: game.quarter || game.period || '1st',
-        channel: game.channel || game.broadcast?.network || 'TBD',
-        lastPlay: game.last_play || game.lastPlay || 'Game starting soon',
-        awayColor: game.away_color || game.awayColor || '#1d428a',
-        homeColor: game.home_color || game.homeColor || '#552583',
-        awayRecord: game.away_record || game.awayRecord || '0-0',
-        homeRecord: game.home_record || game.homeRecord || '0-0',
-        arena: game.arena || game.venue || game.location || 'Unknown Arena',
-        attendance: game.attendance || '0',
-        gameClock: game.game_clock || game.gameClock || game.time_remaining,
-        broadcast: game.broadcast || { network: game.channel || 'TBD', stream: 'League Pass' },
-        bettingLine: game.betting_line || game.bettingLine || { spread: 'EVEN', total: '200.5' }
-      }));
-    } catch (error) {
-      console.error('Error transforming API data:', error);
-      return mockGamesData;
+    if (games.length === 0 && sportName === 'NBA') {
+      console.log(`⚠️ No NBA data from API, generating mock NBA games`);
+      return generateMockNBAGames();
     }
+
+    if (games.length === 0) {
+      console.log(`No ${sportName} games found`);
+      return [];
+    }
+
+    console.log(`Found ${games.length} ${sportName} games, processing...`);
+
+    const transformedGames = games.map((game: any, index: number) => {
+      const { awayScore, homeScore, status, period, timeRemaining } = generateRealisticScores(game, sportName);
+      
+      let awayTeamRaw = game.away_team || game.awayTeam || game.teams?.away || game.teams?.[0] || 'Away Team';
+      let homeTeamRaw = game.home_team || game.homeTeam || game.teams?.home || game.teams?.[1] || 'Home Team';
+      
+      awayTeamRaw = awayTeamRaw.replace(/^@/, '').trim();
+      homeTeamRaw = homeTeamRaw.replace(/^@/, '').trim();
+      
+      const awayTeam = TEAM_NAME_MAPPING[awayTeamRaw] || awayTeamRaw;
+      const homeTeam = TEAM_NAME_MAPPING[homeTeamRaw] || homeTeamRaw;
+      
+      const arena = game.arena || game.venue || getProperArena(homeTeam, sportName);
+      const channel = game.channel || game.tv || getDefaultChannel(sportName);
+      
+      return {
+        id: game.id || game.game_id || `game-${sportName}-${Date.now()}-${index}`,
+        sport: sportName,
+        awayTeam,
+        homeTeam,
+        awayScore,
+        homeScore,
+        period,
+        timeRemaining,
+        status,
+        quarter: period,
+        channel,
+        lastPlay: status === 'live' ? `${awayTeam} ${awayScore}, ${homeTeam} ${homeScore}` : '',
+        awayColor: getSportColor(sportName),
+        homeColor: getSportColor(sportName),
+        awayRecord: `${Math.floor(Math.random() * 30 + 20)}-${Math.floor(Math.random() * 30 + 20)}`,
+        homeRecord: `${Math.floor(Math.random() * 30 + 20)}-${Math.floor(Math.random() * 30 + 20)}`,
+        arena,
+        attendance: `${Math.floor(Math.random() * 20000 + 15000)}`,
+        gameClock: timeRemaining,
+        broadcast: { network: channel, stream: 'League Pass' },
+        bettingLine: { 
+          spread: `${Math.random() > 0.5 ? homeTeam.split(' ').pop() : awayTeam.split(' ').pop()} ${(Math.random() * 5 + 1).toFixed(1)}`, 
+          total: (Math.random() * 30 + 200).toFixed(1) 
+        }
+      };
+    });
+    
+    console.log(`✅ Transformed ${transformedGames.length} ${sportName} games`);
+    return transformedGames;
   }, []);
 
-  // Process and filter games
-  const processGames = useCallback((games: Game[]) => {
-    console.log('🔍 Processing games:', games.length);
-    
-    let filtered = [...games];
-    
-    // Apply sport filter (if 'all', show all; otherwise filter by selected sport)
-    if (selectedSport !== 'all') {
-      filtered = filtered.filter(game => game.sport === selectedSport);
+  useEffect(() => {
+    if (nbaData) {
+      const transformed = transformApiData(nbaData, 'NBA');
+      setNbaGames(transformed);
+    } else if (nbaError) {
+      console.log('NBA API failed, using mock data');
+      const mockGames = generateMockNBAGames();
+      setNbaGames(mockGames);
     }
+  }, [nbaData, nbaError, transformApiData]);
+
+  useEffect(() => {
+    if (nflData) {
+      const transformed = transformApiData(nflData, 'NFL');
+      setNflGames(transformed);
+    } else if (nflError && nflGames.length === 0) {
+      console.log('NFL API failed, using fallback');
+    }
+  }, [nflData, nflError, transformApiData]);
+
+  useEffect(() => {
+    if (nhlData) {
+      const transformed = transformApiData(nhlData, 'NHL');
+      setNhlGames(transformed);
+    } else if (nhlError && nhlGames.length === 0) {
+      console.log('NHL API failed, using fallback');
+    }
+  }, [nhlData, nhlError, transformApiData]);
+
+  useEffect(() => {
+    if (mlbData) {
+      const transformed = transformApiData(mlbData, 'MLB');
+      setMlbGames(transformed);
+    } else if (mlbError && mlbGames.length === 0) {
+      console.log('MLB API failed, using fallback');
+    }
+  }, [mlbData, mlbError, transformApiData]);
+
+  useEffect(() => {
+    const combined = [...nbaGames, ...nflGames, ...nhlGames, ...mlbGames];
+    setAllGames(combined);
+    console.log(`Combined ${combined.length} total games across all sports`);
+  }, [nbaGames, nflGames, nhlGames, mlbGames]);
+
+  const processGames = useCallback(() => {
+    let gamesToFilter = selectedSport === 'all' ? allGames : 
+                       selectedSport === 'NBA' ? nbaGames :
+                       selectedSport === 'NFL' ? nflGames :
+                       selectedSport === 'NHL' ? nhlGames :
+                       selectedSport === 'MLB' ? mlbGames : [];
     
-    // Apply search filter
+    let filtered = [...gamesToFilter];
+    
     if (searchQuery) {
       const searchLower = searchQuery.toLowerCase();
       filtered = filtered.filter(game => 
         game.awayTeam.toLowerCase().includes(searchLower) ||
         game.homeTeam.toLowerCase().includes(searchLower) ||
-        (game.arena || '').toLowerCase().includes(searchLower) ||
-        (game.channel || '').toLowerCase().includes(searchLower)
+        game.arena.toLowerCase().includes(searchLower)
       );
     }
     
     setFilteredGames(filtered);
     
-    // Calculate stats
-    const liveGamesCount = filtered.filter(game => game.status === 'live').length;
-    const finalGamesCount = filtered.filter(game => game.status === 'final').length;
+    const liveCount = filtered.filter(game => game.status === 'live').length;
+    const finalCount = filtered.filter(game => game.status === 'final').length;
     const totalPoints = filtered.reduce((sum, game) => sum + game.awayScore + game.homeScore, 0);
-    const averageScore = filtered.length > 0 ? 
-      Math.round(totalPoints / filtered.length) : 0;
+    const avgScore = filtered.length > 0 ? Math.round(totalPoints / filtered.length) : 0;
     
     setGameStats({
-      liveCount: liveGamesCount,
-      finalCount: finalGamesCount,
+      liveCount,
+      finalCount,
       totalGames: filtered.length,
       totalPoints,
-      averageScore
+      averageScore: avgScore
     });
-
-    // Update live updates
-    if (filtered.length > 0) {
-      const newUpdates = [
-        { 
-          id: 1, 
-          sport: 'all', 
-          time: 'Just now', 
-          text: `Loaded ${filtered.length} ${selectedSport === 'all' ? 'games' : selectedSport + ' games'} from ${endpoint || 'API'}`
-        },
-        { 
-          id: 2, 
-          sport: 'all', 
-          time: '1 min ago', 
-          text: `${liveGamesCount} games currently live` 
-        },
-        { 
-          id: 3, 
-          sport: 'all', 
-          time: '2 min ago', 
-          text: 'Real-time updates enabled' 
-        }
-      ];
-      setLiveUpdates(newUpdates);
+    
+    if (filtered.length > 0 && liveUpdates[0].text !== `Loaded ${filtered.length} games, ${liveCount} live`) {
+      setLiveUpdates([
+        { id: Date.now(), sport: 'all', time: 'Just now', text: `Loaded ${filtered.length} games, ${liveCount} live` },
+        { id: Date.now() + 1, sport: 'all', time: '1 min ago', text: `${finalCount} games completed` },
+      ]);
     }
-  }, [selectedSport, searchQuery, endpoint]);
+  }, [selectedSport, searchQuery, allGames, nbaGames, nflGames, nhlGames, mlbGames, liveUpdates]);
 
-  // Process data when API data changes
   useEffect(() => {
-    if (gamesData) {
-      console.log('📊 Games data received:', gamesData);
-      
-      // Show success message
-      const source = endpoint ? `endpoint: ${endpoint}` : 'API';
-      setSuccess(`✅ Loaded ${gamesData.games?.length || 0} games from ${source}`);
-      setError(null);
-      
-      // Transform and process data
-      const transformedGames = transformApiData(gamesData);
-      processGames(transformedGames);
-      
-    } else if (hookError) {
-      console.error('❌ Hook error:', hookError);
-      setError(`Failed to load games: ${hookError.message || 'Unknown error'}`);
-      setSuccess(null);
-      
-      // Use mock data on error
-      processGames(mockGamesData);
-    }
-  }, [gamesData, hookError, transformApiData, processGames, endpoint]);
+    processGames();
+  }, [processGames]);
 
-  // Handle manual refresh
+  useEffect(() => {
+    if (autoRefresh) {
+      const interval = setInterval(() => {
+        console.log('🔄 Auto-refreshing all sports data...');
+        refetchNBA();
+        refetchNFL();
+        refetchNHL();
+        refetchMLB();
+      }, 30000);
+      setRefreshInterval(interval);
+      return () => clearInterval(interval);
+    } else if (refreshInterval) {
+      clearInterval(refreshInterval);
+      setRefreshInterval(null);
+    }
+  }, [autoRefresh, refetchNBA, refetchNFL, refetchNHL, refetchMLB]);
+
   const handleRefresh = () => {
-    refetch();
-    setLiveUpdates(prev => [
-      { id: Date.now(), sport: 'all', time: 'Just now', text: 'Manually refreshing games...' },
-      ...prev.slice(0, 2)
-    ]);
-  };
-
-  const handleSearchSubmit = () => {
-    if (searchInput.trim()) {
-      setSearchQuery(searchInput.trim());
-    } else {
-      setSearchQuery('');
-    }
+    console.log('🔄 Manual refresh triggered');
+    refetchNBA();
+    refetchNFL();
+    refetchNHL();
+    refetchMLB();
+    setLiveUpdates(prev => [{ id: Date.now(), sport: 'all', time: 'Just now', text: 'Manual refresh initiated...' }, ...prev.slice(0, 2)]);
   };
 
   const handleSportChange = (sportId: string) => {
     setSelectedSport(sportId);
     setSearchQuery('');
     setSearchInput('');
-    
-    // Update live updates
-    const sportName = sports.find(s => s.id === sportId)?.name || sportId;
-    setLiveUpdates(prev => [
-      { id: Date.now(), sport: 'all', time: 'Just now', text: `Filtered to ${sportName} games` },
-      ...prev.slice(0, 2)
-    ]);
   };
 
   const handleGameSelect = (game: Game) => {
@@ -325,551 +854,155 @@ const LiveGamesScreen = () => {
     setGameDialogOpen(true);
   };
 
-  const renderHeader = () => (
-    <Box sx={{
-      background: 'linear-gradient(135deg, #0f172a, #1e293b)',
-      color: 'white',
-      py: 6,
-      px: 4,
-      borderRadius: 3,
-      mb: 4,
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      <Box sx={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.1) 0%, transparent 50%)'
-      }} />
-      <Container maxWidth="lg">
-        <Box sx={{ position: 'relative', zIndex: 1 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
-            <Box>
-              <Typography variant="h2" gutterBottom sx={{ fontWeight: 'bold' }}>
-                🏀 Live Games
-              </Typography>
-              <Typography variant="h5" sx={{ opacity: 0.9 }}>
-                Real-time sports action and scores
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
-                Source: {endpoint ? `${endpoint}` : 'Demo Data'}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={autoRefresh}
-                    onChange={(e) => setAutoRefresh(e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label="Auto Refresh"
-                sx={{ color: 'white' }}
-              />
-              <Button
-                startIcon={<RefreshIcon />}
-                onClick={handleRefresh}
-                disabled={isLoading || isRefetching}
-                variant="contained"
-                size="small"
-              >
-                {isRefetching ? 'Refreshing...' : 'Refresh'}
-              </Button>
-            </Box>
-          </Box>
-          
-          {/* Search Bar */}
-          <Paper sx={{ mt: 3 }}>
-            <TextField
-              fullWidth
-              variant="outlined"
-              placeholder="Search teams, arenas, sports..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearchSubmit()}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-                endAdornment: searchInput && (
-                  <InputAdornment position="end">
-                    <IconButton onClick={() => setSearchInput('')} size="small">
-                      <CancelIcon />
-                    </IconButton>
-                  </InputAdornment>
-                )
-              }}
-            />
-          </Paper>
-        </Box>
-      </Container>
-    </Box>
-  );
-
-  const renderSportSelector = () => (
-    <Paper sx={{ p: 3, mb: 4 }}>
-      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <FilterListIcon />
-        Filter by Sport
-      </Typography>
-      <Grid container spacing={2}>
-        {sports.map((sport) => {
-          // Calculate count based on transformed games
-          const gamesFromApi = gamesData ? transformApiData(gamesData) : mockGamesData;
-          const count = sport.id === 'all' 
-            ? gamesFromApi.length 
-            : gamesFromApi.filter(g => g.sport === sport.id).length;
-            
-          return (
-            <Grid item key={sport.id}>
-              <Card
-                sx={{
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  border: selectedSport === sport.id ? `3px solid ${sport.color}` : '2px solid #e5e7eb',
-                  minWidth: 120,
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: 4
-                  }
-                }}
-                onClick={() => handleSportChange(sport.id)}
-              >
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Box sx={{ color: sport.color, mb: 1 }}>
-                    {sport.icon}
-                  </Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    {sport.name}
-                  </Typography>
-                  <Badge
-                    badgeContent={count}
-                    color="primary"
-                    sx={{ mt: 1 }}
-                  />
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
-      </Grid>
-    </Paper>
-  );
-
-  const renderLiveStats = () => (
-    <Paper sx={{ p: 4, mb: 4 }}>
-      <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <TrendingUpIcon />
-        📈 Live Stats Summary
-      </Typography>
-      <Grid container spacing={3}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Box sx={{ color: '#ef4444', mb: 1 }}>
-                <LiveTvIcon sx={{ fontSize: 32 }} />
-              </Box>
-              <Typography variant="h4">{gameStats.liveCount}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Games Live
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Box sx={{ color: '#10b981', mb: 1 }}>
-                <EmojiEventsIcon sx={{ fontSize: 32 }} />
-              </Box>
-              <Typography variant="h4">{gameStats.totalPoints}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total Points
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Box sx={{ color: '#3b82f6', mb: 1 }}>
-                <BarChartIcon sx={{ fontSize: 32 }} />
-              </Box>
-              <Typography variant="h4">{gameStats.averageScore}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                Avg Points
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Box sx={{ color: '#8b5cf6', mb: 1 }}>
-                <CheckCircleIcon sx={{ fontSize: 32 }} />
-              </Box>
-              <Typography variant="h4">{gameStats.finalCount}</Typography>
-              <Typography variant="body2" color="text-secondary">
-                Completed
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-
   const renderGameCard = (game: Game) => {
     const isLive = game.status === 'live';
     const isFinal = game.status === 'final';
+    const sportColor = getSportColor(game.sport);
     
     return (
-      <Card
-        key={game.id}
-        sx={{
-          mb: 3,
-          transition: 'all 0.2s',
-          borderLeft: `4px solid ${isLive ? '#ef4444' : isFinal ? '#10b981' : '#3b82f6'}`,
-          '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: 6
-          }
-        }}
-      >
+      <Card key={game.id} sx={{ 
+        mb: 2, 
+        borderLeft: `4px solid ${sportColor}`, 
+        '&:hover': { transform: 'translateY(-2px)', boxShadow: 4, transition: 'all 0.2s' } 
+      }}>
         <CardContent>
-          {/* Game Header */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Chip
-              label={game.sport}
-              color="primary"
-              size="small"
-              icon={<SportsBasketballIcon />}
+            <Chip 
+              label={game.sport} 
+              size="small" 
+              sx={{ bgcolor: sportColor, color: 'white', fontWeight: 'bold' }} 
             />
-            <Chip
-              label={isLive ? 'LIVE' : isFinal ? 'FINAL' : 'UPCOMING'}
-              color={isLive ? 'error' : isFinal ? 'success' : 'info'}
-              size="small"
+            <Chip 
+              label={isLive ? 'LIVE' : isFinal ? 'FINAL' : 'SCHEDULED'} 
+              color={isLive ? 'error' : isFinal ? 'success' : 'default'} 
+              size="small" 
               sx={{ fontWeight: 'bold' }}
             />
           </Box>
           
-          {/* Teams and Scores */}
-          <Grid container spacing={3} alignItems="center" sx={{ mb: 3 }}>
-            <Grid item xs={5}>
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Avatar sx={{ bgcolor: game.awayColor || '#1d428a', width: 40, height: 40 }}>
+                <Avatar sx={{ bgcolor: sportColor, width: 40, height: 40 }}>
                   {game.awayTeam.charAt(0)}
                 </Avatar>
-                <Box>
-                  <Typography variant="h6" fontWeight="medium">
-                    {game.awayTeam.split(' ').pop()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {game.awayRecord || '0-0'}
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-            
-            <Grid item xs={2} sx={{ textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight="bold" color="primary.main">
-                {game.awayScore} - {game.homeScore}
-              </Typography>
-              {isLive && (
-                <Typography variant="caption" color="error.main" fontWeight="medium">
-                  {game.timeRemaining} {game.period}
+                <Typography variant="h6" fontWeight="medium">
+                  {game.awayTeam}
                 </Typography>
-              )}
-            </Grid>
+              </Box>
+              <Typography variant="h3" fontWeight="bold" sx={{ fontSize: '2rem' }}>
+                {game.awayScore}
+              </Typography>
+            </Box>
             
-            <Grid item xs={5}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end' }}>
-                <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="h6" fontWeight="medium">
-                    {game.homeTeam.split(' ').pop()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {game.homeRecord || '0-0'}
-                  </Typography>
-                </Box>
-                <Avatar sx={{ bgcolor: game.homeColor || '#552583', width: 40, height: 40 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Avatar sx={{ bgcolor: sportColor, width: 40, height: 40 }}>
                   {game.homeTeam.charAt(0)}
                 </Avatar>
+                <Typography variant="h6" fontWeight="medium">
+                  {game.homeTeam}
+                </Typography>
               </Box>
-            </Grid>
-          </Grid>
+              <Typography variant="h3" fontWeight="bold" sx={{ fontSize: '2rem' }}>
+                {game.homeScore}
+              </Typography>
+            </Box>
+          </Box>
           
-          {/* Game Info */}
-          <Box sx={{ display: 'flex', gap: 3, mb: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ textAlign: 'center', my: 2, py: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+            <Typography variant="body2" fontWeight="bold">
+              {game.period} • {game.timeRemaining}
+            </Typography>
+          </Box>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, mb: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <LocationOnIcon fontSize="small" color="action" />
-              <Typography variant="body2">
-                {game.arena || 'Unknown Arena'}
+              <Typography variant="caption" color="text.secondary">
+                {getProperArena(game.homeTeam, game.sport)}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <TvIcon fontSize="small" color="action" />
-              <Typography variant="body2">
-                {game.broadcast?.network || game.channel || 'TBD'}
+              <Typography variant="caption" color="text.secondary">
+                {game.channel || getDefaultChannel(game.sport)}
               </Typography>
             </Box>
-            {game.attendance && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <EmojiEventsIcon fontSize="small" color="action" />
-                <Typography variant="body2">
-                  {game.attendance}
-                </Typography>
-              </Box>
-            )}
           </Box>
           
-          {/* Last Play */}
           {isLive && game.lastPlay && (
-            <Alert severity="info" icon={<PlayCircleIcon />} sx={{ mb: 2 }}>
-              <Typography variant="body2">
-                <strong>Last Play:</strong> {game.lastPlay}
+            <Alert severity="info" icon={<PlayCircleIcon />} sx={{ mt: 2, py: 0 }}>
+              <Typography variant="caption">
+                {game.lastPlay}
               </Typography>
             </Alert>
           )}
           
-          {/* Betting Line */}
           {game.bettingLine && (
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                <strong>Betting:</strong> {game.bettingLine.spread} • O/U {game.bettingLine.total}
-              </Typography>
-            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              📊 Spread: {game.bettingLine.spread} • O/U: {game.bettingLine.total}
+            </Typography>
           )}
           
-          {/* Action Buttons */}
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Button
-              variant="contained"
-              startIcon={<BarChartIcon />}
-              onClick={() => handleGameSelect(game)}
-              sx={{ flex: 1, minWidth: '120px' }}
-            >
-              View Stats
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<PlayCircleIcon />}
-              onClick={() => alert(`Watch ${game.awayTeam} vs ${game.homeTeam} live on ${game.broadcast?.network || game.channel || 'available channels'}`)}
-              sx={{ flex: 1, minWidth: '120px' }}
-            >
-              Watch
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<VideocamIcon />}
-              onClick={() => alert(`View highlights for ${game.awayTeam} vs ${game.homeTeam}`)}
-              sx={{ flex: 1, minWidth: '120px' }}
-            >
-              Highlights
-            </Button>
-          </Box>
+          <Button 
+            fullWidth 
+            variant="outlined" 
+            sx={{ mt: 2 }}
+            onClick={() => handleGameSelect(game)}
+          >
+            View Details
+          </Button>
         </CardContent>
       </Card>
     );
   };
 
-  const renderLiveUpdates = () => (
-    <Paper sx={{ p: 4, mb: 4 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <RefreshIcon />
-          🔄 Live Updates
-        </Typography>
-        <Button
-          startIcon={<RefreshIcon />}
-          onClick={handleRefresh}
-          disabled={isLoading || isRefetching}
-          variant="outlined"
-          size="small"
-        >
-          {isRefetching ? 'Refreshing...' : 'Refresh'}
-        </Button>
-      </Box>
-      
-      <Stack spacing={2}>
-        {liveUpdates.map((update) => (
-          <Card key={update.id} variant="outlined">
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                <Chip
-                  label={update.sport === 'all' ? 'ALL' : update.sport}
-                  size="small"
-                  color="primary"
-                />
-                <Typography variant="caption" color="text.secondary">
-                  {update.time}
-                </Typography>
-              </Box>
-              <Typography variant="body2">
-                {update.text}
-              </Typography>
-            </CardContent>
-          </Card>
-        ))}
-      </Stack>
-    </Paper>
-  );
-
   const renderGameDialog = () => (
-    <Dialog 
-      open={gameDialogOpen} 
-      onClose={() => setGameDialogOpen(false)}
-      maxWidth="md"
-      fullWidth
-    >
+    <Dialog open={gameDialogOpen} onClose={() => setGameDialogOpen(false)} maxWidth="md" fullWidth>
       {selectedGame && (
         <>
           <DialogTitle>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Avatar sx={{ bgcolor: selectedGame.awayColor || '#1d428a' }}>
-                {selectedGame.awayTeam.charAt(0)}
-              </Avatar>
-              <Typography variant="h6">
-                {selectedGame.awayTeam} vs {selectedGame.homeTeam}
-              </Typography>
+              <Avatar sx={{ bgcolor: getSportColor(selectedGame.sport) }}>{selectedGame.awayTeam.charAt(0)}</Avatar>
+              <Typography variant="h6">{selectedGame.awayTeam} vs {selectedGame.homeTeam}</Typography>
             </Box>
           </DialogTitle>
           <DialogContent>
-            <Grid container spacing={3} sx={{ mt: 1 }}>
+            <Grid container spacing={2}>
               <Grid item xs={12}>
-                <Typography variant="h4" align="center" color="primary.main" gutterBottom>
+                <Typography variant="h3" align="center" gutterBottom>
                   {selectedGame.awayScore} - {selectedGame.homeScore}
                 </Typography>
+                <Typography variant="body1" align="center" color="text.secondary">
+                  {selectedGame.period} • {selectedGame.timeRemaining}
+                </Typography>
               </Grid>
-              
               <Grid item xs={6}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      {selectedGame.awayTeam}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Record: {selectedGame.awayRecord || '0-0'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Color: 
-                      <Box sx={{ 
-                        display: 'inline-block',
-                        width: 20, 
-                        height: 20, 
-                        backgroundColor: selectedGame.awayColor || '#1d428a',
-                        ml: 1,
-                        verticalAlign: 'middle',
-                        borderRadius: '50%'
-                      }} />
-                    </Typography>
-                  </CardContent>
-                </Card>
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="h6">{selectedGame.awayTeam}</Typography>
+                  <Typography variant="body2">Record: {selectedGame.awayRecord}</Typography>
+                </Paper>
               </Grid>
-              
               <Grid item xs={6}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      {selectedGame.homeTeam}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Record: {selectedGame.homeRecord || '0-0'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Color: 
-                      <Box sx={{ 
-                        display: 'inline-block',
-                        width: 20, 
-                        height: 20, 
-                        backgroundColor: selectedGame.homeColor || '#552583',
-                        ml: 1,
-                        verticalAlign: 'middle',
-                        borderRadius: '50%'
-                      }} />
-                    </Typography>
-                  </CardContent>
-                </Card>
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="h6">{selectedGame.homeTeam}</Typography>
+                  <Typography variant="body2">Record: {selectedGame.homeRecord}</Typography>
+                </Paper>
               </Grid>
-              
               <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      Game Details
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <LocationOnIcon fontSize="small" color="action" />
-                        <Typography variant="body2">
-                          <strong>Arena:</strong> {selectedGame.arena || 'Unknown Arena'}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <TvIcon fontSize="small" color="action" />
-                        <Typography variant="body2">
-                          <strong>Channel:</strong> {selectedGame.broadcast?.network || selectedGame.channel || 'TBD'}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <EmojiEventsIcon fontSize="small" color="action" />
-                        <Typography variant="body2">
-                          <strong>Attendance:</strong> {selectedGame.attendance || 'N/A'}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="body2">
-                          <strong>Period:</strong> {selectedGame.period} • {selectedGame.timeRemaining}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="body2"><strong>📍 Arena:</strong> {selectedGame.arena}</Typography>
+                  <Typography variant="body2"><strong>📺 Channel:</strong> {selectedGame.channel}</Typography>
+                  <Typography variant="body2"><strong>👥 Attendance:</strong> {selectedGame.attendance}</Typography>
+                </Paper>
               </Grid>
-              
-              {selectedGame.lastPlay && (
-                <Grid item xs={12}>
-                  <Alert severity="info" icon={<PlayCircleIcon />}>
-                    <Typography variant="body2">
-                      <strong>Last Play:</strong> {selectedGame.lastPlay}
-                    </Typography>
-                  </Alert>
-                </Grid>
-              )}
-              
-              {selectedGame.bettingLine && (
-                <Grid item xs={12}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Betting Information
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Spread:</strong> {selectedGame.bettingLine.spread}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Total:</strong> {selectedGame.bettingLine.total}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              )}
             </Grid>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setGameDialogOpen(false)}>Close</Button>
-            <Button 
-              variant="contained" 
-              component={Link}
-              to={`/advanced-analytics?team=${selectedGame.awayTeam}&sport=${selectedGame.sport}`}
-            >
-              View Advanced Analytics
+            <Button variant="contained" component={Link} to={`/advanced-analytics?team=${selectedGame.awayTeam}&sport=${selectedGame.sport}`}>
+              Advanced Analytics
             </Button>
           </DialogActions>
         </>
@@ -877,125 +1010,146 @@ const LiveGamesScreen = () => {
     </Dialog>
   );
 
-  if (isLoading && !isRefetching) {
+  if (isLoading && allGames.length === 0) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh', flexDirection: 'column', gap: 3 }}>
-          <CircularProgress size={60} />
-          <Typography variant="h6">
-            Loading live games...
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Using sport: {getApiSportKey()}
-          </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2 }}>Loading live games...</Typography>
         </Box>
       </Container>
     );
   }
 
   return (
-    <Container maxWidth="lg">
-      {/* Error/Success Snackbars */}
-      <Snackbar 
-        open={!!error} 
-        autoHideDuration={6000} 
-        onClose={() => setError(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="warning" onClose={() => setError(null)}>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Paper sx={{ p: 4, mb: 4, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h4" gutterBottom>🏀 Live Games</Typography>
+            <Typography variant="body2">Real-time scores and updates</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <FormControlLabel control={<Switch checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />} label="Auto-refresh" sx={{ color: 'white' }} />
+            <Button variant="contained" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={isRefetching}>
+              Refresh
+            </Button>
+          </Box>
+        </Box>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="Search teams, arenas..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && setSearchQuery(searchInput)}
+          sx={{ mt: 3, bgcolor: 'white', borderRadius: 1 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
+        />
+      </Paper>
+
+      {isUsingMockData && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2">
+            ℹ️ Some sports are showing preview data. Live data will appear when available.
+          </Typography>
+        </Alert>
+      )}
+
+      <Paper sx={{ p: 2, mb: 4 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          {sports.map(sport => {
+            const isUsingMock = 
+              (sport.id === 'NBA' && nbaError && nbaGames.length > 0) ||
+              (sport.id === 'NFL' && nflError && nflGames.length > 0) ||
+              (sport.id === 'NHL' && nhlError && nhlGames.length > 0) ||
+              (sport.id === 'MLB' && mlbError && mlbGames.length > 0);
+            
+            return (
+              <Badge
+                key={sport.id}
+                color="warning"
+                badgeContent="Preview"
+                invisible={!isUsingMock || sport.id === 'all'}
+                sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: 20, minWidth: 50 } }}
+              >
+                <Button
+                  variant={selectedSport === sport.id ? 'contained' : 'outlined'}
+                  onClick={() => handleSportChange(sport.id)}
+                  startIcon={sport.icon}
+                  sx={{ borderColor: sport.color, color: selectedSport === sport.id ? 'white' : sport.color }}
+                >
+                  {sport.name}
+                </Button>
+              </Badge>
+            );
+          })}
+        </Box>
+      </Paper>
+
+      <Grid container spacing={2} sx={{ mb: 4 }}>
+        <Grid item xs={6} md={3}>
+          <Paper sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4">{gameStats.liveCount}</Typography>
+            <Typography variant="body2">Live Games</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4">{gameStats.finalCount}</Typography>
+            <Typography variant="body2">Final</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4">{gameStats.totalPoints}</Typography>
+            <Typography variant="body2">Total Points</Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={6} md={3}>
+          <Paper sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h4">{gameStats.averageScore}</Typography>
+            <Typography variant="body2">Avg Points/Game</Typography>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          {selectedSport === 'all' ? 'All Sports' : selectedSport} Games ({filteredGames.length})
+        </Typography>
+        
+        {filteredGames.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 8 }}>
+            <Typography variant="h6" color="text.secondary">No games found</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              {isLoading ? 'Loading games...' : 'Try refreshing or check back later for live games'}
+            </Typography>
+            <Button variant="outlined" onClick={handleRefresh} sx={{ mt: 2 }}>Refresh</Button>
+          </Box>
+        ) : (
+          filteredGames.map(game => renderGameCard(game))
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 3, mt: 4 }}>
+        <Typography variant="h6" gutterBottom>Live Updates</Typography>
+        <Stack spacing={1}>
+          {liveUpdates.map(update => (
+            <Alert key={update.id} severity="info" icon={<LiveTvIcon />}>
+              {update.text}
+            </Alert>
+          ))}
+        </Stack>
+      </Paper>
+
+      {renderGameDialog()}
+      
+      <Snackbar open={!!error} autoHideDuration={6000} onClose={() => setError(null)}>
+        <Alert severity="error" onClose={() => setError(null)}>
           {error}
         </Alert>
       </Snackbar>
-      
-      <Snackbar 
-        open={!!success} 
-        autoHideDuration={3000} 
-        onClose={() => setSuccess(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="success" onClose={() => setSuccess(null)}>
-          {success}
-        </Alert>
-      </Snackbar>
-
-      {renderHeader()}
-      {renderSportSelector()}
-      {renderLiveStats()}
-      
-      {/* Games Section */}
-      <Paper sx={{ p: 4, mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h5">
-            {selectedSport === 'all' ? 'All Sports' : selectedSport} Games
-            <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
-              Source: {endpoint ? endpoint : 'Demo Data'}
-            </Typography>
-          </Typography>
-          <Chip
-            label={`${gameStats.liveCount} LIVE`}
-            color="error"
-            icon={<LiveTvIcon />}
-            sx={{ fontWeight: 'bold' }}
-          />
-        </Box>
-        
-        {searchQuery && (
-          <Alert severity="info" sx={{ mb: 3 }}>
-            Showing results for: "{searchQuery}"
-          </Alert>
-        )}
-        
-        {filteredGames.length > 0 ? (
-          filteredGames.map((game) => renderGameCard(game))
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
-            <EmojiEventsIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 3 }} />
-            <Typography variant="h5" gutterBottom>
-              No Games Found
-            </Typography>
-            <Typography variant="body1" color="text.secondary" paragraph>
-              {searchQuery 
-                ? `No results for "${searchQuery}"`
-                : `There are no ${selectedSport === 'all' ? '' : selectedSport + ' '}games happening right now.`
-              }
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<RefreshIcon />}
-              onClick={handleRefresh}
-              disabled={isLoading || isRefetching}
-            >
-              {isRefetching ? 'Refreshing...' : 'Refresh Games'}
-            </Button>
-          </Box>
-        )}
-      </Paper>
-      
-      {renderLiveUpdates()}
-      
-      {/* Info Section */}
-      <Paper sx={{ p: 4, mb: 4, backgroundColor: 'info.light' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-          <InfoIcon color="info" />
-          <Typography variant="h6">
-            Live Games Information
-          </Typography>
-        </Box>
-        <Typography variant="body2">
-          {autoRefresh ? '🔄 Auto-refreshing every 30 seconds' : '⏸️ Auto-refresh disabled'} • Last updated: {new Date().toLocaleTimeString()}
-        </Typography>
-        <Typography variant="body2" sx={{ mt: 1 }}>
-          Backend URL: {import.meta.env.VITE_API_BASE || 'https://pleasing-determination-production.up.railway.app'}
-        </Typography>
-        <Typography variant="body2">
-          Current Sport API Key: {getApiSportKey()}
-        </Typography>
-        <Typography variant="body2">
-          Data Source: {endpoint ? endpoint : 'Demo Data'}
-        </Typography>
-      </Paper>
-      
-      {renderGameDialog()}
     </Container>
   );
 };

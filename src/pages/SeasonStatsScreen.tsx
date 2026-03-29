@@ -1,5 +1,5 @@
 // pages/SeasonStatsScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -39,8 +39,6 @@ import {
   InputLabel,
   ToggleButton,
   ToggleButtonGroup,
-  Slider,
-  Badge,
   Fade,
   Zoom
 } from '@mui/material';
@@ -51,52 +49,142 @@ import {
   SportsHockey,
   TrendingUp,
   TrendingDown,
-  Info,
-  Flag,
-  Star,
   Assessment,
-  ArrowForward,
-  ArrowDropDown,
   ArrowDropUp,
   Whatshot,
-  ShowChart,
   BarChart,
-  PieChart,
   Timeline,
-  CompareArrows,
-  Psychology,
-  Savings,
-  Warning,
-  CheckCircle,
-  Search,
-  FilterList,
-  Download,
-  Share,
-  Print,
   Person,
   Groups,
   EmojiEvents,
   MilitaryTech,
   Leaderboard,
   TableChart,
-  ScatterPlot,
-  BubbleChart,
   Analytics,
   Functions,
   FormatListNumbered,
   SortByAlpha,
   Downloading,
   CleaningServices,
-  Refresh
+  Refresh,
+  Search,
+  FilterList,
+  Download,
+  CheckCircle
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // =============================================
-// CONSTANTS – same as PlayerStatsScreen
+// CONSTANTS
 // =============================================
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
 const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+
+// =============================================
+// TEAM NAME → ABBREVIATION MAPPINGS (for transformation)
+// =============================================
+const NBA_TEAM_MAP: Record<string, string> = {
+  'Atlanta Hawks': 'ATL',
+  'Boston Celtics': 'BOS',
+  'Brooklyn Nets': 'BKN',
+  'Charlotte Hornets': 'CHA',
+  'Chicago Bulls': 'CHI',
+  'Cleveland Cavaliers': 'CLE',
+  'Dallas Mavericks': 'DAL',
+  'Denver Nuggets': 'DEN',
+  'Detroit Pistons': 'DET',
+  'Golden State Warriors': 'GSW',
+  'Houston Rockets': 'HOU',
+  'Indiana Pacers': 'IND',
+  'LA Clippers': 'LAC',
+  'Los Angeles Lakers': 'LAL',
+  'Memphis Grizzlies': 'MEM',
+  'Miami Heat': 'MIA',
+  'Milwaukee Bucks': 'MIL',
+  'Minnesota Timberwolves': 'MIN',
+  'New Orleans Pelicans': 'NOP',
+  'New York Knicks': 'NYK',
+  'Oklahoma City Thunder': 'OKC',
+  'Orlando Magic': 'ORL',
+  'Philadelphia 76ers': 'PHI',
+  'Phoenix Suns': 'PHX',
+  'Portland Trail Blazers': 'POR',
+  'Sacramento Kings': 'SAC',
+  'San Antonio Spurs': 'SAS',
+  'Toronto Raptors': 'TOR',
+  'Utah Jazz': 'UTA',
+  'Washington Wizards': 'WAS'
+};
+
+const MLB_TEAM_MAP: Record<string, string> = {
+  'Arizona Diamondbacks': 'ARI',
+  'Atlanta Braves': 'ATL',
+  'Baltimore Orioles': 'BAL',
+  'Boston Red Sox': 'BOS',
+  'Chicago Cubs': 'CHC',
+  'Chicago White Sox': 'CWS',
+  'Cincinnati Reds': 'CIN',
+  'Cleveland Guardians': 'CLE',
+  'Colorado Rockies': 'COL',
+  'Detroit Tigers': 'DET',
+  'Houston Astros': 'HOU',
+  'Kansas City Royals': 'KC',
+  'Los Angeles Angels': 'LAA',
+  'Los Angeles Dodgers': 'LAD',
+  'Miami Marlins': 'MIA',
+  'Milwaukee Brewers': 'MIL',
+  'Minnesota Twins': 'MIN',
+  'New York Mets': 'NYM',
+  'New York Yankees': 'NYY',
+  'Oakland Athletics': 'OAK',
+  'Philadelphia Phillies': 'PHI',
+  'Pittsburgh Pirates': 'PIT',
+  'San Diego Padres': 'SD',
+  'San Francisco Giants': 'SF',
+  'Seattle Mariners': 'SEA',
+  'St. Louis Cardinals': 'STL',
+  'Tampa Bay Rays': 'TB',
+  'Texas Rangers': 'TEX',
+  'Toronto Blue Jays': 'TOR',
+  'Washington Nationals': 'WSH'
+};
+
+const NHL_TEAM_MAP: Record<string, string> = {
+  'Anaheim Ducks': 'ANA',
+  'Arizona Coyotes': 'ARI',
+  'Boston Bruins': 'BOS',
+  'Buffalo Sabres': 'BUF',
+  'Calgary Flames': 'CGY',
+  'Carolina Hurricanes': 'CAR',
+  'Chicago Blackhawks': 'CHI',
+  'Colorado Avalanche': 'COL',
+  'Columbus Blue Jackets': 'CBJ',
+  'Dallas Stars': 'DAL',
+  'Detroit Red Wings': 'DET',
+  'Edmonton Oilers': 'EDM',
+  'Florida Panthers': 'FLA',
+  'Los Angeles Kings': 'LAK',
+  'Minnesota Wild': 'MIN',
+  'Montreal Canadiens': 'MTL',
+  'Nashville Predators': 'NSH',
+  'New Jersey Devils': 'NJD',
+  'New York Islanders': 'NYI',
+  'New York Rangers': 'NYR',
+  'Ottawa Senators': 'OTT',
+  'Philadelphia Flyers': 'PHI',
+  'Pittsburgh Penguins': 'PIT',
+  'San Jose Sharks': 'SJS',
+  'Seattle Kraken': 'SEA',
+  'St. Louis Blues': 'STL',
+  'Tampa Bay Lightning': 'TBL',
+  'Toronto Maple Leafs': 'TOR',
+  'Vancouver Canucks': 'VAN',
+  'Vegas Golden Knights': 'VGK',
+  'Washington Capitals': 'WSH',
+  'Winnipeg Jets': 'WPG'
+};
 
 // =============================================
 // TYPES – extended with NHL/MLB fields
@@ -176,14 +264,14 @@ interface PlayerStats {
   shotsPerGame?: number;
   hitsPerGame?: number;
   plusMinus?: number;
-  penaltyMinutes?: number;   // alias for fouls
+  penaltyMinutes?: number;
 
   // ========== MLB specific ==========
-  homeRuns?: number;         // total HR
-  avg?: number;              // batting average
-  obp?: number;              // on‑base percentage
-  slg?: number;              // slugging percentage
-  ops?: number;              // on‑base plus slugging
+  homeRuns?: number;
+  avg?: number;
+  obp?: number;
+  slg?: number;
+  ops?: number;
 }
 
 interface TeamStats {
@@ -243,36 +331,134 @@ interface SeasonLeaders {
 }
 
 // =============================================
-// UPDATED API FUNCTIONS – NBA via Node, others via Python
+// MOCK DATA – kept as fallback
 // =============================================
 
+const MOCK_PLAYER_STATS: PlayerStats[] = [
+  // Add a few mock players as fallback
+  {
+    id: 'mock-1',
+    name: 'LeBron James',
+    team: 'LAL',
+    teamAbbrev: 'LAL',
+    position: 'SF',
+    number: 23,
+    gamesPlayed: 65,
+    gamesStarted: 65,
+    minutes: 2500,
+    minutesPerGame: 34.5,
+    points: 1500,
+    pointsPerGame: 25.5,
+    fieldGoalsMade: 550,
+    fieldGoalsAttempted: 1100,
+    fieldGoalPercentage: 50.0,
+    threePointsMade: 150,
+    threePointsAttempted: 400,
+    threePointPercentage: 37.5,
+    freeThrowsMade: 250,
+    freeThrowsAttempted: 320,
+    freeThrowPercentage: 78.1,
+    rebounds: 500,
+    reboundsPerGame: 8.5,
+    offensiveRebounds: 80,
+    defensiveRebounds: 420,
+    assists: 450,
+    assistsPerGame: 7.2,
+    steals: 80,
+    stealsPerGame: 1.3,
+    blocks: 40,
+    blocksPerGame: 0.7,
+    turnovers: 200,
+    turnoversPerGame: 3.1,
+    fouls: 120,
+    foulsPerGame: 1.9,
+    efficiency: 25.5,
+    trueShootingPercentage: 58.5,
+    effectiveFieldGoalPercentage: 52.0,
+    usageRate: 30.0,
+    winShares: 8.5,
+    boxPlusMinus: 6.5,
+    valueOverReplacement: 4.2,
+    fantasyPoints: 1800,
+    fantasyPointsPerGame: 45.2,
+    last5Avg: 26.5,
+    last10Avg: 25.8,
+    seasonHigh: 45,
+    seasonLow: 15,
+    trend: 'stable',
+    injuryStatus: 'Active'
+  }
+];
+
+// =============================================
+// API FUNCTIONS
+// =============================================
 const fetchPlayerStats = async (sport: string = 'nba') => {
   try {
-    let url: string;
-    if (sport === 'mlb' || sport === 'nhl') {
-      // Use Python API for MLB and NHL
-      url = `${PYTHON_API_BASE}/api/players?sport=${sport}&realtime=true&limit=500`;
-    } else {
-      // Use Node API for NBA and NFL
-      url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${sport}`;
+    // For all sports, try real-time Tank01 API first
+    if (sport === 'nba' || sport === 'mlb' || sport === 'nhl') {
+      try {
+        // Try to get real data from Tank01 via your backend
+        const realtimeUrl = `${PYTHON_API_BASE}/api/players?sport=${sport}&realtime=true&limit=500`;
+        console.log(`🌐 Fetching real ${sport.toUpperCase()} data from Tank01: ${realtimeUrl}`);
+        
+        const response = await axios.get(realtimeUrl, { timeout: 15000 });
+        
+        if (response.data.success) {
+          // Handle different response structures
+          if (response.data.data?.players) {
+            console.log(`✅ Successfully fetched ${response.data.data.players.length} real ${sport} players from Tank01`);
+            return transformPlayerStats(response.data.data.players, sport);
+          } else if (response.data.players) {
+            console.log(`✅ Successfully fetched ${response.data.players.length} real ${sport} players from Tank01`);
+            return transformPlayerStats(response.data.players, sport);
+          } else if (Array.isArray(response.data.data)) {
+            console.log(`✅ Successfully fetched ${response.data.data.length} real ${sport} players from Tank01`);
+            return transformPlayerStats(response.data.data, sport);
+          }
+        }
+      } catch (realtimeError: any) {
+        console.log(`⚠️ Real-time Tank01 API failed for ${sport}, falling back to static data:`, realtimeError.message);
+      }
+      
+      // Fallback to static data
+      const staticUrl = `${PYTHON_API_BASE}/api/players?sport=${sport}&realtime=false&limit=500`;
+      console.log(`📦 Fetching static ${sport} data from: ${staticUrl}`);
+      
+      const response = await axios.get(staticUrl, { timeout: 10000 });
+      
+      if (response.data.success) {
+        if (response.data.data?.players) {
+          console.log(`✅ Successfully fetched ${response.data.data.players.length} ${sport} players from static data`);
+          return transformPlayerStats(response.data.data.players, sport);
+        } else if (response.data.players) {
+          console.log(`✅ Successfully fetched ${response.data.players.length} ${sport} players from static data`);
+          return transformPlayerStats(response.data.players, sport);
+        }
+      }
     }
-
-    const response = await axios.get(url);
     
-    if (sport === 'mlb' || sport === 'nhl') {
-      // Python API returns { success, data: { players, is_real_data } }
-      if (response.data.success && response.data.data?.players) {
-        return transformPlayerStats(response.data.data.players, sport);
-      }
-    } else {
-      // Node API returns { success, data: [...] }
-      if (response.data.success && Array.isArray(response.data.data)) {
-        return transformPlayerStats(response.data.data, sport);
+    // Handle NFL separately
+    else if (sport === 'nfl') {
+      const url = `${PYTHON_API_BASE}/api/players?sport=nfl&realtime=false&limit=500`;
+      console.log(`🏈 Fetching NFL data from: ${url}`);
+      
+      const response = await axios.get(url, { timeout: 10000 });
+      
+      if (response.data.success) {
+        if (response.data.data?.players) {
+          console.log(`✅ Successfully fetched ${response.data.data.players.length} NFL players`);
+          return transformPlayerStats(response.data.data.players, sport);
+        } else if (response.data.players) {
+          console.log(`✅ Successfully fetched ${response.data.players.length} NFL players`);
+          return transformPlayerStats(response.data.players, sport);
+        }
       }
     }
+    
     return null;
   } catch (error) {
-    console.log('Using mock player stats data');
+    console.error(`❌ Error fetching player stats for ${sport}:`, error);
     return null;
   }
 };
@@ -317,7 +503,7 @@ const fetchPlayerTrends = async (sport: string = 'nba') => {
 };
 
 // =============================================
-// TRANSFORM FUNCTIONS (enhanced for NHL/MLB)
+// TRANSFORM FUNCTIONS
 // =============================================
 
 const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
@@ -327,80 +513,69 @@ const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
   }
 
   return players.map((p, index) => {
-    // Determine games played – if missing, use a reasonable default for the sport
-    let gamesPlayed = p.games_played || p.gp;
+    // Determine games played
+    let gamesPlayed = p.games || p.games_played || p.gp;
     if (!gamesPlayed) {
-      if (sport === 'nhl') gamesPlayed = 70;   // typical NHL season games
-      else if (sport === 'mlb') gamesPlayed = 162;
-      else gamesPlayed = 65;                    // fallback for others
-      console.warn(`games_played missing for ${sport} player ${p.name}, using default ${gamesPlayed}`);
+      if (sport === 'nhl') gamesPlayed = 70;
+      else if (sport === 'mlb') gamesPlayed = 120;
+      else gamesPlayed = 65;
     }
 
     const minutes = p.minutes || p.min || 32.5;
 
     // Sport‑specific stat extraction
-    let pointsPerGame, reboundsPerGame, assistsPerGame, stealsPerGame, blocksPerGame, turnoversPerGame, foulsPerGame;
-    let points, rebounds, assists, steals, blocks, turnovers, fouls;
+    let pointsPerGame = 0, reboundsPerGame = 0, assistsPerGame = 0, 
+        stealsPerGame = 0, blocksPerGame = 0, turnoversPerGame = 0, foulsPerGame = 0;
+    let points = 0, rebounds = 0, assists = 0, steals = 0, blocks = 0, turnovers = 0, fouls = 0;
 
     // Additional variables for NHL/MLB
-    let goals = 0, assistsNhl = 0, shots = 0, hits = 0, plusMinus = 0;
+    let goals = 0, shots = 0, hits = 0, plusMinus = 0;
     let homeRuns = 0, avg = 0, obp = 0, slg = 0, ops = 0;
 
     if (sport === 'nhl') {
-      // NHL: totals for goals, assists, points, penalty minutes, plus/minus
       points = p.points || 0;
       assists = p.assists || 0;
-      rebounds = 0;          // NHL doesn't track rebounds
+      goals = p.goals || 0;
+      shots = p.shots || 0;
+      hits = p.hits || 0;
+      plusMinus = p.plus_minus || 0;
       steals = p.steals || 0;
       blocks = p.blocks || 0;
       turnovers = p.turnovers || 0;
       fouls = p.penalty_minutes || p.pim || 0;
 
-      // Additional NHL stats
-      goals = p.goals || 0;
-      shots = p.shots || 0;
-      hits = p.hits || 0;
-      plusMinus = p.plus_minus || 0;
-
       pointsPerGame = gamesPlayed > 0 ? points / gamesPlayed : 0;
-      reboundsPerGame = 0;
       assistsPerGame = gamesPlayed > 0 ? assists / gamesPlayed : 0;
       stealsPerGame = gamesPlayed > 0 ? steals / gamesPlayed : 0;
       blocksPerGame = gamesPlayed > 0 ? blocks / gamesPlayed : 0;
       turnoversPerGame = gamesPlayed > 0 ? turnovers / gamesPlayed : 0;
       foulsPerGame = gamesPlayed > 0 ? fouls / gamesPlayed : 0;
-    } else if (sport === 'mlb') {
-      // MLB: typical stats (runs, hits, RBI, steals) plus advanced
+    } 
+    else if (sport === 'mlb') {
       const runs = p.runs || 0;
       const hitsMlb = p.hits || 0;
       const rbi = p.rbi || 0;
       const stealsMlb = p.steals || 0;
       homeRuns = p.home_runs || 0;
-      const atBats = p.at_bats || (gamesPlayed * 3.5); // fallback
-      const walks = p.walks || 0;
-      // Use provided advanced stats or compute approximations
-      avg = p.avg || (hitsMlb / atBats) || 0;
-      obp = p.obp || (hitsMlb + walks) / (atBats + walks) || 0;
-      slg = p.slg || ((hitsMlb + 2 * (p.doubles || 0) + 3 * (p.triples || 0) + 4 * homeRuns) / atBats) || 0;
+      const atBats = p.at_bats || (gamesPlayed * 3.5);
+      
+      avg = p.avg || (hitsMlb / atBats) || 0.250;
+      obp = p.obp || 0.320;
+      slg = p.slg || 0.450;
       ops = obp + slg;
 
       points = runs;
       rebounds = hitsMlb;
       assists = rbi;
       steals = stealsMlb;
-      blocks = 0;
-      turnovers = 0;
-      fouls = 0;
 
       pointsPerGame = gamesPlayed > 0 ? runs / gamesPlayed : 0;
       reboundsPerGame = gamesPlayed > 0 ? hitsMlb / gamesPlayed : 0;
       assistsPerGame = gamesPlayed > 0 ? rbi / gamesPlayed : 0;
       stealsPerGame = gamesPlayed > 0 ? stealsMlb / gamesPlayed : 0;
-      blocksPerGame = 0;
-      turnoversPerGame = 0;
-      foulsPerGame = 0;
-    } else {
-      // NBA/NFL – API already returns per‑game averages
+    } 
+    else {
+      // NBA/NFL
       pointsPerGame = p.points || p.pts || 0;
       reboundsPerGame = p.rebounds || p.reb || 0;
       assistsPerGame = p.assists || p.ast || 0;
@@ -409,7 +584,6 @@ const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
       turnoversPerGame = p.turnovers || p.tov || 0;
       foulsPerGame = p.fouls || 0;
 
-      // Compute totals for efficiency (optional)
       points = pointsPerGame * gamesPlayed;
       rebounds = reboundsPerGame * gamesPlayed;
       assists = assistsPerGame * gamesPlayed;
@@ -419,7 +593,7 @@ const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
       fouls = foulsPerGame * gamesPlayed;
     }
 
-    // Shooting stats – fallbacks (mostly for NBA)
+    // Shooting stats – fallbacks
     const fgm = p.fgm || points * 0.45;
     const fga = p.fga || points * 0.95;
     const fgp = fga ? (fgm / fga) * 100 : 45.0;
@@ -430,20 +604,38 @@ const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
     const fta = p.free_throws_attempted || p.fta || 4.5;
     const ftp = fta ? (ftm / fta) * 100 : 83.5;
 
-    // Per‑game efficiency
+    // Efficiency calculations
     const efficiency = pointsPerGame + reboundsPerGame + assistsPerGame + stealsPerGame + blocksPerGame - turnoversPerGame;
-
-    // Fantasy points per game (FanDuel scoring)
     const fantasyPointsPerGame = pointsPerGame + reboundsPerGame * 1.2 + assistsPerGame * 1.5 + stealsPerGame * 3 + blocksPerGame * 3 - turnoversPerGame;
 
+    // Team abbreviation handling
+    let teamAbbrev = p.teamAbbrev || '';
+    if (!teamAbbrev && p.team) {
+      if (sport === 'nba') {
+        teamAbbrev = NBA_TEAM_MAP[p.team] || p.team.substring(0, 3).toUpperCase();
+      } else if (sport === 'mlb') {
+        teamAbbrev = MLB_TEAM_MAP[p.team] || p.team.substring(0, 3).toUpperCase();
+      } else if (sport === 'nhl') {
+        teamAbbrev = NHL_TEAM_MAP[p.team] || p.team.substring(0, 3).toUpperCase();
+      } else {
+        teamAbbrev = p.team.substring(0, 3).toUpperCase();
+      }
+    }
+    if (!teamAbbrev) teamAbbrev = 'FA';
+
+    // Determine data source for ID
+    const dataSource = p.id?.includes('mock') ? 'mock' : 
+                       p.id?.includes('static') ? 'static' : 
+                       'realtime';
+
     return {
-      id: p.id || `player-${index}`,
+      id: p.id || `${dataSource}-${sport}-${index}`,
       name: p.name || p.playerName || `Player ${index + 1}`,
-      team: p.team || p.teamAbbrev || 'FA',
-      teamAbbrev: p.teamAbbrev || (p.team ? p.team.substring(0, 3).toUpperCase() : 'FA'),
-      position: p.position || p.pos || 'G/F',
-      number: p.number || Math.floor(Math.random() * 45) + 1,
-      age: p.age || Math.floor(Math.random() * 14 + 22),
+      team: p.team || teamAbbrev,
+      teamAbbrev,
+      position: p.position || p.pos || (sport === 'nba' ? 'G/F' : sport === 'mlb' ? 'UTIL' : 'F'),
+      number: p.number || Math.floor(Math.random() * 99) + 1,
+      age: p.age || Math.floor(Math.random() * 15 + 22),
       height: p.height || `${Math.floor(Math.random() * 10 + 70)}"`,
       weight: p.weight || Math.floor(Math.random() * 60 + 185),
       experience: p.experience || Math.floor(Math.random() * 12),
@@ -485,10 +677,10 @@ const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
       efficiency: parseFloat(efficiency.toFixed(1)),
       trueShootingPercentage: parseFloat(((pointsPerGame / (2 * (fga / gamesPlayed + 0.44 * (fta / gamesPlayed))) * 100) || 0).toFixed(1)),
       effectiveFieldGoalPercentage: parseFloat((((fgm / gamesPlayed + 0.5 * (tpm / gamesPlayed)) / (fga / gamesPlayed) * 100) || 0).toFixed(1)),
-      usageRate: 24.5 + (Math.random() * 6 - 3), // placeholder
-      winShares: 4.2 + (Math.random() * 3),
-      boxPlusMinus: 2.1 + Math.random() * 4 - 2,
-      valueOverReplacement: 1.2 + Math.random() * 2,
+      usageRate: p.usage || 24.5 + (Math.random() * 6 - 3),
+      winShares: p.win_shares || 4.2 + (Math.random() * 3),
+      boxPlusMinus: p.bpm || 2.1 + Math.random() * 4 - 2,
+      valueOverReplacement: p.vorp || 1.2 + Math.random() * 2,
 
       fantasyPoints: fantasyPointsPerGame * gamesPlayed,
       fantasyPointsPerGame: parseFloat(fantasyPointsPerGame.toFixed(1)),
@@ -502,17 +694,15 @@ const transformPlayerStats = (players: any[], sport: string): PlayerStats[] => {
       seasonLow: parseFloat((pointsPerGame * 0.6).toFixed(1)),
       trend: Math.random() > 0.6 ? 'up' : Math.random() > 0.3 ? 'stable' : 'down',
 
-      injuryStatus: p.injury_status || 'Active',
+      injuryStatus: p.injury_status || p.injury || 'Active',
       injuryDetails: p.injury_details,
 
-      // ===== NHL‑specific fields (per‑game averages) =====
+      // Sport-specific fields
       goalsPerGame: sport === 'nhl' ? (gamesPlayed > 0 ? goals / gamesPlayed : 0) : undefined,
       shotsPerGame: sport === 'nhl' ? (gamesPlayed > 0 ? shots / gamesPlayed : 0) : undefined,
       hitsPerGame: sport === 'nhl' ? (gamesPlayed > 0 ? hits / gamesPlayed : 0) : undefined,
       plusMinus: sport === 'nhl' ? plusMinus : undefined,
       penaltyMinutes: sport === 'nhl' ? fouls : undefined,
-
-      // ===== MLB‑specific fields =====
       homeRuns: sport === 'mlb' ? homeRuns : undefined,
       avg: sport === 'mlb' ? avg : undefined,
       obp: sport === 'mlb' ? obp : undefined,
@@ -527,11 +717,14 @@ const transformTeamStatsFromPlayers = (players: PlayerStats[], sport: string): T
   const teamMap = new Map<string, PlayerStats[]>();
   players.forEach(p => {
     const team = p.teamAbbrev;
-    if (!teamMap.has(team)) teamMap.set(team, []);
-    teamMap.get(team)!.push(p);
+    if (team && team !== 'FA') {
+      if (!teamMap.has(team)) teamMap.set(team, []);
+      teamMap.get(team)!.push(p);
+    }
   });
 
   const teamList: TeamStats[] = [];
+  
   const nbaTeamNames: Record<string, string> = {
     ATL: 'Atlanta Hawks', BOS: 'Boston Celtics', BKN: 'Brooklyn Nets', CHA: 'Charlotte Hornets',
     CHI: 'Chicago Bulls', CLE: 'Cleveland Cavaliers', DAL: 'Dallas Mavericks', DEN: 'Denver Nuggets',
@@ -546,7 +739,7 @@ const transformTeamStatsFromPlayers = (players: PlayerStats[], sport: string): T
   teamMap.forEach((teamPlayers, abbrev) => {
     const wins = Math.floor(30 + Math.random() * 30);
     const losses = 82 - wins;
-    const ppg = teamPlayers.reduce((sum, p) => sum + p.pointsPerGame, 0) / teamPlayers.length * 5; // rough estimate
+    const ppg = teamPlayers.reduce((sum, p) => sum + p.pointsPerGame, 0) / teamPlayers.length * 5;
     const oppg = ppg - (Math.random() * 6 - 3);
     const net = ppg - oppg;
 
@@ -621,427 +814,10 @@ const transformSeasonLeaders = (players: PlayerStats[]): SeasonLeaders => {
 };
 
 // =============================================
-// MOCK DATA – kept as fallback (unchanged)
+// MAIN CONTENT COMPONENT
 // =============================================
 
-const MOCK_PLAYER_STATS: PlayerStats[] = [
-  {
-    id: '1',
-    name: 'Luka Dončić',
-    team: 'Dallas Mavericks',
-    teamAbbrev: 'DAL',
-    position: 'PG',
-    number: 77,
-    age: 25,
-    height: '79"',
-    weight: 230,
-    experience: 6,
-    
-    gamesPlayed: 70,
-    gamesStarted: 70,
-    minutes: 37.5,
-    minutesPerGame: 37.5,
-    
-    points: 33.9,
-    pointsPerGame: 33.9,
-    fieldGoalsMade: 11.8,
-    fieldGoalsAttempted: 23.6,
-    fieldGoalPercentage: 48.7,
-    threePointsMade: 3.4,
-    threePointsAttempted: 9.2,
-    threePointPercentage: 38.2,
-    freeThrowsMade: 6.9,
-    freeThrowsAttempted: 8.4,
-    freeThrowPercentage: 78.6,
-    
-    rebounds: 9.2,
-    reboundsPerGame: 9.2,
-    offensiveRebounds: 1.2,
-    defensiveRebounds: 8.0,
-    
-    assists: 9.8,
-    assistsPerGame: 9.8,
-    
-    steals: 1.4,
-    stealsPerGame: 1.4,
-    blocks: 0.6,
-    blocksPerGame: 0.6,
-    turnovers: 3.6,
-    turnoversPerGame: 3.6,
-    fouls: 2.1,
-    foulsPerGame: 2.1,
-    
-    efficiency: 51.5,
-    trueShootingPercentage: 61.2,
-    effectiveFieldGoalPercentage: 56.8,
-    usageRate: 35.2,
-    winShares: 14.2,
-    boxPlusMinus: 8.7,
-    valueOverReplacement: 6.2,
-    
-    fantasyPoints: 55.8,
-    fantasyPointsPerGame: 55.8,
-    fanduelSalary: 11500,
-    draftkingsSalary: 11200,
-    valueScore: 48.5,
-    
-    last5Avg: 35.2,
-    last10Avg: 34.8,
-    seasonHigh: 50,
-    seasonLow: 22,
-    trend: 'up',
-    
-    injuryStatus: 'Active'
-  },
-  {
-    id: '2',
-    name: 'Shai Gilgeous-Alexander',
-    team: 'Oklahoma City Thunder',
-    teamAbbrev: 'OKC',
-    position: 'PG',
-    number: 2,
-    age: 26,
-    height: '78"',
-    weight: 195,
-    experience: 6,
-    
-    gamesPlayed: 75,
-    gamesStarted: 75,
-    minutes: 34.5,
-    minutesPerGame: 34.5,
-    
-    points: 31.4,
-    pointsPerGame: 31.4,
-    fieldGoalsMade: 11.2,
-    fieldGoalsAttempted: 21.8,
-    fieldGoalPercentage: 53.5,
-    threePointsMade: 1.8,
-    threePointsAttempted: 4.9,
-    threePointPercentage: 35.4,
-    freeThrowsMade: 7.2,
-    freeThrowsAttempted: 8.2,
-    freeThrowPercentage: 87.5,
-    
-    rebounds: 5.5,
-    reboundsPerGame: 5.5,
-    offensiveRebounds: 0.8,
-    defensiveRebounds: 4.7,
-    
-    assists: 6.2,
-    assistsPerGame: 6.2,
-    
-    steals: 2.1,
-    stealsPerGame: 2.1,
-    blocks: 0.9,
-    blocksPerGame: 0.9,
-    turnovers: 2.1,
-    turnoversPerGame: 2.1,
-    fouls: 2.2,
-    foulsPerGame: 2.2,
-    
-    efficiency: 45.2,
-    trueShootingPercentage: 63.8,
-    effectiveFieldGoalPercentage: 56.9,
-    usageRate: 32.1,
-    winShares: 13.8,
-    boxPlusMinus: 7.9,
-    valueOverReplacement: 5.8,
-    
-    fantasyPoints: 51.2,
-    fantasyPointsPerGame: 51.2,
-    fanduelSalary: 10800,
-    draftkingsSalary: 10500,
-    valueScore: 47.4,
-    
-    last5Avg: 32.8,
-    last10Avg: 31.9,
-    seasonHigh: 44,
-    seasonLow: 18,
-    trend: 'stable',
-    
-    injuryStatus: 'Active'
-  },
-  {
-    id: '3',
-    name: 'Giannis Antetokounmpo',
-    team: 'Milwaukee Bucks',
-    teamAbbrev: 'MIL',
-    position: 'PF',
-    number: 34,
-    age: 29,
-    height: '83"',
-    weight: 242,
-    experience: 11,
-    
-    gamesPlayed: 68,
-    gamesStarted: 68,
-    minutes: 35.2,
-    minutesPerGame: 35.2,
-    
-    points: 30.7,
-    pointsPerGame: 30.7,
-    fieldGoalsMade: 11.5,
-    fieldGoalsAttempted: 20.8,
-    fieldGoalPercentage: 61.1,
-    threePointsMade: 0.6,
-    threePointsAttempted: 2.3,
-    threePointPercentage: 27.5,
-    freeThrowsMade: 6.9,
-    freeThrowsAttempted: 10.5,
-    freeThrowPercentage: 65.2,
-    
-    rebounds: 11.5,
-    reboundsPerGame: 11.5,
-    offensiveRebounds: 2.4,
-    defensiveRebounds: 9.1,
-    
-    assists: 6.5,
-    assistsPerGame: 6.5,
-    
-    steals: 1.2,
-    stealsPerGame: 1.2,
-    blocks: 1.3,
-    blocksPerGame: 1.3,
-    turnovers: 3.4,
-    turnoversPerGame: 3.4,
-    fouls: 2.8,
-    foulsPerGame: 2.8,
-    
-    efficiency: 49.8,
-    trueShootingPercentage: 62.1,
-    effectiveFieldGoalPercentage: 59.4,
-    usageRate: 33.8,
-    winShares: 12.9,
-    boxPlusMinus: 7.2,
-    valueOverReplacement: 5.4,
-    
-    fantasyPoints: 54.2,
-    fantasyPointsPerGame: 54.2,
-    fanduelSalary: 11200,
-    draftkingsSalary: 10900,
-    valueScore: 48.4,
-    
-    last5Avg: 31.2,
-    last10Avg: 30.8,
-    seasonHigh: 54,
-    seasonLow: 22,
-    trend: 'down',
-    
-    injuryStatus: 'Day-to-Day',
-    injuryDetails: 'Knee soreness'
-  },
-  {
-    id: '4',
-    name: 'Nikola Jokić',
-    team: 'Denver Nuggets',
-    teamAbbrev: 'DEN',
-    position: 'C',
-    number: 15,
-    age: 29,
-    height: '83"',
-    weight: 284,
-    experience: 9,
-    
-    gamesPlayed: 72,
-    gamesStarted: 72,
-    minutes: 34.6,
-    minutesPerGame: 34.6,
-    
-    points: 26.4,
-    pointsPerGame: 26.4,
-    fieldGoalsMade: 10.2,
-    fieldGoalsAttempted: 17.8,
-    fieldGoalPercentage: 58.3,
-    threePointsMade: 1.1,
-    threePointsAttempted: 3.1,
-    threePointPercentage: 35.8,
-    freeThrowsMade: 4.9,
-    freeThrowsAttempted: 5.8,
-    freeThrowPercentage: 81.7,
-    
-    rebounds: 12.4,
-    reboundsPerGame: 12.4,
-    offensiveRebounds: 3.1,
-    defensiveRebounds: 9.3,
-    
-    assists: 9.0,
-    assistsPerGame: 9.0,
-    
-    steals: 1.3,
-    stealsPerGame: 1.3,
-    blocks: 0.9,
-    blocksPerGame: 0.9,
-    turnovers: 3.1,
-    turnoversPerGame: 3.1,
-    fouls: 2.5,
-    foulsPerGame: 2.5,
-    
-    efficiency: 49.5,
-    trueShootingPercentage: 64.5,
-    effectiveFieldGoalPercentage: 61.2,
-    usageRate: 28.9,
-    winShares: 15.1,
-    boxPlusMinus: 9.4,
-    valueOverReplacement: 6.8,
-    
-    fantasyPoints: 58.1,
-    fantasyPointsPerGame: 58.1,
-    fanduelSalary: 11800,
-    draftkingsSalary: 11500,
-    valueScore: 49.2,
-    
-    last5Avg: 27.2,
-    last10Avg: 26.8,
-    seasonHigh: 42,
-    seasonLow: 18,
-    trend: 'up',
-    
-    injuryStatus: 'Active'
-  },
-  {
-    id: '5',
-    name: 'Joel Embiid',
-    team: 'Philadelphia 76ers',
-    teamAbbrev: 'PHI',
-    position: 'C',
-    number: 21,
-    age: 30,
-    height: '84"',
-    weight: 280,
-    experience: 8,
-    
-    gamesPlayed: 58,
-    gamesStarted: 58,
-    minutes: 34.0,
-    minutesPerGame: 34.0,
-    
-    points: 34.7,
-    pointsPerGame: 34.7,
-    fieldGoalsMade: 11.8,
-    fieldGoalsAttempted: 22.1,
-    fieldGoalPercentage: 52.9,
-    threePointsMade: 1.2,
-    threePointsAttempted: 3.5,
-    threePointPercentage: 34.2,
-    freeThrowsMade: 9.9,
-    freeThrowsAttempted: 11.8,
-    freeThrowPercentage: 88.3,
-    
-    rebounds: 11.0,
-    reboundsPerGame: 11.0,
-    offensiveRebounds: 2.2,
-    defensiveRebounds: 8.8,
-    
-    assists: 5.6,
-    assistsPerGame: 5.6,
-    
-    steals: 1.0,
-    stealsPerGame: 1.0,
-    blocks: 1.7,
-    blocksPerGame: 1.7,
-    turnovers: 3.6,
-    turnoversPerGame: 3.6,
-    fouls: 2.9,
-    foulsPerGame: 2.9,
-    
-    efficiency: 52.1,
-    trueShootingPercentage: 64.8,
-    effectiveFieldGoalPercentage: 56.2,
-    usageRate: 36.5,
-    winShares: 11.2,
-    boxPlusMinus: 8.1,
-    valueOverReplacement: 5.9,
-    
-    fantasyPoints: 56.5,
-    fantasyPointsPerGame: 56.5,
-    fanduelSalary: 11400,
-    draftkingsSalary: 11100,
-    valueScore: 49.6,
-    
-    last5Avg: 35.2,
-    last10Avg: 34.1,
-    seasonHigh: 70,
-    seasonLow: 24,
-    trend: 'up',
-    
-    injuryStatus: 'Out',
-    injuryDetails: 'Meniscus surgery'
-  },
-  {
-    id: '6',
-    name: 'Stephen Curry',
-    team: 'Golden State Warriors',
-    teamAbbrev: 'GSW',
-    position: 'PG',
-    number: 30,
-    age: 36,
-    height: '74"',
-    weight: 185,
-    experience: 15,
-    
-    gamesPlayed: 65,
-    gamesStarted: 65,
-    minutes: 33.2,
-    minutesPerGame: 33.2,
-    
-    points: 26.8,
-    pointsPerGame: 26.8,
-    fieldGoalsMade: 9.2,
-    fieldGoalsAttempted: 19.5,
-    fieldGoalPercentage: 45.8,
-    threePointsMade: 5.1,
-    threePointsAttempted: 12.2,
-    threePointPercentage: 41.5,
-    freeThrowsMade: 3.3,
-    freeThrowsAttempted: 3.5,
-    freeThrowPercentage: 92.1,
-    
-    rebounds: 4.5,
-    reboundsPerGame: 4.5,
-    offensiveRebounds: 0.5,
-    defensiveRebounds: 4.0,
-    
-    assists: 5.1,
-    assistsPerGame: 5.1,
-    
-    steals: 0.9,
-    stealsPerGame: 0.9,
-    blocks: 0.4,
-    blocksPerGame: 0.4,
-    turnovers: 2.8,
-    turnoversPerGame: 2.8,
-    fouls: 1.8,
-    foulsPerGame: 1.8,
-    
-    efficiency: 37.9,
-    trueShootingPercentage: 62.8,
-    effectiveFieldGoalPercentage: 58.2,
-    usageRate: 29.8,
-    winShares: 10.5,
-    boxPlusMinus: 5.8,
-    valueOverReplacement: 4.2,
-    
-    fantasyPoints: 44.2,
-    fantasyPointsPerGame: 44.2,
-    fanduelSalary: 9500,
-    draftkingsSalary: 9300,
-    valueScore: 46.5,
-    
-    last5Avg: 27.5,
-    last10Avg: 26.9,
-    seasonHigh: 49,
-    seasonLow: 14,
-    trend: 'stable',
-    
-    injuryStatus: 'Active'
-  }
-];
-
-// =============================================
-// MAIN COMPONENT – UI with dynamic columns
-// =============================================
-
-const SeasonStatsScreen: React.FC = () => {
+const SeasonStatsContent: React.FC = () => {
   const theme = useTheme();
   const [sportTab, setSportTab] = useState<string>('nba');
   const [statsTab, setStatsTab] = useState<string>('players');
@@ -1055,6 +831,91 @@ const SeasonStatsScreen: React.FC = () => {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerStats | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [viewMode, setViewMode] = useState<'table' | 'cards' | 'compact'>('table');
+
+  // ============= DATA FETCHING =============
+  const { data: players, isLoading: playersLoading, refetch: refetchPlayers } = useQuery({
+    queryKey: ['playerStats', sportTab],
+    queryFn: () => fetchPlayerStats(sportTab),
+    staleTime: 5 * 60 * 1000,
+    retry: 2
+  });
+
+  const { data: teams, isLoading: teamsLoading } = useQuery({
+    queryKey: ['teamStats', sportTab],
+    queryFn: () => fetchTeamStats(sportTab),
+    staleTime: 10 * 60 * 1000,
+    enabled: false // Disable if not needed
+  });
+
+  const { data: leaders, isLoading: leadersLoading } = useQuery({
+    queryKey: ['seasonLeaders', sportTab],
+    queryFn: () => fetchSeasonLeaders(sportTab),
+    staleTime: 5 * 60 * 1000,
+    enabled: false
+  });
+
+  // Use real data if available, otherwise fallback to mock
+  const playerStats = players || MOCK_PLAYER_STATS;
+  const teamStats = teams || [];
+  const seasonLeaders = leaders || {
+    points: MOCK_PLAYER_STATS.sort((a, b) => b.pointsPerGame - a.pointsPerGame),
+    rebounds: MOCK_PLAYER_STATS.sort((a, b) => b.reboundsPerGame - a.reboundsPerGame),
+    assists: MOCK_PLAYER_STATS.sort((a, b) => b.assistsPerGame - a.assistsPerGame),
+    steals: MOCK_PLAYER_STATS.sort((a, b) => b.stealsPerGame - a.stealsPerGame),
+    blocks: MOCK_PLAYER_STATS.sort((a, b) => b.blocksPerGame - a.blocksPerGame),
+    threePoints: MOCK_PLAYER_STATS.sort((a, b) => b.threePointsMade - a.threePointsMade),
+    fantasyPoints: MOCK_PLAYER_STATS.sort((a, b) => b.fantasyPointsPerGame - a.fantasyPointsPerGame),
+    efficiency: MOCK_PLAYER_STATS.sort((a, b) => b.efficiency - a.efficiency)
+  };
+
+  // Reset filters when sport changes
+  useEffect(() => {
+    setPositionFilter('all');
+    setTeamFilter('all');
+    setSearchQuery('');
+    setMinGames(20);
+  }, [sportTab]);
+
+  // Combined useEffect for all logging
+  useEffect(() => {
+    if (players && players.length > 0) {
+      console.log(`✅ Received ${players.length} players for ${sportTab}`);
+      
+      // Teams in data
+      const teams = new Set(players.map(p => p.teamAbbrev).filter(Boolean));
+      console.log('Teams in data:', Array.from(teams).sort());
+      
+      // Detailed analysis
+      console.log(`📊 Analyzing ${players.length} ${sportTab.toUpperCase()} players:`);
+      
+      // Count players per team
+      const teamCounts = players.reduce((acc, p) => {
+        if (p.teamAbbrev) {
+          acc[p.teamAbbrev] = (acc[p.teamAbbrev] || 0) + 1;
+        }
+        return acc;
+      }, {} as Record<string, number>);
+      
+      console.log('👥 Players per team:', teamCounts);
+      
+      // Sort teams by player count
+      const sortedTeams = Object.entries(teamCounts)
+        .sort((a, b) => b[1] - a[1]);
+      
+      console.log('📈 Teams by player count:', sortedTeams);
+      
+      // Data source detection
+      const samplePlayer = players[0];
+      const dataSource = samplePlayer.id?.includes('mock') ? 'MOCK' : 
+                         samplePlayer.id?.includes('static') ? 'STATIC' : 
+                         'REAL-TIME';
+      console.log('🔍 Data source:', dataSource);
+      console.log('🔍 Sample player:', {
+        name: samplePlayer.name,
+        team: samplePlayer.teamAbbrev
+      });
+    }
+  }, [players, sportTab]);
 
   // ========== DYNAMIC COLUMN DEFINITIONS ==========
   const getPlayerColumns = (sport: string) => {
@@ -1120,44 +981,21 @@ const SeasonStatsScreen: React.FC = () => {
     return [];
   };
 
-  // ============= DATA FETCHING =============
-  const { data: players, isLoading: playersLoading } = useQuery({
-    queryKey: ['playerStats', sportTab],
-    queryFn: () => fetchPlayerStats(sportTab),
-    staleTime: 5 * 60 * 1000
-  });
+  // ========== DYNAMIC FILTER OPTIONS (DERIVED FROM PLAYER DATA) ==========
+  const derivedTeams = useMemo(() => {
+    if (!playerStats || playerStats.length === 0) return [];
+    const teams = new Set(playerStats.map(p => p.teamAbbrev).filter(Boolean));
+    return Array.from(teams).sort();
+  }, [playerStats]);
 
-  const { data: teams, isLoading: teamsLoading } = useQuery({
-    queryKey: ['teamStats', sportTab],
-    queryFn: () => fetchTeamStats(sportTab),
-    staleTime: 10 * 60 * 1000
-  });
+  const derivedPositions = useMemo(() => {
+    if (!playerStats || playerStats.length === 0) return [];
+    const positions = new Set(playerStats.map(p => p.position).filter(Boolean));
+    return Array.from(positions).sort();
+  }, [playerStats]);
 
-  const { data: leaders, isLoading: leadersLoading } = useQuery({
-    queryKey: ['seasonLeaders', sportTab],
-    queryFn: () => fetchSeasonLeaders(sportTab),
-    staleTime: 5 * 60 * 1000
-  });
-
-  const { data: trends, isLoading: trendsLoading } = useQuery({
-    queryKey: ['playerTrends', sportTab],
-    queryFn: () => fetchPlayerTrends(sportTab),
-    staleTime: 3 * 60 * 1000
-  });
-
-  // Use real data if available, otherwise fallback to mock
-  const playerStats = players || MOCK_PLAYER_STATS;
-  const teamStats = teams || [];
-  const seasonLeaders = leaders || {
-    points: MOCK_PLAYER_STATS.sort((a, b) => b.pointsPerGame - a.pointsPerGame),
-    rebounds: MOCK_PLAYER_STATS.sort((a, b) => b.reboundsPerGame - a.reboundsPerGame),
-    assists: MOCK_PLAYER_STATS.sort((a, b) => b.assistsPerGame - a.assistsPerGame),
-    steals: MOCK_PLAYER_STATS.sort((a, b) => b.stealsPerGame - a.stealsPerGame),
-    blocks: MOCK_PLAYER_STATS.sort((a, b) => b.blocksPerGame - a.blocksPerGame),
-    threePoints: MOCK_PLAYER_STATS.sort((a, b) => b.threePointsMade - a.threePointsMade),
-    fantasyPoints: MOCK_PLAYER_STATS.sort((a, b) => b.fantasyPointsPerGame - a.fantasyPointsPerGame),
-    efficiency: MOCK_PLAYER_STATS.sort((a, b) => b.efficiency - a.efficiency)
-  };
+  // Log to verify
+  console.log(`uniqueTeams for ${sportTab} (length: ${derivedTeams.length}):`, derivedTeams);
 
   // Filter and sort players
   const getFilteredPlayers = () => {
@@ -1192,13 +1030,6 @@ const SeasonStatsScreen: React.FC = () => {
 
   const filteredPlayers = getFilteredPlayers();
 
-  const uniqueTeams = React.useMemo(() => {
-    const teams = playerStats.map(p => p.teamAbbrev).filter(Boolean);
-    const unique = ['All Teams', ...new Set(teams)].sort();
-    console.log(`Unique teams for ${sportTab}:`, unique);
-    return unique;
-  }, [playerStats, sportTab]);
-
   const handleSort = (field: keyof PlayerStats) => {
     if (field === sortField) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -1208,19 +1039,12 @@ const SeasonStatsScreen: React.FC = () => {
     }
   };
 
-  const formatNumber = (num: number, decimals: number = 1) => {
-    return num.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const handleFilterMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
   };
 
-  const formatPercentage = (num: number) => {
-    return `${num.toFixed(1)}%`;
-  };
-
-  const getValueColor = (value: number, type: 'positive' | 'negative' | 'neutral' = 'positive') => {
-    if (type === 'positive') {
-      return value > 0 ? theme.palette.success.main : theme.palette.error.main;
-    }
-    return theme.palette.text.primary;
+  const handleFilterMenuClose = () => {
+    setAnchorEl(null);
   };
 
   const getTrendIcon = (trend: string) => {
@@ -1229,12 +1053,8 @@ const SeasonStatsScreen: React.FC = () => {
     return null;
   };
 
-  const handleFilterMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleFilterMenuClose = () => {
-    setAnchorEl(null);
+  const handleRefresh = () => {
+    refetchPlayers();
   };
 
   return (
@@ -1293,7 +1113,7 @@ const SeasonStatsScreen: React.FC = () => {
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Groups sx={{ fontSize: 20 }} />
-                  <Typography>{teamStats.length || 30} Teams</Typography>
+                  <Typography>{derivedTeams.length} Teams</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Functions sx={{ fontSize: 20 }} />
@@ -1435,13 +1255,9 @@ const SeasonStatsScreen: React.FC = () => {
                     onChange={(e) => setPositionFilter(e.target.value)}
                   >
                     <MenuItem value="all">All Positions</MenuItem>
-                    <MenuItem value="PG">Point Guard</MenuItem>
-                    <MenuItem value="SG">Shooting Guard</MenuItem>
-                    <MenuItem value="SF">Small Forward</MenuItem>
-                    <MenuItem value="PF">Power Forward</MenuItem>
-                    <MenuItem value="C">Center</MenuItem>
-                    <MenuItem value="G">Guard</MenuItem>
-                    <MenuItem value="F">Forward</MenuItem>
+                    {derivedPositions.map(pos => (
+                      <MenuItem key={pos} value={pos}>{pos}</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -1453,12 +1269,38 @@ const SeasonStatsScreen: React.FC = () => {
                     value={teamFilter}
                     label="Team"
                     onChange={(e) => setTeamFilter(e.target.value)}
-                    key={sportTab} // force re-render on sport change
+                    key={sportTab}
+                    MenuProps={{
+                      PaperProps: {
+                        sx: {
+                          maxHeight: 400,
+                          minWidth: 150,
+                          overflow: 'auto',
+                        },
+                      },
+                      MenuListProps: {
+                        sx: {
+                          maxHeight: 400,
+                          overflow: 'auto',
+                        },
+                      },
+                      disableScrollLock: true,
+                      anchorOrigin: {
+                        vertical: 'bottom',
+                        horizontal: 'left',
+                      },
+                      transformOrigin: {
+                        vertical: 'top',
+                        horizontal: 'left',
+                      },
+                    }}
                   >
                     <MenuItem value="all">All Teams</MenuItem>
-                    {uniqueTeams.map(team => (
-                      <MenuItem key={team} value={team}>{team}</MenuItem>
-                    ))}
+                    {derivedTeams.map(team => {
+                      return (
+                        <MenuItem key={team} value={team}>{team}</MenuItem>
+                      );
+                    })}
                   </Select>
                 </FormControl>
               </Grid>
@@ -1516,6 +1358,13 @@ const SeasonStatsScreen: React.FC = () => {
           </Paper>
         )}
 
+        {/* Optional warning if fewer teams than expected */}
+        {statsTab === 'players' && sportTab === 'nba' && derivedTeams.length < 30 && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <strong>Note:</strong> Only {derivedTeams.length} teams have player data available in the current dataset.
+          </Alert>
+        )}
+
         {/* Category Tabs - For Leaders and Advanced */}
         {(statsTab === 'leaders' || statsTab === 'advanced') && (
           <Paper sx={{ borderRadius: 2, mb: 3, p: 1 }}>
@@ -1563,7 +1412,7 @@ const SeasonStatsScreen: React.FC = () => {
                 action={
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <Tooltip title="Refresh data">
-                      <IconButton>
+                      <IconButton onClick={handleRefresh}>
                         <Refresh />
                       </IconButton>
                     </Tooltip>
@@ -1617,7 +1466,6 @@ const SeasonStatsScreen: React.FC = () => {
                           {getPlayerColumns(sportTab).map((col) => {
                             const value = player[col.field as keyof PlayerStats];
                             
-                            // Special rendering for specific columns
                             if (col.id === 'name') {
                               return (
                                 <TableCell key={col.id}>
@@ -1640,12 +1488,7 @@ const SeasonStatsScreen: React.FC = () => {
                                     label={player.teamAbbrev} 
                                     size="small" 
                                     variant="outlined"
-                                    sx={{ 
-                                      fontWeight: 600,
-                                      borderColor: player.teamAbbrev === 'LAL' ? '#552583' : 
-                                                 player.teamAbbrev === 'GSW' ? '#FFC72C' : 
-                                                 player.teamAbbrev === 'BOS' ? '#007A33' : undefined
-                                    }}
+                                    sx={{ fontWeight: 600 }}
                                   />
                                 </TableCell>
                               );
@@ -1674,7 +1517,6 @@ const SeasonStatsScreen: React.FC = () => {
                                 </TableCell>
                               );
                             } else {
-                              // Numeric value
                               let formatted = '';
                               if (typeof value === 'number') {
                                 if (col.id.includes('Percentage') || col.id === 'avg' || col.id === 'obp' || col.id === 'slg' || col.id === 'ops') {
@@ -1746,13 +1588,6 @@ const SeasonStatsScreen: React.FC = () => {
                                 </Typography>
                               </Box>
                             </Box>
-                            <Chip 
-                              label={`#${player.id}`} 
-                              size="small" 
-                              color="primary" 
-                              variant="outlined"
-                              sx={{ fontSize: '0.6rem' }}
-                            />
                           </Box>
                           
                           <Divider sx={{ my: 1.5 }} />
@@ -1951,503 +1786,6 @@ const SeasonStatsScreen: React.FC = () => {
           </Fade>
         )}
 
-        {/* ========== SEASON LEADERS PANEL ========== */}
-        {statsTab === 'leaders' && !leadersLoading && seasonLeaders && (
-          <Fade in>
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
-                <Card sx={{ borderRadius: 3 }}>
-                  <CardHeader 
-                    title={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Leaderboard />
-                        <Typography variant="h6">
-                          {categoryTab === 'points' && 'Points Per Game Leaders'}
-                          {categoryTab === 'rebounds' && 'Rebounds Per Game Leaders'}
-                          {categoryTab === 'assists' && 'Assists Per Game Leaders'}
-                          {categoryTab === 'steals' && 'Steals Per Game Leaders'}
-                          {categoryTab === 'blocks' && 'Blocks Per Game Leaders'}
-                          {categoryTab === 'threePoints' && '3-Point Field Goals Made Leaders'}
-                          {categoryTab === 'fantasyPoints' && 'Fantasy Points Per Game Leaders'}
-                          {categoryTab === 'efficiency' && 'Efficiency Rating Leaders'}
-                        </Typography>
-                      </Box>
-                    }
-                    action={
-                      <Chip 
-                        icon={<MilitaryTech />} 
-                        label="Top 10" 
-                        color="primary" 
-                      />
-                    }
-                  />
-                  <Divider />
-                  <TableContainer>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell align="center">Rank</TableCell>
-                          <TableCell>Player</TableCell>
-                          <TableCell>Team</TableCell>
-                          <TableCell>Pos</TableCell>
-                          <TableCell align="right">GP</TableCell>
-                          <TableCell align="right">MIN</TableCell>
-                          <TableCell align="right">
-                            {categoryTab === 'points' && 'PPG'}
-                            {categoryTab === 'rebounds' && 'RPG'}
-                            {categoryTab === 'assists' && 'APG'}
-                            {categoryTab === 'steals' && 'SPG'}
-                            {categoryTab === 'blocks' && 'BPG'}
-                            {categoryTab === 'threePoints' && '3PM'}
-                            {categoryTab === 'fantasyPoints' && 'FAN'}
-                            {categoryTab === 'efficiency' && 'EFF'}
-                          </TableCell>
-                          <TableCell align="right">FG%</TableCell>
-                          <TableCell align="right">3P%</TableCell>
-                          <TableCell align="right">Trend</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {seasonLeaders[categoryTab as keyof SeasonLeaders]?.slice(0, 10).map((player, index) => (
-                          <TableRow key={player.id} hover>
-                            <TableCell align="center">
-                              <Avatar 
-                                sx={{ 
-                                  width: 32, 
-                                  height: 32, 
-                                  bgcolor: index === 0 ? theme.palette.warning.main : 
-                                          index === 1 ? theme.palette.grey[500] : 
-                                          index === 2 ? theme.palette.warning.dark : 
-                                          theme.palette.grey[300],
-                                  color: index < 3 ? 'white' : 'text.primary'
-                                }}
-                              >
-                                {index + 1}
-                              </Avatar>
-                            </TableCell>
-                            <TableCell>
-                              <Typography fontWeight="bold">{player.name}</Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip label={player.teamAbbrev} size="small" variant="outlined" />
-                            </TableCell>
-                            <TableCell>{player.position}</TableCell>
-                            <TableCell align="right">{player.gamesPlayed}</TableCell>
-                            <TableCell align="right">{player.minutesPerGame.toFixed(1)}</TableCell>
-                            <TableCell align="right">
-                              <Typography fontWeight="bold" color="primary.main">
-                                {categoryTab === 'points' && player.pointsPerGame.toFixed(1)}
-                                {categoryTab === 'rebounds' && player.reboundsPerGame.toFixed(1)}
-                                {categoryTab === 'assists' && player.assistsPerGame.toFixed(1)}
-                                {categoryTab === 'steals' && player.stealsPerGame.toFixed(1)}
-                                {categoryTab === 'blocks' && player.blocksPerGame.toFixed(1)}
-                                {categoryTab === 'threePoints' && player.threePointsMade.toFixed(1)}
-                                {categoryTab === 'fantasyPoints' && player.fantasyPointsPerGame.toFixed(1)}
-                                {categoryTab === 'efficiency' && player.efficiency.toFixed(1)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">{player.fieldGoalPercentage.toFixed(1)}%</TableCell>
-                            <TableCell align="right">{player.threePointPercentage.toFixed(1)}%</TableCell>
-                            <TableCell align="right">
-                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                                {getTrendIcon(player.trend)}
-                                <Typography variant="caption" sx={{ ml: 0.5 }}>
-                                  {player.last5Avg.toFixed(1)}
-                                </Typography>
-                              </Box>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Card>
-              </Grid>
-              
-              <Grid item xs={12} lg={4}>
-                <Card sx={{ borderRadius: 3, height: '100%' }}>
-                  <CardHeader 
-                    title={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <EmojiEvents />
-                        <Typography variant="h6">Season Summary</Typography>
-                      </Box>
-                    }
-                  />
-                  <Divider />
-                  <CardContent>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      <Box>
-                        <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                          Scoring Leader
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography variant="h6">
-                              {seasonLeaders.points[0]?.name}
-                            </Typography>
-                            <Chip 
-                              label={seasonLeaders.points[0]?.teamAbbrev} 
-                              size="small" 
-                              variant="outlined" 
-                            />
-                          </Box>
-                          <Typography variant="h5" fontWeight="bold" color="primary.main">
-                            {seasonLeaders.points[0]?.pointsPerGame.toFixed(1)}
-                          </Typography>
-                        </Box>
-                        <Typography variant="caption" color="text.secondary">
-                          {seasonLeaders.points[0]?.position} · {seasonLeaders.points[0]?.gamesPlayed} GP
-                        </Typography>
-                      </Box>
-                      
-                      <Divider />
-                      
-                      <Box>
-                        <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                          Rebounding Leader
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Typography variant="body1" fontWeight="bold">
-                            {seasonLeaders.rebounds[0]?.name}
-                          </Typography>
-                          <Typography variant="body1" fontWeight="bold" color="primary.main">
-                            {seasonLeaders.rebounds[0]?.reboundsPerGame.toFixed(1)}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      
-                      <Box>
-                        <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                          Assists Leader
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Typography variant="body1" fontWeight="bold">
-                            {seasonLeaders.assists[0]?.name}
-                          </Typography>
-                          <Typography variant="body1" fontWeight="bold" color="primary.main">
-                            {seasonLeaders.assists[0]?.assistsPerGame.toFixed(1)}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      
-                      <Divider />
-                      
-                      <Box>
-                        <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                          Efficiency Leader
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Typography variant="h6">
-                            {seasonLeaders.efficiency[0]?.name}
-                          </Typography>
-                          <Typography variant="h5" fontWeight="bold" color="primary.main">
-                            {seasonLeaders.efficiency[0]?.efficiency.toFixed(1)}
-                          </Typography>
-                        </Box>
-                        <Typography variant="caption" color="text.secondary">
-                          {seasonLeaders.efficiency[0]?.position} · {seasonLeaders.efficiency[0]?.team}
-                        </Typography>
-                      </Box>
-                      
-                      <Alert severity="info" sx={{ mt: 2 }}>
-                        <Typography variant="body2">
-                          <strong>Data source:</strong> SportsData.io Real-Time API + Comprehensive JSON database
-                        </Typography>
-                      </Alert>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Fade>
-        )}
-
-        {/* ========== ADVANCED METRICS PANEL ========== */}
-        {statsTab === 'advanced' && !playersLoading && (
-          <Fade in>
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
-                <Card sx={{ borderRadius: 3 }}>
-                  <CardHeader 
-                    title={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Functions />
-                        <Typography variant="h6">Advanced Statistics</Typography>
-                      </Box>
-                    }
-                    subheader="True Shooting % · Usage Rate · Win Shares · BPM"
-                  />
-                  <Divider />
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Player</TableCell>
-                          <TableCell align="center">TS%</TableCell>
-                          <TableCell align="center">eFG%</TableCell>
-                          <TableCell align="center">USG%</TableCell>
-                          <TableCell align="center">WS</TableCell>
-                          <TableCell align="center">BPM</TableCell>
-                          <TableCell align="center">VORP</TableCell>
-                          <TableCell align="center">ORTG</TableCell>
-                          <TableCell align="center">DRTG</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {playerStats
-                          .sort((a, b) => b.winShares - a.winShares)
-                          .slice(0, 15)
-                          .map((player) => (
-                            <TableRow key={player.id} hover>
-                              <TableCell>
-                                <Box>
-                                  <Typography variant="body2" fontWeight="bold">
-                                    {player.name}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {player.teamAbbrev} · {player.position}
-                                  </Typography>
-                                </Box>
-                              </TableCell>
-                              <TableCell align="center">
-                                <Typography fontWeight="bold" color={player.trueShootingPercentage > 60 ? 'success.main' : 'text.primary'}>
-                                  {player.trueShootingPercentage.toFixed(1)}%
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="center">
-                                {player.effectiveFieldGoalPercentage.toFixed(1)}%
-                              </TableCell>
-                              <TableCell align="center">
-                                {player.usageRate.toFixed(1)}%
-                              </TableCell>
-                              <TableCell align="center">
-                                <Typography fontWeight="bold" color="primary.main">
-                                  {player.winShares.toFixed(1)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="center">
-                                {player.boxPlusMinus > 0 ? '+' : ''}{player.boxPlusMinus.toFixed(1)}
-                              </TableCell>
-                              <TableCell align="center">
-                                {player.valueOverReplacement.toFixed(1)}
-                              </TableCell>
-                              <TableCell align="center">
-                                {Math.floor(115 + Math.random() * 8)}
-                              </TableCell>
-                              <TableCell align="center">
-                                {Math.floor(108 + Math.random() * 6)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Card>
-              </Grid>
-              
-              <Grid item xs={12} lg={4}>
-                <Card sx={{ borderRadius: 3 }}>
-                  <CardHeader 
-                    title={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Whatshot />
-                        <Typography variant="h6">Efficiency Leaders</Typography>
-                      </Box>
-                    }
-                  />
-                  <Divider />
-                  <CardContent>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {playerStats
-                        .sort((a, b) => b.trueShootingPercentage - a.trueShootingPercentage)
-                        .slice(0, 5)
-                        .map((player, i) => (
-                          <Box key={player.id}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Typography variant="body2" color="text.secondary">
-                                  #{i + 1}
-                                </Typography>
-                                <Typography variant="body1">
-                                  {player.name}
-                                </Typography>
-                              </Box>
-                              <Chip 
-                                label={`${player.trueShootingPercentage.toFixed(1)}%`} 
-                                size="small" 
-                                color={i === 0 ? 'warning' : 'primary'}
-                              />
-                            </Box>
-                            <LinearProgress 
-                              variant="determinate" 
-                              value={player.trueShootingPercentage} 
-                              sx={{ 
-                                height: 6, 
-                                borderRadius: 3,
-                                bgcolor: alpha(theme.palette.primary.main, 0.1),
-                                '& .MuiLinearProgress-bar': {
-                                  bgcolor: i === 0 ? theme.palette.warning.main : theme.palette.primary.main
-                                }
-                              }} 
-                            />
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                eFG%: {player.effectiveFieldGoalPercentage.toFixed(1)}%
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                USG: {player.usageRate.toFixed(1)}%
-                              </Typography>
-                            </Box>
-                          </Box>
-                        ))}
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Fade>
-        )}
-
-        {/* ========== TRENDS PANEL ========== */}
-        {statsTab === 'trends' && (
-          <Fade in>
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <Card sx={{ borderRadius: 3 }}>
-                  <CardHeader 
-                    title={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <TrendingUp />
-                        <Typography variant="h6">Hot Players (Last 5 Games)</Typography>
-                      </Box>
-                    }
-                  />
-                  <Divider />
-                  <CardContent>
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Player</TableCell>
-                            <TableCell>Team</TableCell>
-                            <TableCell align="right">Season</TableCell>
-                            <TableCell align="right">Last 5</TableCell>
-                            <TableCell align="right">Diff</TableCell>
-                            <TableCell align="center">Trend</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {playerStats
-                            .filter(p => p.last5Avg > p.pointsPerGame * 1.1)
-                            .sort((a, b) => (b.last5Avg - b.pointsPerGame) - (a.last5Avg - a.pointsPerGame))
-                            .slice(0, 8)
-                            .map((player) => {
-                              const diff = player.last5Avg - player.pointsPerGame;
-                              return (
-                                <TableRow key={player.id} hover>
-                                  <TableCell>
-                                    <Typography fontWeight="bold">{player.name}</Typography>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Chip label={player.teamAbbrev} size="small" variant="outlined" />
-                                  </TableCell>
-                                  <TableCell align="right">{player.pointsPerGame.toFixed(1)}</TableCell>
-                                  <TableCell align="right">
-                                    <Typography fontWeight="bold" color="success.main">
-                                      {player.last5Avg.toFixed(1)}
-                                    </Typography>
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <Chip 
-                                      label={`+${diff.toFixed(1)}`} 
-                                      size="small" 
-                                      color="success"
-                                      sx={{ fontWeight: 'bold' }}
-                                    />
-                                  </TableCell>
-                                  <TableCell align="center">
-                                    <TrendingUp sx={{ color: theme.palette.success.main }} />
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </CardContent>
-                </Card>
-              </Grid>
-              
-              <Grid item xs={12} md={6}>
-                <Card sx={{ borderRadius: 3 }}>
-                  <CardHeader 
-                    title={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <TrendingDown />
-                        <Typography variant="h6">Cold Players (Last 5 Games)</Typography>
-                      </Box>
-                    }
-                  />
-                  <Divider />
-                  <CardContent>
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Player</TableCell>
-                            <TableCell>Team</TableCell>
-                            <TableCell align="right">Season</TableCell>
-                            <TableCell align="right">Last 5</TableCell>
-                            <TableCell align="right">Diff</TableCell>
-                            <TableCell align="center">Trend</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {playerStats
-                            .filter(p => p.last5Avg < p.pointsPerGame * 0.9)
-                            .sort((a, b) => (a.pointsPerGame - a.last5Avg) - (b.pointsPerGame - b.last5Avg))
-                            .slice(0, 8)
-                            .map((player) => {
-                              const diff = player.pointsPerGame - player.last5Avg;
-                              return (
-                                <TableRow key={player.id} hover>
-                                  <TableCell>
-                                    <Typography fontWeight="bold">{player.name}</Typography>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Chip label={player.teamAbbrev} size="small" variant="outlined" />
-                                  </TableCell>
-                                  <TableCell align="right">{player.pointsPerGame.toFixed(1)}</TableCell>
-                                  <TableCell align="right">
-                                    <Typography fontWeight="bold" color="error.main">
-                                      {player.last5Avg.toFixed(1)}
-                                    </Typography>
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <Chip 
-                                      label={`-${diff.toFixed(1)}`} 
-                                      size="small" 
-                                      color="error"
-                                      sx={{ fontWeight: 'bold' }}
-                                    />
-                                  </TableCell>
-                                  <TableCell align="center">
-                                    <TrendingDown sx={{ color: theme.palette.error.main }} />
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Fade>
-        )}
-
         {/* Educational Footer */}
         <Paper sx={{ mt: 6, p: 3, borderRadius: 3, bgcolor: alpha(theme.palette.primary.main, 0.02) }}>
           <Grid container spacing={3}>
@@ -2456,13 +1794,11 @@ const SeasonStatsScreen: React.FC = () => {
                 About This Data
               </Typography>
               <Typography variant="body2" color="text.secondary" paragraph>
-                All statistics are sourced from your comprehensive JSON databases via the Flask backend. 
-                Player stats come from <strong>players_data_comprehensive_fixed.json</strong>, team stats from 
-                <strong>sports_stats_database_comprehensive.json</strong>. Advanced metrics are calculated 
-                using real NBA formulas.
+                All statistics are sourced from comprehensive JSON databases via the Flask backend. 
+                Advanced metrics are calculated using real sports formulas.
               </Typography>
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                <Chip icon={<CheckCircle />} label="SportsData.io integration" size="small" variant="outlined" />
+                <Chip icon={<CheckCircle />} label="Tank01 API integration" size="small" variant="outlined" />
                 <Chip icon={<Downloading />} label="Updated daily" size="small" variant="outlined" />
                 <Chip icon={<Functions />} label="Advanced metrics included" size="small" variant="outlined" />
               </Box>
@@ -2472,14 +1808,14 @@ const SeasonStatsScreen: React.FC = () => {
                 Last updated: {new Date().toLocaleString()}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Data sources: SportsData.io, JSON databases
+                Data sources: Tank01 API, JSON databases
               </Typography>
             </Grid>
           </Grid>
         </Paper>
       </Box>
 
-      {/* Player Detail Modal - Would be implemented as a Dialog */}
+      {/* Player Detail Modal */}
       {selectedPlayer && (
         <Zoom in={!!selectedPlayer}>
           <Paper 
@@ -2547,6 +1883,18 @@ const SeasonStatsScreen: React.FC = () => {
         </Zoom>
       )}
     </Box>
+  );
+};
+
+// =============================================
+// Main exported component wrapped with ProtectedRoute
+// =============================================
+
+const SeasonStatsScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="SeasonStats">
+      <SeasonStatsContent />
+    </ProtectedRoute>
   );
 };
 

@@ -92,7 +92,12 @@ const NCAABGamesPage: React.FC = () => {
                   <Typography variant="body1" sx={{ mt: 1 }}>
                     Score: {game.away_score ?? game.away_team_score ?? '-'} – {game.home_score ?? game.home_team_score ?? '-'}
                   </Typography>
-                  <Button component={Link} to={`/ncaab/games/${game.id}`} sx={{ mt: 2 }}>
+                  <Button
+                    component={Link}
+                    to={`/ncaab/games/${game.id}`}
+                    state={{ game }} // 👈 pass the full game object
+                    sx={{ mt: 2 }}
+                  >
                     View Details
                   </Button>
                 </CardContent>

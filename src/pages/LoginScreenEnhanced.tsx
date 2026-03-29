@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Container,
   Paper,
@@ -18,7 +18,7 @@ import GoogleIcon from '@mui/icons-material/Google';
 type AuthMode = 'login' | 'signup';
 
 const LoginScreenEnhanced: React.FC = () => {
-  const { signIn, signUp, signInWithGoogle, error, loading, clearError } = useAuth();
+  const { user, login, signUp, signInWithGoogle, error, loading, clearError } = useAuth();
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<AuthMode>('login');
@@ -26,24 +26,33 @@ const LoginScreenEnhanced: React.FC = () => {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      if (mode === 'login') {
-        await signIn(email, password);
-      } else {
-        await signUp(email, password, displayName);
-      }
+  // Navigate as soon as user becomes available (and loading is done)
+  useEffect(() => {
+    if (user && !loading) {
       navigate('/home', { replace: true });
-    } catch (err) {
-      // Error is already set in context
     }
-  };
+  }, [user, loading, navigate]);
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  console.log('🔥 handleSubmit called, mode:', mode, 'email:', email);
+  try {
+    if (mode === 'login') {
+      await login(email, password);
+    } else {
+      await signUp(email, password, displayName);
+    }
+    console.log('✅ signIn/signUp succeeded, navigating...');
+    navigate('/home', { replace: true });
+  } catch (err) {
+    console.error('❌ Login failed:', err);
+  }
+};
 
   const handleGoogleLogin = async () => {
     try {
       await signInWithGoogle();
-      navigate('/home', { replace: true });
+      // No navigate here – the useEffect will handle it
     } catch (err) {
       // Error handled by context
     }

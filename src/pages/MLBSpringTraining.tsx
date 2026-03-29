@@ -38,6 +38,9 @@ import {
   LocationOn as LocationIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
+import ProtectedRoute from '../components/ProtectedRoute';
+import PlanGuard from '../components/PlanGuard';
+import GeneratorCredits from '../components/GeneratorCredits';
 
 // ----------------------------------------------------------------------
 // Types – based on expected MLB Spring Training API response
@@ -296,14 +299,16 @@ const ProspectChip = () => (
 );
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component with Plan Guards
 // ----------------------------------------------------------------------
-
-const MLBSpringTraining: React.FC = () => {
+const MLBSpringTrainingContent: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [tabValue, setTabValue] = useState<number>(0);
   const [leagueFilter, setLeagueFilter] = useState<string>('all');
   const [positionFilter, setPositionFilter] = useState<string>('all');
+
+  // Mock user plan for testing - in production this would come from auth/user context
+  const [userPlan, setUserPlan] = useState('starter'); // 'starter', 'analytics', or 'generator'
 
   const yearOptions = useMemo(() => {
     const current = new Date().getFullYear();
@@ -398,10 +403,368 @@ const MLBSpringTraining: React.FC = () => {
     );
   }
 
+  // 🔵 Starter Content - Everyone sees games tab
+  const renderGamesTab = () => (
+    <>
+      <Typography variant="h6" gutterBottom>
+        Spring Training Games
+      </Typography>
+      {filteredGames.length === 0 ? (
+        <Alert severity="info">No games found for the selected filter.</Alert>
+      ) : (
+        <Grid container spacing={3}>
+          {filteredGames.map((game) => (
+            <Grid item xs={12} md={6} key={game.id}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                    <GameStatusChip status={game.status} />
+                    <LeagueChip league={game.league} />
+                  </Box>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1 }}>
+                      <Typography variant="h6" fontWeight="bold">
+                        {game.away_team}
+                      </Typography>
+                    </Box>
+                    <Box textAlign="center" sx={{ px: 2 }}>
+                      {game.status === 'scheduled' ? (
+                        <Typography variant="body1">@</Typography>
+                      ) : (
+                        <Typography variant="h5" fontWeight="bold">
+                          {game.away_score ?? 0} - {game.home_score ?? 0}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1, justifyContent: 'flex-end' }}>
+                      <Typography variant="h6" fontWeight="bold">
+                        {game.home_team}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Divider sx={{ my: 2 }} />
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <LocationIcon fontSize="small" color="action" />
+                      <Typography variant="caption" color="text.secondary">
+                        {game.venue}, {game.location}
+                      </Typography>
+                    </Box>
+                    {game.weather && (
+                      <Box display="flex" alignItems="center" gap={1}>
+                        {game.weather.temperature > 70 ? <SunnyIcon fontSize="small" /> : <ColdIcon fontSize="small" />}
+                        <Typography variant="caption" color="text.secondary">
+                          {game.weather.temperature}°F • {game.weather.condition}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                  <Box display="flex" justifyContent="space-between" mt={1}>
+                    <Typography variant="caption" color="text.secondary">
+                      {game.date ? new Date(game.date).toLocaleString() : 'TBD'}
+                    </Typography>
+                    {game.broadcast && (
+                      <Chip label={game.broadcast} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                    )}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+    </>
+  );
+
+  // 🟣 Analytics Content - Only Analytics+ users see standings
+  const renderStandingsTab = () => (
+    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
+      <Alert severity="info" sx={{ mt: 2 }}>
+        Upgrade to Analytics Package to access Spring Training standings.
+      </Alert>
+    }>
+      <>
+        <Typography variant="h6" gutterBottom>
+          {leagueFilter === 'all' ? 'Spring Training Standings' : `${leagueFilter} League Standings`}
+        </Typography>
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Team</TableCell>
+                <TableCell align="center">League</TableCell>
+                <TableCell align="center">W</TableCell>
+                <TableCell align="center">L</TableCell>
+                <TableCell align="center">T</TableCell>
+                <TableCell align="center">PCT</TableCell>
+                <TableCell align="center">GB</TableCell>
+                <TableCell align="center">HOME</TableCell>
+                <TableCell align="center">AWAY</TableCell>
+                <TableCell align="center">STRK</TableCell>
+                <TableCell align="center">L10</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredStandings.map((team) => (
+                <TableRow key={team.id} hover>
+                  <TableCell>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body2" fontWeight="medium">
+                        {team.team}
+                      </Typography>
+                      <Chip
+                        label={team.abbreviation}
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 20, fontSize: '0.7rem' }}
+                      />
+                    </Box>
+                  </TableCell>
+                  <TableCell align="center">
+                    <LeagueChip league={team.league} />
+                  </TableCell>
+                  <TableCell align="center">{team.wins ?? 0}</TableCell>
+                  <TableCell align="center">{team.losses ?? 0}</TableCell>
+                  <TableCell align="center">{team.ties ?? 0}</TableCell>
+                  <TableCell align="center">
+                    <WinPercentageBar percentage={team.win_percentage} />
+                  </TableCell>
+                  <TableCell align="center">{team.games_back?.toFixed(1) ?? '—'}</TableCell>
+                  <TableCell align="center">{team.home_record ?? '—'}</TableCell>
+                  <TableCell align="center">{team.away_record ?? '—'}</TableCell>
+                  <TableCell align="center">
+                    <StreakChip streak={team.streak} />
+                  </TableCell>
+                  <TableCell align="center">{team.last_10 ?? '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </>
+    </PlanGuard>
+  );
+
+  // 🟣 Analytics Content - Only Analytics+ users see hitting leaders
+  const renderHittingTab = () => (
+    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
+      <Alert severity="info" sx={{ mt: 2 }}>
+        Upgrade to Analytics Package to access hitting statistics.
+      </Alert>
+    }>
+      <>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">Spring Training Hitting Leaders</Typography>
+          <FormControl sx={{ minWidth: 150 }} size="small">
+            <InputLabel id="position-filter-label">Position</InputLabel>
+            <Select
+              labelId="position-filter-label"
+              value={positionFilter}
+              label="Position"
+              onChange={handlePositionChange}
+            >
+              <MenuItem value="all">All Positions</MenuItem>
+              <MenuItem value="C">Catcher</MenuItem>
+              <MenuItem value="1B">First Base</MenuItem>
+              <MenuItem value="2B">Second Base</MenuItem>
+              <MenuItem value="3B">Third Base</MenuItem>
+              <MenuItem value="SS">Shortstop</MenuItem>
+              <MenuItem value="OF">Outfield</MenuItem>
+              <MenuItem value="DH">DH</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Player</TableCell>
+                <TableCell align="center">Team</TableCell>
+                <TableCell align="center">Pos</TableCell>
+                <TableCell align="center">AVG</TableCell>
+                <TableCell align="center">HR</TableCell>
+                <TableCell align="center">RBI</TableCell>
+                <TableCell align="center">OPS</TableCell>
+                <TableCell align="center">Prospect</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredHitters.map((player) => (
+                <TableRow key={player.id} hover>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">
+                      {player.name}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="center">{player.team ?? '—'}</TableCell>
+                  <TableCell align="center">{player.position ?? '—'}</TableCell>
+                  <TableCell align="center">{player.avg?.toFixed(3) ?? '.000'}</TableCell>
+                  <TableCell align="center">{player.hr ?? 0}</TableCell>
+                  <TableCell align="center">{player.rbi ?? 0}</TableCell>
+                  <TableCell align="center">{player.ops?.toFixed(3) ?? '.000'}</TableCell>
+                  <TableCell align="center">
+                    {player.is_prospect && <ProspectChip />}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </>
+    </PlanGuard>
+  );
+
+  // 🟣 Analytics Content - Only Analytics+ users see pitching leaders
+  const renderPitchingTab = () => (
+    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
+      <Alert severity="info" sx={{ mt: 2 }}>
+        Upgrade to Analytics Package to access pitching statistics.
+      </Alert>
+    }>
+      <>
+        <Typography variant="h6" gutterBottom>
+          Spring Training Pitching Leaders
+        </Typography>
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Player</TableCell>
+                <TableCell align="center">Team</TableCell>
+                <TableCell align="center">IP</TableCell>
+                <TableCell align="center">ERA</TableCell>
+                <TableCell align="center">WHIP</TableCell>
+                <TableCell align="center">SO</TableCell>
+                <TableCell align="center">Prospect</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(springData?.pitchers ?? []).map((player) => (
+                <TableRow key={player.id} hover>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">
+                      {player.name}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="center">{player.team ?? '—'}</TableCell>
+                  <TableCell align="center">{player.ip?.toFixed(1) ?? '0.0'}</TableCell>
+                  <TableCell align="center">{player.era?.toFixed(2) ?? '0.00'}</TableCell>
+                  <TableCell align="center">{player.whip?.toFixed(2) ?? '0.00'}</TableCell>
+                  <TableCell align="center">{player.so ?? 0}</TableCell>
+                  <TableCell align="center">
+                    {player.is_prospect && <ProspectChip />}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </>
+    </PlanGuard>
+  );
+
+  // 🟠 Generator Content - Only Generator users see top prospects
+  const renderProspectsTab = () => (
+    <PlanGuard requiredPlan="generator" currentPlan={userPlan} fallback={
+      <Alert severity="info" sx={{ mt: 2 }}>
+        Upgrade to Generators Package to access top prospect rankings and detailed scouting reports.
+      </Alert>
+    }>
+      <>
+        <Typography variant="h6" gutterBottom>
+          Top Spring Training Prospects
+        </Typography>
+        <Grid container spacing={3}>
+          {(springData?.prospects ?? []).map((prospect) => (
+            <Grid item xs={12} md={6} lg={4} key={prospect.id}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h6">{prospect.name}</Typography>
+                    <ProspectChip />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {prospect.team ?? '—'} • {prospect.position ?? '—'}
+                  </Typography>
+                  <Divider sx={{ my: 1 }} />
+                  {prospect.avg != null ? (
+                    <Box display="flex" justifyContent="space-between" mt={1}>
+                      <Typography variant="body2">AVG</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {prospect.avg.toFixed(3)}
+                      </Typography>
+                    </Box>
+                  ) : prospect.era != null ? (
+                    <Box display="flex" justifyContent="space-between" mt={1}>
+                      <Typography variant="body2">ERA</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {prospect.era.toFixed(2)}
+                      </Typography>
+                    </Box>
+                  ) : null}
+                  {prospect.hr != null && (
+                    <Box display="flex" justifyContent="space-between">
+                      <Typography variant="body2">HR</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {prospect.hr}
+                      </Typography>
+                    </Box>
+                  )}
+                  {prospect.rbi != null && (
+                    <Box display="flex" justifyContent="space-between">
+                      <Typography variant="body2">RBI</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {prospect.rbi}
+                      </Typography>
+                    </Box>
+                  )}
+                  {prospect.so != null && (
+                    <Box display="flex" justifyContent="space-between">
+                      <Typography variant="body2">SO</Typography>
+                      <Typography variant="body2" fontWeight="bold">
+                        {prospect.so}
+                      </Typography>
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </>
+    </PlanGuard>
+  );
+
+  // 🟠 Generator Content - Only Generator users see credits
+  const renderGeneratorCredits = () => {
+    return (
+      <PlanGuard requiredPlan="generator" currentPlan={userPlan}>
+        <Box sx={{ mb: 3 }}>
+          <GeneratorCredits />
+        </Box>
+      </PlanGuard>
+    );
+  };
+
   // springData is guaranteed to exist because fetch returns mock data on failure,
   // but we add optional chaining everywhere to be extra safe.
   return (
     <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
+      {/* Plan indicator chip for testing */}
+      <Box display="flex" justifyContent="flex-end" mb={2}>
+        <Chip 
+          label={`Current Plan: ${userPlan.toUpperCase()}`} 
+          color={userPlan === 'generator' ? 'warning' : userPlan === 'analytics' ? 'secondary' : 'primary'}
+          onDelete={() => {
+            // Cycle through plans for testing
+            if (userPlan === 'starter') setUserPlan('analytics');
+            else if (userPlan === 'analytics') setUserPlan('generator');
+            else setUserPlan('starter');
+          }}
+          deleteIcon={<Box component="span">↻</Box>}
+        />
+      </Box>
+
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box display="flex" alignItems="center" gap={2}>
@@ -446,6 +809,9 @@ const MLBSpringTraining: React.FC = () => {
         </Alert>
       )}
 
+      {/* 🟠 Generator Content - Show credits at the top for Generator users */}
+      {renderGeneratorCredits()}
+
       {/* League filter */}
       <Box display="flex" justifyContent="flex-end" mb={2}>
         <FormControl sx={{ minWidth: 150 }} size="small">
@@ -474,314 +840,24 @@ const MLBSpringTraining: React.FC = () => {
         </Tabs>
       </Box>
 
-      {/* Tab: Games */}
-      {tabValue === 0 && (
-        <>
-          <Typography variant="h6" gutterBottom>
-            Spring Training Games
-          </Typography>
-          {filteredGames.length === 0 ? (
-            <Alert severity="info">No games found for the selected filter.</Alert>
-          ) : (
-            <Grid container spacing={3}>
-              {filteredGames.map((game) => (
-                <Grid item xs={12} md={6} key={game.id}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                        <GameStatusChip status={game.status} />
-                        <LeagueChip league={game.league} />
-                      </Box>
-                      <Box display="flex" justifyContent="space-between" alignItems="center">
-                        <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1 }}>
-                          <Typography variant="h6" fontWeight="bold">
-                            {game.away_team}
-                          </Typography>
-                        </Box>
-                        <Box textAlign="center" sx={{ px: 2 }}>
-                          {game.status === 'scheduled' ? (
-                            <Typography variant="body1">@</Typography>
-                          ) : (
-                            <Typography variant="h5" fontWeight="bold">
-                              {game.away_score ?? 0} - {game.home_score ?? 0}
-                            </Typography>
-                          )}
-                        </Box>
-                        <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1, justifyContent: 'flex-end' }}>
-                          <Typography variant="h6" fontWeight="bold">
-                            {game.home_team}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Divider sx={{ my: 2 }} />
-                      <Box display="flex" justifyContent="space-between" alignItems="center">
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <LocationIcon fontSize="small" color="action" />
-                          <Typography variant="caption" color="text.secondary">
-                            {game.venue}, {game.location}
-                          </Typography>
-                        </Box>
-                        {game.weather && (
-                          <Box display="flex" alignItems="center" gap={1}>
-                            {game.weather.temperature > 70 ? <SunnyIcon fontSize="small" /> : <ColdIcon fontSize="small" />}
-                            <Typography variant="caption" color="text.secondary">
-                              {game.weather.temperature}°F • {game.weather.condition}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Box>
-                      <Box display="flex" justifyContent="space-between" mt={1}>
-                        <Typography variant="caption" color="text.secondary">
-                          {game.date ? new Date(game.date).toLocaleString() : 'TBD'}
-                        </Typography>
-                        {game.broadcast && (
-                          <Chip label={game.broadcast} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-                        )}
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          )}
-        </>
-      )}
-
-      {/* Tab: Standings */}
-      {tabValue === 1 && (
-        <>
-          <Typography variant="h6" gutterBottom>
-            {leagueFilter === 'all' ? 'Spring Training Standings' : `${leagueFilter} League Standings`}
-          </Typography>
-          <TableContainer component={Paper} variant="outlined">
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Team</TableCell>
-                  <TableCell align="center">League</TableCell>
-                  <TableCell align="center">W</TableCell>
-                  <TableCell align="center">L</TableCell>
-                  <TableCell align="center">T</TableCell>
-                  <TableCell align="center">PCT</TableCell>
-                  <TableCell align="center">GB</TableCell>
-                  <TableCell align="center">HOME</TableCell>
-                  <TableCell align="center">AWAY</TableCell>
-                  <TableCell align="center">STRK</TableCell>
-                  <TableCell align="center">L10</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredStandings.map((team) => (
-                  <TableRow key={team.id} hover>
-                    <TableCell>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Typography variant="body2" fontWeight="medium">
-                          {team.team}
-                        </Typography>
-                        <Chip
-                          label={team.abbreviation}
-                          size="small"
-                          variant="outlined"
-                          sx={{ height: 20, fontSize: '0.7rem' }}
-                        />
-                      </Box>
-                    </TableCell>
-                    <TableCell align="center">
-                      <LeagueChip league={team.league} />
-                    </TableCell>
-                    <TableCell align="center">{team.wins ?? 0}</TableCell>
-                    <TableCell align="center">{team.losses ?? 0}</TableCell>
-                    <TableCell align="center">{team.ties ?? 0}</TableCell>
-                    <TableCell align="center">
-                      <WinPercentageBar percentage={team.win_percentage} />
-                    </TableCell>
-                    <TableCell align="center">{team.games_back?.toFixed(1) ?? '—'}</TableCell>
-                    <TableCell align="center">{team.home_record ?? '—'}</TableCell>
-                    <TableCell align="center">{team.away_record ?? '—'}</TableCell>
-                    <TableCell align="center">
-                      <StreakChip streak={team.streak} />
-                    </TableCell>
-                    <TableCell align="center">{team.last_10 ?? '—'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </>
-      )}
-
-      {/* Tab: Hitting Leaders */}
-      {tabValue === 2 && (
-        <>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h6">Spring Training Hitting Leaders</Typography>
-            <FormControl sx={{ minWidth: 150 }} size="small">
-              <InputLabel id="position-filter-label">Position</InputLabel>
-              <Select
-                labelId="position-filter-label"
-                value={positionFilter}
-                label="Position"
-                onChange={handlePositionChange}
-              >
-                <MenuItem value="all">All Positions</MenuItem>
-                <MenuItem value="C">Catcher</MenuItem>
-                <MenuItem value="1B">First Base</MenuItem>
-                <MenuItem value="2B">Second Base</MenuItem>
-                <MenuItem value="3B">Third Base</MenuItem>
-                <MenuItem value="SS">Shortstop</MenuItem>
-                <MenuItem value="OF">Outfield</MenuItem>
-                <MenuItem value="DH">DH</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
-          <TableContainer component={Paper} variant="outlined">
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Player</TableCell>
-                  <TableCell align="center">Team</TableCell>
-                  <TableCell align="center">Pos</TableCell>
-                  <TableCell align="center">AVG</TableCell>
-                  <TableCell align="center">HR</TableCell>
-                  <TableCell align="center">RBI</TableCell>
-                  <TableCell align="center">OPS</TableCell>
-                  <TableCell align="center">Prospect</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredHitters.map((player) => (
-                  <TableRow key={player.id} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {player.name}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="center">{player.team ?? '—'}</TableCell>
-                    <TableCell align="center">{player.position ?? '—'}</TableCell>
-                    <TableCell align="center">{player.avg?.toFixed(3) ?? '.000'}</TableCell>
-                    <TableCell align="center">{player.hr ?? 0}</TableCell>
-                    <TableCell align="center">{player.rbi ?? 0}</TableCell>
-                    <TableCell align="center">{player.ops?.toFixed(3) ?? '.000'}</TableCell>
-                    <TableCell align="center">
-                      {player.is_prospect && <ProspectChip />}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </>
-      )}
-
-      {/* Tab: Pitching Leaders */}
-      {tabValue === 3 && (
-        <>
-          <Typography variant="h6" gutterBottom>
-            Spring Training Pitching Leaders
-          </Typography>
-          <TableContainer component={Paper} variant="outlined">
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Player</TableCell>
-                  <TableCell align="center">Team</TableCell>
-                  <TableCell align="center">IP</TableCell>
-                  <TableCell align="center">ERA</TableCell>
-                  <TableCell align="center">WHIP</TableCell>
-                  <TableCell align="center">SO</TableCell>
-                  <TableCell align="center">Prospect</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {(springData?.pitchers ?? []).map((player) => (
-                  <TableRow key={player.id} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {player.name}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="center">{player.team ?? '—'}</TableCell>
-                    <TableCell align="center">{player.ip?.toFixed(1) ?? '0.0'}</TableCell>
-                    <TableCell align="center">{player.era?.toFixed(2) ?? '0.00'}</TableCell>
-                    <TableCell align="center">{player.whip?.toFixed(2) ?? '0.00'}</TableCell>
-                    <TableCell align="center">{player.so ?? 0}</TableCell>
-                    <TableCell align="center">
-                      {player.is_prospect && <ProspectChip />}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </>
-      )}
-
-{/* Tab: Top Prospects */}
-      {tabValue === 4 && (
-        <>
-          <Typography variant="h6" gutterBottom>
-            Top Spring Training Prospects
-          </Typography>
-          <Grid container spacing={3}>
-            {(springData?.prospects ?? []).map((prospect) => (
-              <Grid item xs={12} md={6} lg={4} key={prospect.id}>
-                <Card variant="outlined">
-                  <CardContent>
-                    <Box display="flex" justifyContent="space-between" alignItems="center">
-                      <Typography variant="h6">{prospect.name}</Typography>
-                      <ProspectChip />
-                    </Box>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      {prospect.team ?? '—'} • {prospect.position ?? '—'}
-                    </Typography>
-                    <Divider sx={{ my: 1 }} />
-                    {prospect.avg != null ? (
-                      <Box display="flex" justifyContent="space-between" mt={1}>
-                        <Typography variant="body2">AVG</Typography>
-                        <Typography variant="body2" fontWeight="bold">
-                          {prospect.avg.toFixed(3)}
-                        </Typography>
-                      </Box>
-                    ) : prospect.era != null ? (
-                      <Box display="flex" justifyContent="space-between" mt={1}>
-                        <Typography variant="body2">ERA</Typography>
-                        <Typography variant="body2" fontWeight="bold">
-                          {prospect.era.toFixed(2)}
-                        </Typography>
-                      </Box>
-                    ) : null}
-                    {prospect.hr != null && (
-                      <Box display="flex" justifyContent="space-between">
-                        <Typography variant="body2">HR</Typography>
-                        <Typography variant="body2" fontWeight="bold">
-                          {prospect.hr}
-                        </Typography>
-                      </Box>
-                    )}
-                    {prospect.rbi != null && (
-                      <Box display="flex" justifyContent="space-between">
-                        <Typography variant="body2">RBI</Typography>
-                        <Typography variant="body2" fontWeight="bold">
-                          {prospect.rbi}
-                        </Typography>
-                      </Box>
-                    )}
-                    {prospect.so != null && (
-                      <Box display="flex" justifyContent="space-between">
-                        <Typography variant="body2">SO</Typography>
-                        <Typography variant="body2" fontWeight="bold">
-                          {prospect.so}
-                        </Typography>
-                      </Box>
-                    )}
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        </>
-      )}
+      {/* Tab Content with Plan Guards */}
+      {tabValue === 0 && renderGamesTab()}
+      {tabValue === 1 && renderStandingsTab()}
+      {tabValue === 2 && renderHittingTab()}
+      {tabValue === 3 && renderPitchingTab()}
+      {tabValue === 4 && renderProspectsTab()}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Outer Wrapper with Protected Route
+// ----------------------------------------------------------------------
+const MLBSpringTraining: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="MLBSpringTraining">
+      <MLBSpringTrainingContent />
+    </ProtectedRoute>
   );
 };
 

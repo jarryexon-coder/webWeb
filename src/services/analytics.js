@@ -8,19 +8,12 @@ const AnalyticsService = {
     return typeof window !== 'undefined' && window.location;
   },
 
-  // Initialize analytics (no-op for React Native)
+  // Initialize analytics (no Firebase involved)
   async initialize() {
     if (this.isSupported()) {
-      try {
-        const { initializeApp } = await import('firebase/app');
-        const { getAnalytics } = await import('firebase/analytics');
-        // Note: We don't actually initialize here since Firebase is already initialized
-        console.log('Analytics would be available in web environment');
-        return true;
-      } catch (error) {
-        console.log('Analytics not available:', error.message);
-        return false;
-      }
+      // Previously tried to import Firebase analytics; now just log availability
+      console.log('Analytics service ready (web environment)');
+      return true;
     }
     console.log('Analytics not available in React Native/Expo Go');
     return false;

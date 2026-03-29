@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import tennisApi from '../services/tennis'; // Keep for potential future use, not used in this component now
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ----------------------------------------------------------------------
 // Types
@@ -351,10 +352,10 @@ const SurfaceChip = ({ surface }: { surface?: string }) => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component
 // ----------------------------------------------------------------------
 
-const TennisMatches: React.FC = () => {
+const TennisMatchesContent: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [tabValue, setTabValue] = useState<number>(0);
   const [surfaceFilter, setSurfaceFilter] = useState<string>('all');
@@ -729,6 +730,18 @@ const TennisMatches: React.FC = () => {
         </>
       )}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const TennisMatches: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="TennisMatches">
+      <TennisMatchesContent />
+    </ProtectedRoute>
   );
 };
 

@@ -41,6 +41,7 @@ import {
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import golfApi from '../services/golf';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ----------------------------------------------------------------------
 // Types – make many fields optional to accommodate real API data
@@ -287,10 +288,10 @@ const fetchGolfPlayers = async (): Promise<GolfApiResponse> => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component
 // ----------------------------------------------------------------------
 
-const GolfPlayers: React.FC = () => {
+const GolfPlayersContent: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [tabValue, setTabValue] = useState<number>(0);
   const [countryFilter, setCountryFilter] = useState<string>('all');
@@ -671,6 +672,18 @@ const GolfPlayers: React.FC = () => {
         </TableContainer>
       )}
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const GolfPlayers: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="GolfPlayers">
+      <GolfPlayersContent />
+    </ProtectedRoute>
   );
 };
 

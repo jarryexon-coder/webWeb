@@ -51,6 +51,17 @@ import NCAABBracketPage from '../pages/ncaab/NCAABBracketPage';
 // Team Rosters page
 import TeamRostersPage from '../pages/TeamRostersPage';
 
+// FAQ, Info, About, Settings, Tutorials
+import FAQPage from '../pages/FAQPage';
+import InfoPage from '../pages/InfoPage';
+import AboutPage from '../pages/AboutPage';
+import SettingsPage from '../pages/SettingsPage';
+import TutorialsScreen from '../pages/TutorialsScreen';
+
+// 👇 NEW ACCOUNT PAGE IMPORTS 👇
+import SportsAnalyticsDashboard from '../pages/SportsAnalyticsDashboard';
+import SubscriptionScreen from '../pages/SubscriptionScreen';
+
 export interface NavItem {
   label: string;
   path: string;
@@ -64,76 +75,83 @@ export interface NavGroup {
 
 export const navigationGroups: NavGroup[] = [
   {
-    title: 'ALL-ACCESS',
+    title: 'Free 4 All',
     items: [
       { label: 'Home', path: '/home', element: HomeScreen },
       { label: 'Live Games', path: '/live-games', element: LiveGamesScreen },
-      { label: 'Newsdesk', path: '/newsdesk', element: NewsDeskScreen },
+      { label: 'News Desk', path: '/newsdesk', element: NewsDeskScreen },
       { label: 'Team Rosters', path: '/team-rosters', element: TeamRostersPage },
-    ],
-  },
-  {
-    title: 'STATS',
-    items: [
-      { label: 'Player Props', path: '/player-props', element: PlayerPropsScreen },
-      { label: 'Player Stats', path: '/player-stats', element: PlayerStatsScreen },
       { label: 'Match Analytics', path: '/match-analytics', element: MatchAnalyticsScreen },
-      { label: 'Season Stats', path: '/season-stats', element: SeasonStatsScreen },
-      { label: 'NHL Trends', path: '/nhl-trends', element: NHLTrendsScreen },
+      { label: 'NCAAB Bracket', path: '/ncaab/bracket', element: NCAABBracketPage },
+      { label: 'Player Props', path: '/player-props', element: PlayerPropsScreen },
+      { label: 'Tutorials', path: '/tutorials', element: TutorialsScreen },
     ],
   },
   {
-    title: 'GENERATOR$',
+    title: 'Starter',
+    items: [
+      { label: 'NHL Trends', path: '/nhl-trends', element: NHLTrendsScreen },
+      { label: 'NCAAB Teams', path: '/ncaab/teams', element: NCAABTeamsPage },
+      { label: 'World Cup 2026', path: '/world-cup-2026', element: WorldCup2026Screen },
+    ],
+  },
+  {
+    title: 'Analytics Package',
+    items: [
+      { label: 'Player Stats', path: '/player-stats', element: PlayerStatsScreen },
+      { label: 'Season Stats', path: '/season-stats', element: SeasonStatsScreen },
+      { label: 'Parlay Analytics', path: '/parlay-analytics', element: ParlayAnalyticsScreen },
+      { label: 'AI Suggestions', path: '/ai-suggestions', element: AIParlaySuggestionsScreen },
+      { label: 'Tennis Matches', path: '/tennis/matches', element: TennisMatches },
+      { label: 'Tennis Players', path: '/tennis/players', element: TennisPlayers },
+      { label: 'Tennis Tournaments', path: '/tennis/tournaments', element: TennisTournaments },
+      { label: 'Golf Leaderboard', path: '/golf/leaderboard', element: GolfLeaderboard },
+      { label: 'Golf Players', path: '/golf/players', element: GolfPlayers },
+      { label: 'Golf Tournaments', path: '/golf/tournaments', element: GolfTournaments },
+      { label: 'NCAAB Games', path: '/ncaab/games', element: NCAABGamesPage },
+      { label: 'NCAAB Standings', path: '/ncaab/standings', element: NCAABStandingsPage },
+      { label: 'NCAAB Players', path: '/ncaab/players', element: NCAABPlayersPage },
+    ],
+  },
+  {
+    title: 'Generator package',
     items: [
       { label: 'Daily Picks', path: '/daily-picks', element: DailyPicksScreen },
       { label: 'Secret Phrases', path: '/secret-phrases', element: SecretPhraseScreen },
       { label: 'Sports Wire', path: '/sports-wire', element: SportsWireScreen },
-      { label: 'Prize Picks', path: '/prize-picks', element: PrizePicksScreen },
       { label: 'Fantasy Hub', path: '/fantasy-hub', element: FantasyHubScreen },
-      { label: 'Advanced Analytics', path: '/advanced-analytics', element: AdvancedAnalyticsScreen },
+      { label: 'Prize Picks', path: '/prize-picks', element: PrizePicksScreen },
       { label: 'Kalshi Predictions', path: '/kalshi-predictions', element: KalshiPredictionsScreen },
       { label: 'Predictions Outcome', path: '/predictions-outcome', element: PredictionsOutcomeScreen },
-    ],
-  },
-  {
-    title: 'PARLAYPLUSPACKAGE-PPP',
-    items: [
       { label: 'Parlay Architect', path: '/parlay-architect', element: ParlayArchitectScreen },
       { label: 'Same Game Parlay', path: '/same-game-parlay', element: SameGameParlayScreen },
-      { label: 'Parlay Analytics', path: '/parlay-analytics', element: ParlayAnalyticsScreen },
-      { label: 'AI Suggestions', path: '/ai-suggestions', element: AIParlaySuggestionsScreen },
+      { label: 'Advanced Analytics', path: '/advanced-analytics', element: AdvancedAnalyticsScreen },
     ],
   },
   {
-    title: 'DASHBOARDS',
+    title: 'Dashboards',
     items: [
       { label: 'Analytics Dashboard', path: '/analytics-dashboard', element: AnalyticsDashboardScreen },
-      { label: 'NBA Dashboard', path: '/nba-dashboard', element: NBADashboard },
       { label: 'NHL Dashboard', path: '/nhl-dashboard', element: NHLDashboard },
+      { label: 'NBA Dashboard', path: '/nba-dashboard', element: NBADashboard },
       { label: 'MLB Spring Training', path: '/mlb-spring-training', element: MLBSpringTraining },
     ],
   },
   {
-    title: 'NCAAB',
+    title: 'Settings',
     items: [
-      { label: 'Games', path: '/ncaab/games', element: NCAABGamesPage },
-      { label: 'Standings', path: '/ncaab/standings', element: NCAABStandingsPage },
-      { label: 'Players', path: '/ncaab/players', element: NCAABPlayersPage },
-      { label: 'Teams', path: '/ncaab/teams', element: NCAABTeamsPage },
-      { label: 'Rankings', path: '/ncaab/rankings', element: NCAABRankingsPage },
-      { label: 'Bracket', path: '/ncaab/bracket', element: NCAABBracketPage },
+      { label: 'FAQ', path: '/faq', element: FAQPage },
+      { label: 'Info', path: '/info', element: InfoPage },
+      { label: 'About', path: '/about', element: AboutPage },
+      { label: 'Account Settings', path: '/settings', element: SettingsPage },
     ],
   },
   {
-    title: 'Misc. Sports',
+    title: 'Account',
     items: [
-      { label: 'World Cup 2026', path: '/world-cup-2026', element: WorldCup2026Screen },
-      { label: 'Tennis Players', path: '/tennis/players', element: TennisPlayers },
-      { label: 'Tennis Tournaments', path: '/tennis/tournaments', element: TennisTournaments },
-      { label: 'Tennis Matches', path: '/tennis/matches', element: TennisMatches },
-      { label: 'Golf Players', path: '/golf/players', element: GolfPlayers },
-      { label: 'Golf Tournaments', path: '/golf/tournaments', element: GolfTournaments },
-      { label: 'Golf Leaderboard', path: '/golf/leaderboard', element: GolfLeaderboard },
+      { label: 'Dashboard', path: '/dashboard', element: SportsAnalyticsDashboard },
+      { label: 'Subscription', path: '/subscription', element: SubscriptionScreen },
+      { label: 'Buy Credits', path: '/subscription?tab=credits', element: SubscriptionScreen },
     ],
   },
 ];

@@ -51,6 +51,7 @@ import {
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // =============================================
 // TYPES
@@ -301,10 +302,10 @@ const fetchWorldCupNews = async () => {
 };
 
 // =============================================
-// MAIN COMPONENT
+// MAIN CONTENT COMPONENT
 // =============================================
 
-const WorldCup2026Screen: React.FC = () => {
+const WorldCup2026Content: React.FC = () => {
   const theme = useTheme();
   const [tabValue, setTabValue] = useState(0);
   const [selectedGroup, setSelectedGroup] = useState('A');
@@ -1235,6 +1236,18 @@ const WorldCup2026Screen: React.FC = () => {
         </Box>
       </Box>
     </Box>
+  );
+};
+
+// =============================================
+// PROTECTED SCREEN EXPORT
+// =============================================
+
+const WorldCup2026Screen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="WorldCup2026">
+      <WorldCup2026Content />
+    </ProtectedRoute>
   );
 };
 

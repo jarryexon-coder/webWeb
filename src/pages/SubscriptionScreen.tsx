@@ -1,169 +1,49 @@
 // src/pages/SubscriptionScreen.tsx
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
+  Container,
+  Paper,
   Typography,
+  Box,
+  Button,
   Grid,
   Card,
   CardContent,
-  Button,
-  Container,
-  Paper,
   Chip,
-  IconButton,
-  LinearProgress,
+  Avatar,
+  CardActions,
+  CircularProgress,
+  Alert,
+  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Divider,
-  Avatar,
-  Tooltip,
-  Badge,
-  Fade,
-  CardActions,
-  Stack,
-  CircularProgress,
-  Alert,
-  alpha,
-  useTheme,
-  Tabs,
   Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Checkbox,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  ListItemAvatar,
-  Breadcrumbs,
-  Link as MuiLink,
-  Switch,
-  FormControlLabel,
-  Stepper,
-  Step,
-  StepLabel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Tabs,
+  TextField,
+  InputAdornment,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
-  Diamond as DiamondIcon,
   CheckCircle as CheckCircleIcon,
-  Warning as WarningIcon,
-  TrendingUp as TrendingUpIcon,
+  Refresh as RefreshIcon,
   Analytics as AnalyticsIcon,
   AutoAwesome as SparklesIcon,
-  Key as KeyIcon,
   RocketLaunch as RocketIcon,
-  Refresh as RefreshIcon,
-  Security as ShieldIcon,
-  SportsBasketball as BasketballIcon,
-  SportsFootball as FootballIcon,
-  SportsHockey as HockeyIcon,
-  SportsBaseball as BaseballIcon,
-  Tv as TvIcon,
-  GridView as CubeIcon,
-  Star as StarIcon,
-  AttachMoney as MoneyIcon,
-  Timeline as TimelineIcon,
-  Lock as LockIcon,
-  ExpandMore as ExpandMoreIcon,
-  CompareArrows as CompareIcon,
-  Group as GroupIcon,
-  EmojiEvents as TrophyIcon,
-  Security as SecurityIcon,
-  Speed as SpeedIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  Insights as InsightsIcon,
-  LocalFireDepartment as FireIcon,
+  Bolt as BoltIcon,
+  ShoppingCart as ShoppingCartIcon,
+  Discount as DiscountIcon,
 } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { styled } from '@mui/material/styles';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 
-// Styled Components
-const GradientPaper = styled(Paper)(({ theme }) => ({
-  background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
-  color: theme.palette.primary.contrastText,
-  borderRadius: theme.shape.borderRadius * 2,
-}));
-
-const StyledCard = styled(Card)(({ theme }) => ({
-  borderRadius: theme.shape.borderRadius * 2,
-  transition: 'transform 0.2s, box-shadow 0.2s',
-  '&:hover': {
-    transform: 'translateY(-4px)',
-    boxShadow: theme.shadows[8],
-  },
-}));
-
-const PopularBadge = styled(Chip)(({ theme }) => ({
-  position: 'absolute',
-  top: -10,
-  left: '50%',
-  transform: 'translateX(-50%)',
-  backgroundColor: theme.palette.warning.main,
-  color: theme.palette.warning.contrastText,
-  fontWeight: 'bold',
-  fontSize: '0.75rem',
-}));
-
-const FeatureRow = ({ feature }: { feature: string }) => (
-  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-    <CheckCircleIcon sx={{ color: 'success.main', fontSize: 16, mr: 1 }} />
-    <Typography variant="body2" color="text.secondary">
-      {feature}
-    </Typography>
-  </Box>
-);
-
-// Mock subscription data
-const subscriptionData = {
-  user: {
-    hasActiveSubscription: false,
-    activeEntitlements: [],
-  },
-  stats: [
-    { label: 'Prediction Accuracy', value: '84.7%', icon: <TrendingUpIcon /> },
-    { label: 'User Success Rate', value: '76%', icon: <TrophyIcon /> },
-    { label: 'Active Subscribers', value: '8,459+', icon: <GroupIcon /> },
-    { label: 'Average ROI', value: '+189%', icon: <MoneyIcon /> },
-  ],
-};
-
-// Free Access Package
-const allAccessScreens = [
-  'Live Games Screen',
-  'NFL Analytics',
-  'News Desk Screen',
-  'Up-to-date App Updates',
-  'Contest Information',
-];
-
-// Super Stats Packages
-const superStatsPackages = [
+// Subscription packages with correct prices
+const subscriptionPackages = [
   {
-    id: 'superstats-weekly',
+    id: 'starter',
     name: 'Super Stats',
-    period: 'Weekly',
-    price: '$4.99',
-    duration: 'per week',
-    popular: false,
-    icon: <AnalyticsIcon />,
-    color: '#3b82f6',
-    screens: [
-      'Fantasy Screen AI',
-      'Player Stats AI',
-      'Sports News Hub',
-      'NHL Analytics',
-      'Game Details',
-    ],
+    price: { month: 5.99, year: 49.99 },
+    priceId: { month: 'price_1TBpvaA3tlI8MNZjT4rmDzFm', year: 'price_1TBq2UA3tlI8MNZjD3ry0Ell' },
     features: [
       '5 supercharged AI stats screens',
       'Advanced handicapping tools',
@@ -171,764 +51,475 @@ const superStatsPackages = [
       'Player performance analytics',
       'Game prediction models',
     ],
-  },
-  {
-    id: 'superstats-monthly',
-    name: 'Super Stats',
-    period: 'Monthly',
-    price: '$16.99',
-    duration: 'per month',
-    popular: true,
-    discount: 'Save 15%',
     icon: <AnalyticsIcon />,
     color: '#3b82f6',
-    screens: [
-      'Fantasy Screen AI',
-      'Player Stats AI',
-      'Sports News Hub',
-      'NHL Analytics',
-      'Game Details',
-    ],
-    features: [
-      '5 supercharged AI stats screens',
-      'Advanced handicapping tools',
-      'Real-time betting insights',
-      'Player performance analytics',
-      'Game prediction models',
-      'Priority updates',
-    ],
   },
   {
-    id: 'superstats-yearly',
-    name: 'Super Stats',
-    period: 'Yearly',
-    price: '$159.99',
-    duration: 'per year',
-    popular: false,
-    discount: 'Save 20%',
+    id: 'analytics',
+    name: 'Analytics Package',
+    price: { month: 19.99, year: 179.99 },
+    priceId: { month: 'price_1TBq5hA3tlI8MNZjkExuKQJ2', year: 'price_1TBq6rA3tlI8MNZjabiqWjwq' },
+    features: [
+      'All Super Stats features',
+      'Player Analysis & Advanced Stats',
+      'Real-time Injury Reports',
+      'Edge Analysis & Value Betting',
+      'AI-Powered Predictions',
+    ],
     icon: <AnalyticsIcon />,
-    color: '#3b82f6',
-    screens: [
-      'Fantasy Screen AI',
-      'Player Stats AI',
-      'Sports News Hub',
-      'NHL Analytics',
-      'Game Details',
-    ],
-    features: [
-      '5 supercharged AI stats screens',
-      'Advanced handicapping tools',
-      'Real-time betting insights',
-      'Player performance analytics',
-      'Game prediction models',
-      'Priority updates',
-      'Early access to new features',
-    ],
-  },
-];
-
-// AI Generators Packages
-const aiGeneratorsPackages = [
-  {
-    id: 'aigenerators-weekly',
-    name: 'AI Generators',
-    period: 'Weekly',
-    price: '$29.99',
-    duration: 'per week',
-    popular: false,
-    icon: <SparklesIcon />,
     color: '#8b5cf6',
-    dailyGenerators: [
-      '2 Parlay Builders',
-      '2 Expert Daily Picks',
-      '2 Game/Prop Predictions',
-      '2 Randomized Predictions',
-    ],
-    includes: 'All Super Stats screens included',
+    popular: true,
+  },
+  {
+    id: 'generator',
+    name: 'Generator Package',
+    price: { month: 39.99, year: 359.99 },
+    priceId: { month: 'price_1TBqTrA3tlI8MNZjn2kvGXI3', year: 'price_1TBqVUA3tlI8MNZjlDK9POuj' },
     features: [
+      'All Analytics features',
       '8 daily AI-generated predictions',
       'Parlay builder tools',
       'Expert pick analysis',
       'Game & prop predictions',
       'Randomized prediction engine',
-      'Includes ALL Super Stats screens',
-    ],
-  },
-  {
-    id: 'aigenerators-monthly',
-    name: 'AI Generators',
-    period: 'Monthly',
-    price: '$79.99',
-    duration: 'per month',
-    popular: true,
-    discount: 'Save 11%',
-    icon: <SparklesIcon />,
-    color: '#8b5cf6',
-    dailyGenerators: [
-      '2 Parlay Builders',
-      '2 Expert Daily Picks',
-      '2 Game/Prop Predictions',
-      '2 Randomized Predictions',
-    ],
-    includes: 'All Super Stats screens included',
-    features: [
-      '8 daily AI-generated predictions',
-      'Parlay builder tools',
-      'Expert pick analysis',
-      'Game & prop predictions',
-      'Randomized prediction engine',
-      'Includes ALL Super Stats screens',
+      'Secret Phrases & Insider Insights',
       'Priority generator access',
     ],
-  },
-  {
-    id: 'aigenerators-yearly',
-    name: 'AI Generators',
-    period: 'Yearly',
-    price: '$699.99',
-    duration: 'per year',
-    popular: false,
-    discount: 'Save 27%',
     icon: <SparklesIcon />,
-    color: '#8b5cf6',
-    dailyGenerators: [
-      '2 Parlay Builders',
-      '2 Expert Daily Picks',
-      '2 Game/Prop Predictions',
-      '2 Randomized Predictions',
-    ],
-    includes: 'All Super Stats screens included',
-    features: [
-      '8 daily AI-generated predictions',
-      'Parlay builder tools',
-      'Expert pick analysis',
-      'Game & prop predictions',
-      'Randomized prediction engine',
-      'Includes ALL Super Stats screens',
-      'Priority generator access',
-      'Custom generator requests',
-      'Early AI model access',
-    ],
-  },
-];
-
-// Elite Tools - Kalshi Predictions
-const kalshiPackages = [
-  {
-    id: 'kalshi-weekly',
-    name: 'Kalshi Predictions',
-    period: 'Weekly',
-    price: '$4.99',
-    duration: '1 week access',
-    popular: false,
-    icon: <TrendingUpIcon />,
-    color: '#f59e0b',
-    features: [
-      'High-powered prediction models',
-      'Real-time market analysis',
-      'Probability calculations',
-      'Risk assessment tools',
-      'Weekly prediction reports',
-    ],
-  },
-  {
-    id: 'kalshi-monthly',
-    name: 'Kalshi Predictions',
-    period: 'Monthly',
-    price: '$15.99',
-    duration: '1 month access',
-    popular: true,
-    discount: 'Save 20%',
-    icon: <TrendingUpIcon />,
-    color: '#f59e0b',
-    features: [
-      'High-powered prediction models',
-      'Real-time market analysis',
-      'Probability calculations',
-      'Risk assessment tools',
-      'Weekly prediction reports',
-      'Advanced analytics dashboard',
-    ],
-  },
-];
-
-// Elite Tools - Secret Phrases
-const secretPhrasesPackages = [
-  {
-    id: 'secret-phrases-3',
-    name: 'Secret Phrases',
-    period: 'Weekly',
-    price: '$9.99',
-    duration: '3 phrases per week',
-    popular: false,
-    icon: <KeyIcon />,
     color: '#ef4444',
-    features: [
-      '3 secret phrases weekly',
-      'Exclusive insider insights',
-      'Hidden pattern detection',
-      'Priority phrase generation',
-      'Weekly insights report',
-    ],
   },
-  {
-    id: 'secret-phrases-10',
-    name: 'Secret Phrases',
-    period: 'Weekly',
-    price: '$19.99',
-    duration: '10 phrases per week',
+];
+
+// Generator credit packages - MATCH YOUR STRIPE PRICES
+const creditPackages = [
+  { 
+    credits: 1, 
+    price: 1.99, 
+    priceDisplay: '$1.99',
+    pricePerCredit: 1.99,
+    popular: false
+  },
+  { 
+    credits: 10, 
+    price: 14.90, 
+    priceDisplay: '$14.90',
+    pricePerCredit: 1.49,
     popular: true,
-    discount: 'Best Value',
-    icon: <KeyIcon />,
-    color: '#ef4444',
-    features: [
-      '10 secret phrases weekly',
-      'Exclusive insider insights',
-      'Hidden pattern detection',
-      'Priority phrase generation',
-      'Weekly insights report',
-      'Advanced phrase analytics',
-    ],
+    discount: 'Save 25%'
+  },
+  { 
+    credits: 20, 
+    price: 25.80, 
+    priceDisplay: '$25.80',
+    pricePerCredit: 1.29,
+    discount: 'Save 35%'
+  },
+  { 
+    credits: 50, 
+    price: 44.50, 
+    priceDisplay: '$44.50',
+    pricePerCredit: 0.89,
+    discount: 'Save 55%'
   },
 ];
 
-// Comparison Table Data
-const comparisonData = [
-  { feature: 'Live Games Screen', allAccess: '✓', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'NFL Analytics', allAccess: '✓', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'News Desk', allAccess: '✓', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'Fantasy Screen AI', allAccess: '×', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'Player Stats AI', allAccess: '×', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'Sports News Hub', allAccess: '×', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'NHL Analytics', allAccess: '×', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'Game Details', allAccess: '×', superStats: '✓', aiGenerators: '✓' },
-  { feature: 'Parlay Builders', allAccess: '×', superStats: '×', aiGenerators: '✓' },
-  { feature: 'Expert Daily Picks', allAccess: '×', superStats: '×', aiGenerators: '✓' },
-  { feature: 'Game/Prop Predictions', allAccess: '×', superStats: '×', aiGenerators: '✓' },
-];
-
-// Main Component
-const SubscriptionScreen = () => {
-  const theme = useTheme();
+const SubscriptionScreen: React.FC = () => {
   const navigate = useNavigate();
-  
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [selectedPackage, setSelectedPackage] = useState('superstats-monthly');
-  const [selectedEliteTool, setSelectedEliteTool] = useState(null);
-  const [restoring, setRestoring] = useState(false);
+  const [subscription, setSubscription] = useState<any>(null);
+  const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [activeTab, setActiveTab] = useState(0);
+  const [selectedInterval, setSelectedInterval] = useState<'month' | 'year'>('month');
+  const [selectedCredits, setSelectedCredits] = useState<number>(10);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoError, setPromoError] = useState('');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [activeStep, setActiveStep] = useState(0);
-  const [isExpoGo, setIsExpoGo] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
 
-  const handleSubscription = async (planId: string) => {
-    setLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    setSelectedPackage(planId);
-    setShowSuccessModal(true);
-    setLoading(false);
+  // Check URL for tab parameter
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'credits') {
+      setActiveTab(1);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const fetchSubscription = async () => {
+      try {
+        const token = localStorage.getItem('authToken');
+        if (!token) {
+          setLoadingSubscription(false);
+          return;
+        }
+
+        const response = await fetch('https://python-api-fresh-production.up.railway.app/api/subscriptions/my-subscription', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        const data = await response.json();
+        if (data.subscription) {
+          setSubscription(data.subscription);
+        }
+      } catch (error) {
+        console.error('Error fetching subscription:', error);
+      } finally {
+        setLoadingSubscription(false);
+      }
+    };
+
+    fetchSubscription();
+  }, []);
+
+  // Handle back button - go to previous page
+  const handleGoBack = () => {
+    navigate(-1); // This goes to the previous page in history
   };
 
-  const handleRestorePurchases = async () => {
-    setRestoring(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setRestoring(false);
-    // Show restore success message
+  const handleSubscriptionPurchase = async (planId: string) => {
+    setCheckoutLoading(true);
+    try {
+      const token = localStorage.getItem('authToken');
+      
+      const response = await fetch('https://python-api-fresh-production.up.railway.app/api/subscriptions/create-checkout', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          planId, 
+          interval: selectedInterval,
+          promoCode: promoCode || null 
+        })
+      });
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert(data.error || 'Failed to create checkout session');
+      }
+    } catch (error) {
+      console.error('Subscription error:', error);
+      alert('Failed to process subscription. Please try again.');
+    } finally {
+      setCheckoutLoading(false);
+    }
   };
 
-  const handleContinueToPremium = () => {
-    setShowSuccessModal(false);
-    // Navigate to premium content based on selected package
-    navigate('/premium-dashboard');
+  const handleCreditsPurchase = async () => {
+    setCheckoutLoading(true);
+    try {
+      const token = localStorage.getItem('authToken');
+      const creditPackage = creditPackages.find(c => c.credits === selectedCredits);
+      
+      const response = await fetch('https://python-api-fresh-production.up.railway.app/api/generator/credits/checkout', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          credits: selectedCredits
+        })
+      });
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert(data.error || 'Failed to create checkout session');
+      }
+    } catch (error) {
+      console.error('Credits purchase error:', error);
+      alert('Failed to process credits purchase. Please try again.');
+    } finally {
+      setCheckoutLoading(false);
+    }
   };
 
-  const renderPackageCard = (pkg: any, isElite = false) => {
-    const isSelected = isElite ? selectedEliteTool === pkg.id : selectedPackage === pkg.id;
-    const isPopular = pkg.popular;
+  const handleApplyPromo = () => {
+    if (promoCode) {
+      setPromoError('Promo code applied!');
+    }
+  };
 
+  const hasActiveSubscription = subscription?.status === 'active';
+  const currentPlan = subscription?.plan_id;
+
+  if (loadingSubscription) {
     return (
-      <StyledCard
-        sx={{
-          border: isSelected ? `2px solid ${pkg.color}` : '1px solid',
-          borderColor: isSelected ? pkg.color : 'divider',
-          position: 'relative',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        {isPopular && (
-          <PopularBadge
-            label={pkg.discount}
-            size="small"
-          />
-        )}
-
-        <CardContent sx={{ flexGrow: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <Avatar sx={{ bgcolor: `${pkg.color}20`, color: pkg.color, mr: 2 }}>
-              {pkg.icon}
-            </Avatar>
-            <Box>
-              <Typography variant="h6" fontWeight="bold">
-                {pkg.name}
-              </Typography>
-              <Typography variant="subtitle2" color="text.secondary">
-                {pkg.period}
-              </Typography>
-            </Box>
-          </Box>
-
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="h3" fontWeight="bold" color="primary">
-              {pkg.price}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {pkg.duration}
-            </Typography>
-          </Box>
-
-          <Box sx={{ mb: 3 }}>
-            {pkg.features?.map((feature: string, index: number) => (
-              <FeatureRow key={index} feature={feature} />
-            ))}
-            
-            {pkg.dailyGenerators && (
-              <Accordion sx={{ mt: 2 }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="body2" fontWeight="bold">
-                    Daily Generators
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  {pkg.dailyGenerators.map((generator: string, index: number) => (
-                    <Typography key={index} variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                      • {generator}
-                    </Typography>
-                  ))}
-                </AccordionDetails>
-              </Accordion>
-            )}
-
-            {pkg.screens && (
-              <Accordion sx={{ mt: 2 }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography variant="body2" fontWeight="bold">
-                    Included Screens
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  {pkg.screens.map((screen: string, index: number) => (
-                    <Typography key={index} variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                      <TvIcon fontSize="small" sx={{ mr: 1, verticalAlign: 'middle' }} />
-                      {screen}
-                    </Typography>
-                  ))}
-                </AccordionDetails>
-              </Accordion>
-            )}
-          </Box>
-        </CardContent>
-
-        <CardActions sx={{ p: 2, pt: 0 }}>
-          <Button
-            fullWidth
-            variant={isSelected ? "contained" : "outlined"}
-            color="primary"
-            onClick={() => handleSubscription(pkg.id)}
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={20} /> : null}
-          >
-            {isSelected ? 'SELECTED' : 'SELECT'}
-          </Button>
-        </CardActions>
-      </StyledCard>
+      <Container maxWidth="lg" sx={{ py: 8, textAlign: 'center' }}>
+        <CircularProgress />
+      </Container>
     );
-  };
-
-  const renderToolPackage = (pkg: any) => {
-    const isSelected = selectedEliteTool === pkg.id;
-    
-    return (
-      <Paper
-        sx={{
-          p: 2,
-          border: isSelected ? `2px solid ${pkg.color}` : '1px solid',
-          borderColor: isSelected ? pkg.color : 'divider',
-          borderRadius: 2,
-          position: 'relative',
-          height: '100%',
-        }}
-      >
-        {pkg.popular && (
-          <Chip
-            label={pkg.discount}
-            size="small"
-            color="warning"
-            sx={{ position: 'absolute', top: -10, right: 10 }}
-          />
-        )}
-
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Avatar sx={{ bgcolor: `${pkg.color}20`, color: pkg.color, mr: 1, width: 32, height: 32 }}>
-            {pkg.icon}
-          </Avatar>
-          <Typography variant="subtitle1" fontWeight="bold">
-            {pkg.name}
-          </Typography>
-        </Box>
-
-        <Typography variant="h5" fontWeight="bold" color="primary" gutterBottom>
-          {pkg.price}
-        </Typography>
-        <Typography variant="body2" color="text.secondary" gutterBottom>
-          {pkg.duration}
-        </Typography>
-
-        <Box sx={{ mb: 2 }}>
-          {pkg.features.slice(0, 3).map((feature: string, index: number) => (
-            <Typography key={index} variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-              • {feature}
-            </Typography>
-          ))}
-        </Box>
-
-        <Button
-          fullWidth
-          variant={isSelected ? "contained" : "outlined"}
-          size="small"
-          onClick={() => setSelectedEliteTool(pkg.id)}
-          sx={{ mt: 1 }}
-        >
-          {isSelected ? 'SELECTED' : 'SELECT'}
-        </Button>
-      </Paper>
-    );
-  };
+  }
 
   return (
-    <Container maxWidth="lg">
-      {/* Header */}
-      <Box sx={{ mb: 4, mt: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Button
-            component={RouterLink}
-            to="/"
-            startIcon={<ArrowBackIcon />}
-          >
-            Back
-          </Button>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Button
-              startIcon={restoring ? <CircularProgress size={16} /> : <RefreshIcon />}
-              onClick={handleRestorePurchases}
-              disabled={restoring}
-              variant="outlined"
-            >
-              Restore Purchases
-            </Button>
-          </Box>
-        </Box>
-
-        <Box sx={{ textAlign: 'center', mb: 4 }}>
-          <Typography variant="h2" fontWeight="bold" gutterBottom>
-            Premium Packages
-          </Typography>
-          <Typography variant="h6" color="text.secondary">
-            Choose the perfect package for your betting success
-          </Typography>
-        </Box>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Header with proper back navigation */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Button 
+          startIcon={<ArrowBackIcon />} 
+          onClick={handleGoBack}
+        >
+          Back
+        </Button>
+        <Button startIcon={<RefreshIcon />} onClick={() => window.location.reload()} variant="outlined">
+          Refresh
+        </Button>
       </Box>
 
       {/* Active Subscription Banner */}
-      {subscriptionData.user.hasActiveSubscription && (
-        <Alert
-          severity="success"
-          icon={<CheckCircleIcon />}
-          action={
-            <Button color="inherit" size="small">
-              Manage
-            </Button>
-          }
-          sx={{ mb: 3 }}
-        >
-          You have an active subscription! 🎉
+      {hasActiveSubscription && (
+        <Alert severity="success" sx={{ mb: 4 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap">
+            <Box>
+              <Typography variant="body1" fontWeight="bold">
+                ✅ Active {currentPlan?.toUpperCase()} Plan
+              </Typography>
+              {subscription.current_period_end && (
+                <Typography variant="caption">
+                  Valid until {new Date(subscription.current_period_end).toLocaleDateString()}
+                </Typography>
+              )}
+            </Box>
+            <Box display="flex" gap={1}>
+              <Button size="small" color="inherit" onClick={() => navigate('/dashboard')}>
+                Go to Dashboard
+              </Button>
+            </Box>
+          </Box>
         </Alert>
       )}
 
-      {/* Free All Access Section */}
-      <GradientPaper sx={{ p: 4, mb: 4, textAlign: 'center' }}>
-        <Chip
-          label="FREE FOR ALL USERS"
-          color="success"
-          sx={{ mb: 2 }}
-        />
-        
-        <Typography variant="h4" fontWeight="bold" gutterBottom sx={{ color: 'white' }}>
-          All Access Package
-        </Typography>
-        <Typography variant="subtitle1" sx={{ color: 'rgba(255,255,255,0.9)', mb: 3 }}>
-          Available to everyone at no cost
-        </Typography>
+      {/* Tabs */}
+      <Paper sx={{ mb: 4 }}>
+        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tab label="Subscription Plans" />
+          <Tab label="Generator Credits" />
+        </Tabs>
 
-        <Grid container spacing={2} justifyContent="center" sx={{ mb: 2 }}>
-          {allAccessScreens.map((screen, index) => (
-            <Grid item xs={12} sm={6} md={4} key={index}>
-              <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}>
-                <CheckCircleIcon sx={{ color: 'success.light', mr: 1 }} />
-                {screen}
+        {/* Subscription Plans Tab */}
+        {activeTab === 0 && (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h4" fontWeight="bold" textAlign="center" gutterBottom>
+              Choose Your Plan
+            </Typography>
+            <Typography variant="body1" textAlign="center" color="text.secondary" sx={{ mb: 4 }}>
+              Select the perfect package for your betting success
+            </Typography>
+
+            {/* Billing Interval Toggle */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
+              <Paper sx={{ p: 0.5, display: 'inline-flex', gap: 1 }}>
+                <Button
+                  variant={selectedInterval === 'month' ? 'contained' : 'outlined'}
+                  onClick={() => setSelectedInterval('month')}
+                >
+                  Monthly
+                </Button>
+                <Button
+                  variant={selectedInterval === 'year' ? 'contained' : 'outlined'}
+                  onClick={() => setSelectedInterval('year')}
+                >
+                  Yearly <Chip label="Save 20%" size="small" sx={{ ml: 1 }} />
+                </Button>
               </Paper>
+            </Box>
+
+            {/* Packages Grid */}
+            <Grid container spacing={3}>
+              {subscriptionPackages.map((pkg) => {
+                const price = pkg.price[selectedInterval];
+                const isCurrentPlan = currentPlan === pkg.id && hasActiveSubscription;
+                
+                return (
+                  <Grid item xs={12} md={4} key={pkg.id}>
+                    <Card sx={{ 
+                      height: '100%', 
+                      position: 'relative',
+                      border: pkg.popular ? '2px solid #ff9800' : 'none',
+                      opacity: isCurrentPlan ? 0.8 : 1
+                    }}>
+                      {pkg.popular && (
+                        <Chip 
+                          label="Most Popular" 
+                          color="warning" 
+                          size="small" 
+                          sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)' }} 
+                        />
+                      )}
+                      <CardContent>
+                        <Box display="flex" alignItems="center" mb={2}>
+                          <Avatar sx={{ bgcolor: `${pkg.color}20`, color: pkg.color, mr: 2 }}>
+                            {pkg.icon}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="h6" fontWeight="bold">{pkg.name}</Typography>
+                            {isCurrentPlan && <Chip label="Current Plan" size="small" color="success" />}
+                          </Box>
+                        </Box>
+                        <Typography variant="h3" fontWeight="bold" color="primary">
+                          ${price}
+                          <Typography component="span" variant="body2" color="text.secondary">
+                            /{selectedInterval}
+                          </Typography>
+                        </Typography>
+                        <Divider sx={{ my: 2 }} />
+                        {pkg.features.map((feature, i) => (
+                          <Box key={i} display="flex" alignItems="center" mb={1}>
+                            <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main', mr: 1 }} />
+                            <Typography variant="body2">{feature}</Typography>
+                          </Box>
+                        ))}
+                      </CardContent>
+                      <CardActions sx={{ p: 2 }}>
+                        <Button
+                          fullWidth
+                          variant={isCurrentPlan ? "outlined" : "contained"}
+                          color="primary"
+                          onClick={() => handleSubscriptionPurchase(pkg.id)}
+                          disabled={checkoutLoading || isCurrentPlan}
+                          startIcon={checkoutLoading ? <CircularProgress size={20} /> : <ShoppingCartIcon />}
+                        >
+                          {isCurrentPlan ? 'CURRENT PLAN' : `SUBSCRIBE $${price}/${selectedInterval}`}
+                        </Button>
+                      </CardActions>
+                    </Card>
+                  </Grid>
+                );
+              })}
             </Grid>
-          ))}
-        </Grid>
 
-        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.8)', fontStyle: 'italic' }}>
-          All users get free access to live games, NFL analytics, and news updates
-        </Typography>
-      </GradientPaper>
-
-      {/* Stats Overview */}
-      <Grid container spacing={3} sx={{ mb: 6 }}>
-        {subscriptionData.stats.map((stat, index) => (
-          <Grid item xs={6} sm={3} key={index}>
-            <Paper sx={{ p: 3, textAlign: 'center' }}>
-              <Box sx={{ color: 'primary.main', mb: 1 }}>
-                {stat.icon}
+            {/* Promo Code Section */}
+            <Paper sx={{ mt: 4, p: 3, bgcolor: '#f5f5f5' }}>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <DiscountIcon color="primary" />
+                <TextField
+                  placeholder="Enter promo code"
+                  size="small"
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value)}
+                  sx={{ flex: 1, minWidth: 200 }}
+                  InputProps={{
+                    endAdornment: promoError && (
+                      <InputAdornment position="end">
+                        <Typography variant="caption" color="error">{promoError}</Typography>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+                <Button variant="outlined" onClick={handleApplyPromo}>
+                  Apply
+                </Button>
               </Box>
-              <Typography variant="h4" fontWeight="bold" color="primary" gutterBottom>
-                {stat.value}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {stat.label}
-              </Typography>
             </Paper>
-          </Grid>
-        ))}
-      </Grid>
-
-      {/* Super Stats Packages */}
-      <Box sx={{ mb: 6 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-          <Avatar sx={{ bgcolor: 'primary.light', color: 'primary.main', mr: 2 }}>
-            <AnalyticsIcon />
-          </Avatar>
-          <Box>
-            <Typography variant="h4" fontWeight="bold">
-              Super Stats
-            </Typography>
-            <Typography variant="body1" color="text.secondary">
-              5 AI-powered screens for advanced handicapping
-            </Typography>
           </Box>
-        </Box>
+        )}
 
-        <Grid container spacing={3}>
-          {superStatsPackages.map((pkg) => (
-            <Grid item xs={12} md={4} key={pkg.id}>
-              {renderPackageCard(pkg)}
-            </Grid>
-          ))}
-        </Grid>
-      </Box>
-
-      {/* AI Generators Packages */}
-      <Box sx={{ mb: 6 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-          <Avatar sx={{ bgcolor: 'secondary.light', color: 'secondary.main', mr: 2 }}>
-            <SparklesIcon />
-          </Avatar>
-          <Box>
-            <Typography variant="h4" fontWeight="bold">
-              AI Generators
+        {/* Generator Credits Tab */}
+        {activeTab === 1 && (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h4" fontWeight="bold" textAlign="center" gutterBottom>
+              Generator Credits
             </Typography>
-            <Typography variant="body1" color="text.secondary">
-              High-powered daily generators + All Super Stats
+            <Typography variant="body1" textAlign="center" color="text.secondary" sx={{ mb: 4 }}>
+              Purchase credits to use the AI generator features
             </Typography>
-          </Box>
-        </Box>
 
-        <Grid container spacing={3}>
-          {aiGeneratorsPackages.map((pkg) => (
-            <Grid item xs={12} md={4} key={pkg.id}>
-              {renderPackageCard(pkg)}
-            </Grid>
-          ))}
-        </Grid>
-      </Box>
+            {/* Current Credits Display */}
+            {subscription?.plan_id === 'generator' && (
+              <Alert severity="info" sx={{ mb: 3 }}>
+                <Typography variant="body2">
+                  You have <strong>{subscription.credits || 0}</strong> generator credits remaining.
+                </Typography>
+              </Alert>
+            )}
 
-      {/* Elite Tools Section */}
-      <Box sx={{ mb: 6 }}>
-        <Typography variant="h4" fontWeight="bold" gutterBottom>
-          Elite Tools
-        </Typography>
-        <Typography variant="body1" color="text.secondary" gutterBottom sx={{ mb: 3 }}>
-          High-powered specialized tools for serious bettors
-        </Typography>
-
-        {/* Kalshi Predictions */}
-        <Box sx={{ mb: 4 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <TrendingUpIcon sx={{ color: '#f59e0b', mr: 1 }} />
-            <Typography variant="h5" fontWeight="bold">
-              Kalshi Predictions
-            </Typography>
-          </Box>
-          
-          <Grid container spacing={2}>
-            {kalshiPackages.map((pkg) => (
-              <Grid item xs={12} sm={6} key={pkg.id}>
-                {renderToolPackage(pkg)}
-              </Grid>
-            ))}
-          </Grid>
-        </Box>
-
-        {/* Secret Phrases */}
-        <Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <KeyIcon sx={{ color: '#ef4444', mr: 1 }} />
-            <Typography variant="h5" fontWeight="bold">
-              Secret Phrases
-            </Typography>
-          </Box>
-          
-          <Grid container spacing={2}>
-            {secretPhrasesPackages.map((pkg) => (
-              <Grid item xs={12} sm={6} key={pkg.id}>
-                {renderToolPackage(pkg)}
-              </Grid>
-            ))}
-          </Grid>
-        </Box>
-      </Box>
-
-      {/* Package Comparison */}
-      <Paper sx={{ p: 3, mb: 6 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-          <CompareIcon sx={{ mr: 1, color: 'primary.main' }} />
-          <Typography variant="h5" fontWeight="bold">
-            Package Comparison
-          </Typography>
-        </Box>
-
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell><Typography fontWeight="bold">Feature</Typography></TableCell>
-                <TableCell align="center"><Typography fontWeight="bold">All Access</Typography></TableCell>
-                <TableCell align="center"><Typography fontWeight="bold">Super Stats</Typography></TableCell>
-                <TableCell align="center"><Typography fontWeight="bold">AI Generators</Typography></TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {comparisonData.map((row, index) => (
-                <TableRow key={index}>
-                  <TableCell>{row.feature}</TableCell>
-                  <TableCell align="center">
-                    <Typography color={row.allAccess === '✓' ? 'success.main' : 'error.main'} fontWeight="bold">
-                      {row.allAccess}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography color={row.superStats === '✓' ? 'success.main' : 'error.main'} fontWeight="bold">
-                      {row.superStats}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography color={row.aiGenerators === '✓' ? 'success.main' : 'error.main'} fontWeight="bold">
-                      {row.aiGenerators}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
+            {/* Credits Packages */}
+            <Grid container spacing={3} sx={{ mb: 4 }}>
+              {creditPackages.map((pkg) => (
+                <Grid item xs={12} sm={6} md={3} key={pkg.credits}>
+                  <Card 
+                    sx={{ 
+                      cursor: 'pointer',
+                      border: selectedCredits === pkg.credits ? '2px solid #1976d2' : '1px solid #e0e0e0',
+                      transition: 'all 0.2s',
+                      '&:hover': { transform: 'translateY(-4px)', boxShadow: 3 },
+                      height: '100%'
+                    }}
+                    onClick={() => setSelectedCredits(pkg.credits)}
+                  >
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      {pkg.popular && (
+                        <Chip label="Best Value" color="warning" size="small" sx={{ mb: 1 }} />
+                      )}
+                      <Typography variant="h2" fontWeight="bold" color="primary">
+                        {pkg.credits}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Generator Credits
+                      </Typography>
+                      <Typography variant="h4" fontWeight="bold">
+                        {pkg.priceDisplay}
+                      </Typography>
+                      {pkg.discount && (
+                        <Chip label={pkg.discount} size="small" color="success" sx={{ mt: 1 }} />
+                      )}
+                      <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+                        ${pkg.pricePerCredit.toFixed(2)} per credit
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
               ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+            </Grid>
 
-      {/* Final CTA */}
-      <Paper sx={{ p: 4, textAlign: 'center', bgcolor: 'primary.main', color: 'white' }}>
-        <Typography variant="h4" fontWeight="bold" gutterBottom>
-          Ready to Level Up Your Betting Game?
-        </Typography>
-        <Typography variant="h6" sx={{ mb: 4, opacity: 0.9 }}>
-          Join thousands of successful bettors using our AI-powered tools
-        </Typography>
+            {/* Purchase Button */}
+            <Button
+              fullWidth
+              variant="contained"
+              size="large"
+              onClick={handleCreditsPurchase}
+              disabled={checkoutLoading}
+              startIcon={checkoutLoading ? <CircularProgress size={24} /> : <BoltIcon />}
+              sx={{ py: 1.5, fontSize: '1.1rem' }}
+            >
+              Purchase {selectedCredits} Credits - {creditPackages.find(c => c.credits === selectedCredits)?.priceDisplay}
+            </Button>
 
-        <Button
-          variant="contained"
-          size="large"
-          onClick={() => handleSubscription(selectedPackage)}
-          disabled={loading}
-          sx={{
-            bgcolor: 'white',
-            color: 'primary.main',
-            '&:hover': { bgcolor: 'grey.100' },
-            mb: 3,
-          }}
-          startIcon={loading ? <CircularProgress size={20} /> : <ShieldIcon />}
-        >
-          GET STARTED
-        </Button>
-
-        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3, flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <CheckCircleIcon fontSize="small" sx={{ mr: 1 }} />
-            <Typography variant="body2">Cancel anytime</Typography>
+            <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ mt: 2 }}>
+              Credits never expire and can be used for any AI generator feature
+            </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <CheckCircleIcon fontSize="small" sx={{ mr: 1 }} />
-            <Typography variant="body2">Instant access</Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <CheckCircleIcon fontSize="small" sx={{ mr: 1 }} />
-            <Typography variant="body2">7-day support</Typography>
-          </Box>
-        </Box>
+        )}
       </Paper>
 
       {/* Success Modal */}
-      <Dialog
-        open={showSuccessModal}
-        onClose={() => setShowSuccessModal(false)}
-        maxWidth="sm"
-        fullWidth
-      >
+      <Dialog open={showSuccessModal} onClose={() => setShowSuccessModal(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ bgcolor: 'success.main', color: 'white' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box display="flex" alignItems="center">
             <CheckCircleIcon sx={{ mr: 1 }} />
             Purchase Successful!
           </Box>
         </DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Avatar sx={{ bgcolor: 'success.light', color: 'success.main', width: 80, height: 80, mb: 3, mx: 'auto' }}>
-              <RocketIcon fontSize="large" />
-            </Avatar>
-            
-            <Typography variant="h5" fontWeight="bold" gutterBottom>
-              Welcome to Premium!
-            </Typography>
-            
-            <Typography variant="body1" color="text.secondary" paragraph>
-              You now have access to {selectedPackage.replace(/-/g, ' ')}
-            </Typography>
-            
-            <Typography variant="body2" color="text.secondary">
-              Your premium features are now active. You can access them immediately.
-            </Typography>
-          </Box>
+        <DialogContent sx={{ p: 3, textAlign: 'center' }}>
+          <Avatar sx={{ bgcolor: 'success.light', color: 'success.main', width: 80, height: 80, mx: 'auto', mb: 3 }}>
+            <RocketIcon fontSize="large" />
+          </Avatar>
+          <Typography variant="h5" fontWeight="bold" gutterBottom>
+            Welcome to Premium!
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Your purchase has been processed successfully.
+          </Typography>
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setShowSuccessModal(false)}>
-            Continue Shopping
-          </Button>
-          <Button variant="contained" onClick={handleContinueToPremium}>
-            Access Premium Content
-          </Button>
+        <DialogActions>
+          <Button onClick={() => setShowSuccessModal(false)}>Continue Shopping</Button>
+          <Button variant="contained" onClick={() => navigate('/dashboard')}>Go to Dashboard</Button>
         </DialogActions>
       </Dialog>
     </Container>

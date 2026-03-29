@@ -87,10 +87,11 @@ import {
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 import { useQuery } from '@tanstack/react-query';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ============= CONSTANTS =============
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
-const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+// PYTHON_API_BASE is no longer used – all sports now go through the Node API
 
 // Mock data for players (fallback)
 const mockPlayers = {
@@ -335,6 +336,227 @@ const mockPlayers = {
         'EuroLeague champion'
       ]
     }
+  ],
+  NHL: [
+    {
+      id: 9,
+      name: 'Connor McDavid',
+      team: 'Edmonton Oilers',
+      position: 'C',
+      number: 97,
+      age: 27,
+      height: "6'1\"",
+      weight: '195 lbs',
+      salary: '$12.5M/yr',
+      contract: '8 years',
+      trend: 'up',
+      isPremium: true,
+      stats: {
+        goals: 64,
+        assists: 89,
+        points: 153,
+        shots: 300,
+        plusMinus: 35,
+        pim: 20
+      },
+      highlights: [
+        '3x Hart Trophy',
+        '4x Art Ross Trophy',
+        '5x All-Star',
+        'Rocket Richard Trophy'
+      ]
+    },
+    {
+      id: 10,
+      name: 'Auston Matthews',
+      team: 'Toronto Maple Leafs',
+      position: 'C',
+      number: 34,
+      age: 26,
+      height: "6'3\"",
+      weight: '220 lbs',
+      salary: '$11.6M/yr',
+      contract: '4 years',
+      trend: 'up',
+      isPremium: true,
+      stats: {
+        goals: 69,
+        assists: 49,
+        points: 118,
+        shots: 350,
+        plusMinus: 30,
+        pim: 15
+      },
+      highlights: [
+        '2x Rocket Richard Trophy',
+        'Hart Trophy',
+        '5x All-Star',
+        'Calder Trophy'
+      ]
+    },
+    {
+      id: 11,
+      name: 'Cale Makar',
+      team: 'Colorado Avalanche',
+      position: 'D',
+      number: 8,
+      age: 25,
+      height: "5'11\"",
+      weight: '190 lbs',
+      salary: '$9.0M/yr',
+      contract: '6 years',
+      trend: 'up',
+      isPremium: true,
+      stats: {
+        goals: 21,
+        assists: 70,
+        points: 91,
+        shots: 220,
+        plusMinus: 45,
+        pim: 25
+      },
+      highlights: [
+        'Norris Trophy',
+        'Stanley Cup champion',
+        'Conn Smythe Trophy',
+        '2x All-Star'
+      ]
+    },
+    {
+      id: 12,
+      name: 'Ilya Sorokin',
+      team: 'New York Islanders',
+      position: 'G',
+      number: 30,
+      age: 28,
+      height: "6'3\"",
+      weight: '190 lbs',
+      salary: '$8.2M/yr',
+      contract: '8 years',
+      trend: 'up',
+      isPremium: false,
+      stats: {
+        wins: 31,
+        goalsAgainstAvg: 2.34,
+        savePct: 0.924,
+        shutouts: 6
+      },
+      highlights: [
+        'Vezina finalist',
+        'All-Star',
+        'All-Rookie team'
+      ]
+    }
+  ],
+  MLB: [
+    {
+      id: 13,
+      name: 'Shohei Ohtani',
+      team: 'Los Angeles Dodgers',
+      position: 'DH',
+      number: 17,
+      age: 29,
+      height: "6'4\"",
+      weight: '210 lbs',
+      salary: '$70M/yr',
+      contract: '10 years',
+      trend: 'up',
+      isPremium: true,
+      stats: {
+        battingAvg: 0.304,
+        homeRuns: 44,
+        rbi: 95,
+        runs: 102,
+        steals: 20
+      },
+      highlights: [
+        '2x MVP',
+        'All-Star',
+        'Home Run leader',
+        'Pitching ace'
+      ]
+    },
+    {
+      id: 14,
+      name: 'Aaron Judge',
+      team: 'New York Yankees',
+      position: 'RF',
+      number: 99,
+      age: 32,
+      height: "6'7\"",
+      weight: '282 lbs',
+      salary: '$40M/yr',
+      contract: '9 years',
+      trend: 'up',
+      isPremium: true,
+      stats: {
+        battingAvg: 0.267,
+        homeRuns: 62,
+        rbi: 131,
+        runs: 133,
+        steals: 16
+      },
+      highlights: [
+        'MVP',
+        '4x All-Star',
+        'Home Run record',
+        'Silver Slugger'
+      ]
+    },
+    {
+      id: 15,
+      name: 'Ronald Acuña Jr.',
+      team: 'Atlanta Braves',
+      position: 'RF',
+      number: 13,
+      age: 26,
+      height: "6'0\"",
+      weight: '205 lbs',
+      salary: '$17M/yr',
+      contract: '8 years',
+      trend: 'up',
+      isPremium: true,
+      stats: {
+        battingAvg: 0.337,
+        homeRuns: 41,
+        rbi: 106,
+        runs: 149,
+        steals: 73
+      },
+      highlights: [
+        'MVP',
+        '4x All-Star',
+        '40/70 club',
+        'Silver Slugger'
+      ]
+    },
+    {
+      id: 16,
+      name: 'Mookie Betts',
+      team: 'Los Angeles Dodgers',
+      position: 'RF',
+      number: 50,
+      age: 31,
+      height: "5'9\"",
+      weight: '180 lbs',
+      salary: '$30M/yr',
+      contract: '12 years',
+      trend: 'up',
+      isPremium: false,
+      stats: {
+        battingAvg: 0.307,
+        homeRuns: 39,
+        rbi: 107,
+        runs: 126,
+        steals: 14
+      },
+      highlights: [
+        'MVP',
+        '7x All-Star',
+        'World Series champion',
+        'Gold Glove'
+      ]
+    }
   ]
 };
 
@@ -446,7 +668,7 @@ const AnalyticsBox = () => {
   );
 };
 
-// Advanced Metrics Modal
+// Advanced Metrics Modal (unchanged)
 const AdvancedMetricsGuide = ({ open, onClose }: { open: boolean, onClose: () => void }) => {
   const metrics = [
     { name: 'Player Efficiency Rating (PER)', description: 'Overall player performance metric. League average is 15. Higher values indicate better performance.', color: '#7c3aed' },
@@ -483,7 +705,7 @@ const AdvancedMetricsGuide = ({ open, onClose }: { open: boolean, onClose: () =>
   );
 };
 
-const PlayerStatsScreen = () => {
+const PlayerStatsContent: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
@@ -494,12 +716,21 @@ const PlayerStatsScreen = () => {
   const [selectedPosition, setSelectedPosition] = useState('All Positions');
   const [selectedTeam, setSelectedTeam] = useState('All Teams');
   const [searchInput, setSearchInput] = useState('');
-  const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
   const [showAdvancedMetricsGuide, setShowAdvancedMetricsGuide] = useState(false);
   const [showSearchPrompts, setShowSearchPrompts] = useState(true);
-  const [advancedMetrics, setAdvancedMetrics] = useState<any>({});
   
   const [searchHistory, setSearchHistory] = useState<string[]>(['Patrick Mahomes', 'Quarterbacks', 'Top receivers']);
+
+  // Helper to normalize API response (handles both raw arrays and { data } objects)
+  const normalizeResponse = (data: any): { success: boolean; data: any[] } => {
+    if (Array.isArray(data)) {
+      return { success: true, data };
+    }
+    if (data && typeof data === 'object' && 'data' in data && Array.isArray(data.data)) {
+      return { success: true, data: data.data };
+    }
+    return { success: false, data: [] };
+  };
 
   // ============= REACT QUERY =============
   const {
@@ -511,39 +742,18 @@ const PlayerStatsScreen = () => {
   } = useQuery({
     queryKey: ['players', selectedSport],
     queryFn: async () => {
-      let url: string;
-      let response;
-      
-      if (selectedSport === 'mlb' || selectedSport === 'nhl') {
-        // Use Python API for MLB and NHL (real data endpoints exist)
-        url = `${PYTHON_API_BASE}/api/players?sport=${selectedSport}&realtime=true&limit=500`;
-        response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const json = await response.json();
-        console.log(`🔍 RAW ${selectedSport} response (Python):`, json);
+      // Use the same Node API endpoint for all sports
+      const url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${selectedSport}&filterByToday=false`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const json = await response.json();
+      console.log(`🔍 RAW ${selectedSport} response (Node):`, json);
 
-        // Python API returns { success: true, data: { players, is_real_data } }
-        if (json.success && json.data?.players) {
-          const players = json.data.players;
-          const isReal = json.data.is_real_data === true;
-          return { players, is_real_data: isReal };
-        }
-        return { players: [], is_real_data: false };
-      } else {
-        // For NBA and NFL, use Node API
-        url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${selectedSport}`;
-        response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const json = await response.json();
-        console.log(`🔍 RAW ${selectedSport} response (Node):`, json);
-
-        if (json.success && Array.isArray(json.data)) {
-          // Only mark as real if array is non-empty
-          const isReal = json.data.length > 0;
-          return { players: json.data, is_real_data: isReal };
-        }
-        return { players: [], is_real_data: false };
+      const normalized = normalizeResponse(json);
+      if (normalized.success && normalized.data.length > 0) {
+        return { players: normalized.data, is_real_data: true };
       }
+      return { players: [], is_real_data: false };
     },
     staleTime: 1000 * 60 * 2,
     refetchOnWindowFocus: false,
@@ -567,51 +777,6 @@ const PlayerStatsScreen = () => {
     }
   }, [playersFromApi, playersData, selectedSport, isLoading, error]);
 
-  // ============= BUILD STATS PER SPORT =============
-  const buildStats = (player: any, sport: string) => {
-    const stats: any = {};
-    if (sport === 'nba') {
-      stats.points = player.points || player.pts_per_game || 0;
-      stats.rebounds = player.rebounds || player.reb_per_game || 0;
-      stats.assists = player.assists || player.ast_per_game || 0;
-      stats.steals = player.steals || player.stl_per_game || 0;
-      stats.blocks = player.blocks || player.blk_per_game || 0;
-      stats.fgPct = player.fg_pct || 0;
-      stats.threePtPct = player.three_pct || 0;
-      stats.turnovers = player.turnovers || player.to_per_game || 0;
-      stats.fantasy_points = player.projection || player.fantasy_points || 0;
-    } else if (sport === 'nhl') {
-      stats.goals = player.goals || 0;
-      stats.assists = player.assists || 0;
-      stats.points = player.points || 0;
-      stats.shots = player.shots || 0;
-      stats.plusMinus = player.plus_minus || 0;
-      stats.pim = player.pim || 0;
-      stats.fantasy_points = player.fantasy_points || 0;
-    } else if (sport === 'mlb') {
-      stats.battingAvg = player.avg || player.batting_avg || 0;
-      stats.homeRuns = player.hr || player.home_runs || 0;
-      stats.rbi = player.rbi || 0;
-      stats.runs = player.runs || 0;
-      stats.steals = player.steals || 0;
-      stats.fantasy_points = player.fantasy_points || 0;
-    } else if (sport === 'nfl') {
-      stats.passingYards = player.passingYards || player.passing_yds || 0;
-      stats.passingTDs = player.passingTDs || player.passing_tds || 0;
-      stats.interceptions = player.interceptions || player.ints || 0;
-      stats.rushingYards = player.rushingYards || player.rushing_yds || 0;
-      stats.rushingTDs = player.rushingTDs || player.rushing_tds || 0;
-      stats.receptions = player.receptions || 0;
-      stats.receivingYards = player.receivingYards || player.receiving_yds || 0;
-      stats.receivingTDs = player.receivingTDs || player.receiving_tds || 0;
-      stats.sacks = player.sacks || 0;
-      stats.fantasy_points = player.projection || player.fantasy_points || 0;
-    } else {
-      Object.assign(stats, player.stats || {});
-    }
-    return stats;
-  };
-
   // ============= TRANSFORM API DATA =============
   const players = React.useMemo(() => {
     console.log('🔍 Processing player data:', {
@@ -620,19 +785,69 @@ const PlayerStatsScreen = () => {
       hasRealData: playersData?.is_real_data || false,
     });
 
-    if (playersFromApi.length > 0 && playersData?.is_real_data) {
-      console.log(`✅ Using REAL player data: ${playersFromApi.length} players`);
+if (playersFromApi.length > 0 && playersData?.is_real_data) {
+  // Quick check: does the first player have any non‑zero stat?
+  const first = playersFromApi[0];
+  const hasStats = selectedSport === 'nhl'
+    ? (first.goals || first.assists || first.points)
+    : (first.battingAverage || first.homeRuns || first.rbi);
+  if (!hasStats) {
+    console.warn('⚠️ Real data has zero stats – falling back to mock');
+    const sportUpper = selectedSport.toUpperCase();
+    return mockPlayers[sportUpper as keyof typeof mockPlayers] || mockPlayers.NBA;
+  }
 
       return playersFromApi.map((player: any, index: number) => {
-        const stats = buildStats(player, selectedSport);
+        // Build a stats object with consistent field names per sport
+        const stats: any = {};
 
-        // Use mock data to fill missing fields (age, height, etc.)
+        if (selectedSport === 'nba') {
+          stats.points = player.points || 0;
+          stats.rebounds = player.rebounds || 0;
+          stats.assists = player.assists || 0;
+          stats.steals = player.steals || 0;
+          stats.blocks = player.blocks || 0;
+          stats.fgPct = player.fgPct || player.fg_pct || 0;
+          stats.threePtPct = player.threePtPct || player.three_pct || 0;
+          stats.turnovers = player.turnovers || 0;
+        } else if (selectedSport === 'nhl') {
+          stats.goals = player.goals || 0;
+          stats.assists = player.assists || 0;
+          stats.points = player.points || 0;
+          stats.shots = player.shots || 0;
+          stats.plusMinus = player.plusMinus || 0;
+          stats.hits = player.hits || 0;
+          stats.blockedShots = player.blockedShots || 0;
+          stats.pim = player.penaltiesInMinutes || 0;
+        } else if (selectedSport === 'mlb') {
+          stats.avg = player.battingAverage || player.avg || 0;
+          stats.hr = player.homeRuns || player.hr || 0;
+          stats.rbi = player.rbi || 0;
+          stats.runs = player.runs || 0;
+          stats.sb = player.stolenBases || player.steals || 0;
+          stats.ops = player.ops || 0;
+          stats.era = player.era || 0;
+          stats.whip = player.whip || 0;
+          stats.k = player.strikeouts || 0;
+        } else if (selectedSport === 'nfl') {
+          stats.passingYards = player.passingYards || 0;
+          stats.passingTDs = player.passingTDs || 0;
+          stats.interceptions = player.interceptions || 0;
+          stats.rushingYards = player.rushingYards || 0;
+          stats.rushingTDs = player.rushingTDs || 0;
+          stats.receptions = player.receptions || 0;
+          stats.receivingYards = player.receivingYards || 0;
+          stats.receivingTDs = player.receivingTDs || 0;
+          stats.sacks = player.sacks || 0;
+        }
+
+        // Fill missing personal fields with mock data
         const sportUpper = selectedSport.toUpperCase();
         const mockSportData = mockPlayers[sportUpper as keyof typeof mockPlayers] || [];
         const mockPlayer = mockSportData[index % mockSportData.length] || mockSportData[0] || mockPlayers.NBA[0];
 
         return {
-          id: player.id || player.player_id || `player-${index}`,
+          id: player.player_id || player.id || `player-${index}`,
           name: player.name || `Player ${index + 1}`,
           team: player.team || mockPlayer.team,
           position: player.position || mockPlayer.position,
@@ -644,7 +859,7 @@ const PlayerStatsScreen = () => {
           contract: player.contract || mockPlayer.contract || "1 year",
           trend: player.trend || mockPlayer.trend || 'neutral',
           isPremium: player.isPremium || player.is_premium || mockPlayer.isPremium || false,
-          stats: stats,
+          stats: stats, // This stats object will be used for display
           highlights: player.highlights || mockPlayer.highlights || [],
         };
       });
@@ -679,9 +894,7 @@ const PlayerStatsScreen = () => {
   }, [players, selectedPosition, selectedTeam, searchInput]);
 
   const calculateAdvancedMetrics = (player: any) => {
-    if (!player || !player.stats) return {};
-    
-    const stats = player.stats;
+    const stats = player.stats || {};
     
     let per = 0;
     let tsPercentage = 0;
@@ -751,12 +964,6 @@ const PlayerStatsScreen = () => {
     };
   };
 
-  const handlePlayerSelect = (player: any) => {
-    setSelectedPlayer(player);
-    const metrics = calculateAdvancedMetrics(player);
-    setAdvancedMetrics(metrics);
-  };
-
   const handleSearch = () => {
     if (searchInput.trim()) {
       setSearchHistory([searchInput.trim(), ...searchHistory.slice(0, 4)]);
@@ -777,12 +984,90 @@ const PlayerStatsScreen = () => {
     setSelectedTeam('All Teams');
   };
 
+  const handlePlayerClick = (player: any) => {
+    navigate(`/player/${player.id}?sport=${selectedSport}`);
+  };
+
   // ----- renderPlayerCard -----
   const renderPlayerCard = (player: any) => {
+    const stats = player.stats; // Now stats is always defined (either from real data or mock)
+
+    // Build display stats based on sport
+    let displayStats: { label: string; value: number }[] = [];
+
+    if (selectedSport === 'nba') {
+      displayStats = [
+        { label: 'PTS', value: stats.points },
+        { label: 'REB', value: stats.rebounds },
+        { label: 'AST', value: stats.assists },
+        { label: 'STL', value: stats.steals },
+      ];
+    } else if (selectedSport === 'nhl') {
+      displayStats = [
+        { label: 'G', value: stats.goals },
+        { label: 'A', value: stats.assists },
+        { label: 'PTS', value: stats.points },
+        { label: 'SOG', value: stats.shots },
+        { label: '+/-', value: stats.plusMinus },
+      ];
+    } else if (selectedSport === 'mlb') {
+      // For pitchers, we might want to show different stats, but for simplicity we show batting.
+      displayStats = [
+        { label: 'AVG', value: stats.avg },
+        { label: 'HR', value: stats.hr },
+        { label: 'RBI', value: stats.rbi },
+        { label: 'SB', value: stats.sb },
+      ];
+    } else if (selectedSport === 'nfl') {
+      if (player.position === 'QB') {
+        displayStats = [
+          { label: 'YDS', value: stats.passingYards },
+          { label: 'TD', value: stats.passingTDs },
+          { label: 'INT', value: stats.interceptions },
+          { label: 'RUSH', value: stats.rushingYards },
+        ];
+      } else if (player.position === 'WR' || player.position === 'TE') {
+        displayStats = [
+          { label: 'REC', value: stats.receptions },
+          { label: 'YDS', value: stats.receivingYards },
+          { label: 'TD', value: stats.receivingTDs },
+        ];
+      } else if (player.position === 'RB') {
+        displayStats = [
+          { label: 'RUSH', value: stats.rushingYards },
+          { label: 'RUSH TD', value: stats.rushingTDs },
+          { label: 'REC', value: stats.receptions },
+          { label: 'REC YDS', value: stats.receivingYards },
+        ];
+      } else if (player.position === 'DEF') {
+        displayStats = [
+          { label: 'SACK', value: stats.sacks },
+          { label: 'INT', value: stats.interceptions },
+          { label: 'FF', value: stats.forcedFumbles || 0 },
+          { label: 'TD', value: stats.defensiveTDs || 0 },
+        ];
+      }
+    }
+
+    // Limit to 4 stats for the card
+    const statsToShow = displayStats.slice(0, 4);
+
     const metrics = calculateAdvancedMetrics(player);
 
     return (
-      <Card key={player.id} sx={{ mb: 2 }}>
+      <Card 
+        key={player.id} 
+        sx={{ 
+          mb: 2, 
+          cursor: 'pointer',
+          transition: 'transform 0.2s, box-shadow 0.2s',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: theme.shadows[8]
+          }
+        }}
+        onClick={() => handlePlayerClick(player)}
+      >
         <CardContent>
           <Box display="flex" alignItems="center" gap={2} mb={2}>
             <Avatar sx={{ bgcolor: 'primary.main' }}>{player.name.charAt(0)}</Avatar>
@@ -792,89 +1077,21 @@ const PlayerStatsScreen = () => {
             </Box>
           </Box>
           <Grid container spacing={1} mb={2}>
-            {Object.entries(player.stats).slice(0, 4).map(([key, value], index) => {
-              const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
-              const formatted = numValue.toFixed(1);
-              return (
-                <Grid item xs={6} sm={3} key={index}>
-                  <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
-                    <Typography variant="h6" fontWeight="bold">{formatted}</Typography>
-                    <Typography variant="caption" color="text.secondary">{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Typography>
-                  </Box>
-                </Grid>
-              );
-            })}
+            {statsToShow.map((stat, idx) => (
+              <Grid item xs={6} sm={3} key={idx}>
+                <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
+                  <Typography variant="h6" fontWeight="bold">
+                    {typeof stat.value === 'number' ? stat.value.toFixed(1) : stat.value}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">{stat.label}</Typography>
+                </Box>
+              </Grid>
+            ))}
           </Grid>
           <Box display="flex" gap={1}>
             <Chip icon={<SpeedIcon />} label={`PER: ${metrics.per}`} size="small" sx={{ bgcolor: alpha('#7c3aed', 0.1), color: '#7c3aed' }} />
             <Chip icon={<PulseIcon />} label={`EFF: ${metrics.efficiency}`} size="small" sx={{ bgcolor: alpha('#ec4899', 0.1), color: '#ec4899' }} />
           </Box>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const renderPlayerDetail = () => {
-    if (!selectedPlayer) return null;
-
-    return (
-      <Card sx={{ mt: 3 }}>
-        <CardContent>
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
-            <Box display="flex" alignItems="center" gap={2}>
-              <Avatar sx={{ width: 60, height: 60, bgcolor: 'primary.main' }}>{selectedPlayer.name.charAt(0)}</Avatar>
-              <Box>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <Typography variant="h5" fontWeight="bold">{selectedPlayer.name}</Typography>
-                  {selectedPlayer.isPremium && <Badge badgeContent="PREMIUM" color="warning" sx={{ '& .MuiBadge-badge': { fontSize: '0.6rem' } }} />}
-                  {playersData?.is_real_data && <Chip label="LIVE DATA" size="small" color="success" sx={{ height: 20, fontSize: '0.6rem' }} />}
-                </Box>
-                <Typography variant="body2" color="text.secondary">{selectedPlayer.team} • {selectedPlayer.position} #{selectedPlayer.number}</Typography>
-              </Box>
-            </Box>
-            <IconButton onClick={() => setSelectedPlayer(null)}><CloseIcon /></IconButton>
-          </Box>
-          <Grid container spacing={2} mb={3}>
-            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Age</Typography><Typography variant="body1" fontWeight="medium">{selectedPlayer.age}</Typography></Grid>
-            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Height / Weight</Typography><Typography variant="body1" fontWeight="medium">{selectedPlayer.height} • {selectedPlayer.weight}</Typography></Grid>
-            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Salary</Typography><Typography variant="body1" fontWeight="medium" color="success.main">{selectedPlayer.salary}</Typography></Grid>
-            <Grid item xs={6}><Typography variant="body2" color="text.secondary">Contract</Typography><Typography variant="body1" fontWeight="medium">{selectedPlayer.contract}</Typography></Grid>
-          </Grid>
-          <Typography variant="h6" fontWeight="bold">Season Stats</Typography>
-          <Grid container spacing={1} mb={3}>
-            {Object.entries(selectedPlayer.stats).map(([key, value], index) => {
-              const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
-              const formatted = numValue.toFixed(1);
-              return (
-                <Grid item xs={6} sm={4} md={3} key={index}>
-                  <Box textAlign="center" p={1} bgcolor="action.hover" borderRadius={1}>
-                    <Typography variant="h6" fontWeight="bold">{formatted}</Typography>
-                    <Typography variant="caption" color="text.secondary">{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</Typography>
-                  </Box>
-                </Grid>
-              );
-            })}
-          </Grid>
-          <Box mb={3}>
-            <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-              <Typography variant="h6" fontWeight="bold">Advanced Metrics</Typography>
-              <IconButton size="small" onClick={() => setShowAdvancedMetricsGuide(true)}><InfoIcon /></IconButton>
-            </Box>
-            <Grid container spacing={2}>
-              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #7c3aed' }}><CardContent sx={{ textAlign: 'center' }}><SpeedIcon sx={{ color: '#7c3aed', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.per}</Typography><Typography variant="caption" color="text.secondary">PER</Typography><Typography variant="caption" display="block" color="text.secondary">Player Efficiency</Typography></CardContent></Card></Grid>
-              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #3b82f6' }}><CardContent sx={{ textAlign: 'center' }}><BarChartIcon sx={{ color: '#3b82f6', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.usageRate}</Typography><Typography variant="caption" color="text.secondary">USG%</Typography><Typography variant="caption" display="block" color="text.secondary">Usage Rate</Typography></CardContent></Card></Grid>
-              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #10b981' }}><CardContent sx={{ textAlign: 'center' }}><EmojiEventsIcon sx={{ color: '#10b981', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.winShares}</Typography><Typography variant="caption" color="text.secondary">WS</Typography><Typography variant="caption" display="block" color="text.secondary">Win Shares</Typography></CardContent></Card></Grid>
-              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #8b5cf6' }}><CardContent sx={{ textAlign: 'center' }}><StarIcon sx={{ color: '#8b5cf6', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.vorp}</Typography><Typography variant="caption" color="text.secondary">VORP</Typography><Typography variant="caption" display="block" color="text.secondary">Value Added</Typography></CardContent></Card></Grid>
-              <Grid item xs={6} md={4}><Card sx={{ borderLeft: '4px solid #ec4899' }}><CardContent sx={{ textAlign: 'center' }}><PulseIcon sx={{ color: '#ec4899', mb: 1 }} /><Typography variant="h5" fontWeight="bold">{advancedMetrics.efficiency}</Typography><Typography variant="caption" color="text.secondary">EFF</Typography><Typography variant="caption" display="block" color="text.secondary">Efficiency</Typography></CardContent></Card></Grid>
-            </Grid>
-          </Box>
-          <Typography variant="h6" fontWeight="bold" mb={2}>Highlights</Typography>
-          <List>
-            {selectedPlayer.highlights?.map((highlight: string, index: number) => (
-              <ListItem key={index} sx={{ py: 0.5 }}><CheckCircleIcon sx={{ color: 'success.main', mr: 2, fontSize: 16 }} /><ListItemText primary={highlight} /></ListItem>
-            ))}
-          </List>
-          <Button fullWidth variant="contained" startIcon={<PersonIcon />} onClick={() => navigate('/player-profile')} sx={{ mt: 2, bgcolor: '#059669' }}>View Full Player Profile</Button>
         </CardContent>
       </Card>
     );
@@ -937,7 +1154,7 @@ const PlayerStatsScreen = () => {
               {playersData?.is_real_data ? '✅ REAL DATA CONNECTED' : '⚠️ USING MOCK DATA'}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Endpoint: {selectedSport === 'mlb' || selectedSport === 'nhl' ? 'Python API' : 'Node API'} • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
+              Endpoint: Node API • Players: {playersFromApi.length} • Sport: {selectedSport.toUpperCase()}
             </Typography>
           </Box>
           <Button size="small" variant="outlined" onClick={() => setShowApiDebug(!showApiDebug)} startIcon={<BugReportIcon />}>Debug</Button>
@@ -1027,7 +1244,7 @@ const PlayerStatsScreen = () => {
         <Paper sx={{ p: 2, mb: 3, bgcolor: '#f3f4f6' }}>
           <Typography variant="subtitle1" fontWeight="bold" gutterBottom>API Debug Information</Typography>
           <Box sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>
-            <div><strong>Endpoint:</strong> {selectedSport === 'mlb' || selectedSport === 'nhl' ? 'Python API' : 'Node API'}</div>
+            <div><strong>Endpoint:</strong> Node API</div>
             <div><strong>Sport:</strong> {selectedSport}</div>
             <div><strong>API Players:</strong> {playersFromApi.length}</div>
             <div><strong>Processed Players:</strong> {players.length}</div>
@@ -1060,7 +1277,6 @@ const PlayerStatsScreen = () => {
         {filteredPlayers.length > 0 ? (
           <>
             {filteredPlayers.map((player) => renderPlayerCard(player))}
-            {renderPlayerDetail()}
           </>
         ) : (
           <Paper sx={{ p: 4, textAlign: 'center' }}>
@@ -1086,6 +1302,15 @@ const PlayerStatsScreen = () => {
       <AnalyticsBox />
       <AdvancedMetricsGuide open={showAdvancedMetricsGuide} onClose={() => setShowAdvancedMetricsGuide(false)} />
     </Container>
+  );
+};
+
+// Main exported component wrapped with ProtectedRoute
+const PlayerStatsScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="PlayerStats">
+      <PlayerStatsContent />
+    </ProtectedRoute>
   );
 };
 

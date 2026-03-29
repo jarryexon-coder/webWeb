@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Container, Grid, Card, CardContent, CardActions, Typography, Button,
   Paper, Box, Slider, FormControl, InputLabel, Select, MenuItem,
@@ -20,7 +20,7 @@ import { usePhraseCache } from '../utils/usePhrasecache';
 import { preprocessQuery, QueryIntent } from '../utils/queryProcessor';
 import { logPromptPerformance } from '../utils/analytics';
 
-// Define interfaces (unchanged)
+// Define interfaces
 interface PlayerProp {
   player_name: string;
   prop_type: string;
@@ -33,7 +33,7 @@ interface PlayerProp {
   last_update: string;
   id?: string;
   player?: string;
-  projection?: number;
+  projection?: number | null;
   stat_type?: string;
   market?: string;
   source?: string;
@@ -59,6 +59,11 @@ interface PlayerProp {
   opponent?: string;
   is_real_data?: boolean;
   last_updated?: string;
+  league?: string;
+  prop_type?: string;
+  projected_value?: number;
+  projected_score?: number;
+  proj?: number;
 }
 
 interface ConfidenceResult {
@@ -134,7 +139,7 @@ const PrizePicksScreen = () => {
   const debouncedSearch = useDebounce(searchQuery, 300);
 
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-  const REFRESH_INTERVAL = 120000;
+  const REFRESH_INTERVAL = 180000; // 3 minutes (increased from 2)
 
   // ===== VALUE FILTERING STATE =====
   const [enableProjectionFiltering, setEnableProjectionFiltering] = useState(false);
@@ -180,7 +185,7 @@ const PrizePicksScreen = () => {
   // Flag to indicate if we are using real backend or fallback
   const [usingBackend, setUsingBackend] = useState(true);
 
-  // ===== TAB STATE (added "generator") =====
+  // ===== TAB STATE =====
   const [activeTab, setActiveTab] = useState<'all' | 'top' | 'generator'>('all');
 
   const [showFilters, setShowFilters] = useState(true);
@@ -190,23 +195,35 @@ const PrizePicksScreen = () => {
 
   const { getCached, setCached } = usePhraseCache();
 
-  // ===== ALL‑SPORTS PROMPTS =====
+  // ===== ALL-SPORTS PROMPTS =====
   const ALL_SPORTS_PROMPTS = [
-    { label: '🔥 Highest Edge Points', query: 'points high edge' },
-    { label: '🎯 Best Value Assists', query: 'assists best value' },
-    { label: '📊 Top Projection Rebounds', query: 'rebounds top projection' },
-    { label: '⚡ Highest Edge Goals', query: 'goals high edge' },
-    { label: '💪 Best Value Strikeouts', query: 'strikeouts best value' },
-    { label: '🏈 Top Projection Passing Yards', query: 'passing yards top projection' },
-    { label: '🥅 Highest Edge Shots on Goal', query: 'shots on goal high edge' },
-    { label: '⚾ Best Value Home Runs', query: 'home runs best value' },
-    { label: '🏃 Top Projection Rushing Yards', query: 'rushing yards top projection' },
-    { label: '🧤 Highest Edge Saves', query: 'saves high edge' },
-    { label: '🔢 Best Value Total Bases', query: 'total bases best value' },
-    { label: '✨ Top Projection Points + Assists', query: 'points+assists top projection' },
-    { label: '🔄 Highest Edge Rebounds + Assists', query: 'rebounds+assists high edge' },
-    { label: '⬆️ Best Value Over Bets', query: 'over best value' },
-    { label: '⬇️ Best Value Under Bets', query: 'under best value' },
+    // NBA Prompts (5)
+    { label: '🏀 NBA: Highest Edge Points', query: 'nba points high edge' },
+    { label: '🏀 NBA: Best Value Assists', query: 'nba assists best value' },
+    { label: '🏀 NBA: Top Projection Rebounds', query: 'nba rebounds top projection' },
+    { label: '🏀 NBA: Highest Edge Steals+Blocks', query: 'nba stocks high edge' },
+    { label: '🏀 NBA: Best Value 3-Pointers', query: 'nba threes best value' },
+    
+    // MLB Prompts (5)
+    { label: '⚾ MLB: Highest Edge Strikeouts', query: 'mlb strikeouts high edge' },
+    { label: '⚾ MLB: Best Value Home Runs', query: 'mlb home runs best value' },
+    { label: '⚾ MLB: Top Projection Hits', query: 'mlb hits top projection' },
+    { label: '⚾ MLB: Highest Edge RBIs', query: 'mlb rbis high edge' },
+    { label: '⚾ MLB: Best Value Total Bases', query: 'mlb total bases best value' },
+    
+    // NHL Prompts (5)
+    { label: '🏒 NHL: Highest Edge Goals', query: 'nhl goals high edge' },
+    { label: '🏒 NHL: Best Value Assists', query: 'nhl assists best value' },
+    { label: '🏒 NHL: Top Projection Shots on Goal', query: 'nhl shots top projection' },
+    { label: '🏒 NHL: Highest Edge Saves', query: 'nhl saves high edge' },
+    { label: '🏒 NHL: Best Value Points', query: 'nhl points best value' },
+    
+    // Mixed Prompts (5)
+    { label: '🔥 HIGHEST EDGE: All Sports', query: 'highest edge' },
+    { label: '🎯 BEST VALUE: Points+Assists', query: 'points+assists best value' },
+    { label: '📊 TOP PROJECTION: Rebounds+Goals', query: 'rebounds goals top projection' },
+    { label: '⚡ OVER Bets: Best Value', query: 'over best value' },
+    { label: '⬇️ UNDER Bets: Best Value', query: 'under best value' },
   ];
 
   const generatorPrompts = [
@@ -222,6 +239,9 @@ const PrizePicksScreen = () => {
     { label: '🏋️ Centers High Rebounds', query: 'c rebounds' },
   ];
 
+  // ===== REQUEST DEDUPLICATION REF =====
+  const fetchingRef = useRef(false);
+
   // ===== FETCH REMAINING REQUESTS ON MOUNT =====
   useEffect(() => {
     if (!userId) return;
@@ -233,14 +253,11 @@ const PrizePicksScreen = () => {
           setRemainingRequests(data.remaining);
           setUsingBackend(true);
         } else {
-          // Backend returned an error – fallback to local default
-          console.warn('Failed to fetch remaining requests, using default (2). Ensure backend endpoints are implemented.');
-          setRemainingRequests(2); // fallback
+          setRemainingRequests(null);
           setUsingBackend(false);
         }
       } catch (error) {
-        console.warn('Error fetching remaining requests, using default (2). Ensure backend endpoints are implemented.', error);
-        setRemainingRequests(2); // fallback
+        setRemainingRequests(null);
         setUsingBackend(false);
       }
     };
@@ -251,7 +268,6 @@ const PrizePicksScreen = () => {
   const handlePurchase = async () => {
     if (!userId) return;
     if (!usingBackend) {
-      alert('Purchase is not available in local‑only mode. Please implement the backend.');
       return;
     }
     try {
@@ -274,8 +290,15 @@ const PrizePicksScreen = () => {
     }
   };
 
-  // ===== FETCH FUNCTION =====
-  const fetchPrizepicksSelections = async (skipCache = false) => {
+  // ===== FETCH FUNCTION WITH DEDUP AND 429 RETRY =====
+  const fetchPrizepicksSelections = async (skipCache = false, retryCount = 0) => {
+    // Deduplicate concurrent requests
+    if (fetchingRef.current) {
+      log('⏳ Fetch already in progress, skipping');
+      return;
+    }
+    fetchingRef.current = true;
+
     try {
       setPicksLoading(true);
       setRefreshing(true);
@@ -313,6 +336,17 @@ const PrizePicksScreen = () => {
       const response = await fetch(apiUrl);
       if (!response.ok) {
         const errorText = await response.text();
+        // Handle 429 specifically
+        if (response.status === 429 && retryCount < 3) {
+          setSnackbar({
+            open: true,
+            message: `Rate limit hit. Retrying in 5 seconds (${retryCount + 1}/3)...`,
+            severity: 'warning',
+          });
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          fetchingRef.current = false;
+          return fetchPrizepicksSelections(skipCache, retryCount + 1);
+        }
         throw new Error(`HTTP ${response.status}: ${errorText}`);
       }
 
@@ -358,6 +392,7 @@ const PrizePicksScreen = () => {
         severity: 'error'
       });
     } finally {
+      fetchingRef.current = false;
       setPicksLoading(false);
       setRefreshing(false);
     }
@@ -375,7 +410,7 @@ const PrizePicksScreen = () => {
     return () => clearInterval(intervalId);
   }, [autoRefreshEnabled, selectedSport]);
 
-  // ===== HELPER FUNCTIONS (unchanged) =====
+  // ===== HELPER FUNCTIONS =====
   const calculateImpliedProbability = (americanOdds: number): number => {
     if (americanOdds > 0) return 100 / (americanOdds + 100);
     else return Math.abs(americanOdds) / (Math.abs(americanOdds) + 100);
@@ -401,8 +436,8 @@ const PrizePicksScreen = () => {
     };
   };
 
-  const calculateProjectionValue = (projection?: number, line?: number, overPrice?: number | null, underPrice?: number | null): ProjectionValueResult => {
-    if (projection === undefined || line === undefined) {
+  const calculateProjectionValue = (projection?: number | null, line?: number, overPrice?: number | null, underPrice?: number | null): ProjectionValueResult => {
+    if (projection === undefined || projection === null || line === undefined || line === null) {
       return { 
         edge: 0, 
         recommendedSide: 'none', 
@@ -476,6 +511,18 @@ const PrizePicksScreen = () => {
     return isNaN(numericOdds) ? null : numericOdds;
   };
 
+  // ===== STAT TYPE NORMALIZATION =====
+  const normalizeStatType = (rawStat: string): string => {
+    const stat = rawStat.toLowerCase();
+    if (stat === 'pts' || stat === 'point' || stat.includes('point')) return 'points';
+    if (stat === 'reb' || stat === 'rebounds' || stat.includes('rebound')) return 'rebounds';
+    if (stat === 'ast' || stat === 'assist' || stat.includes('assist')) return 'assists';
+    if (stat === 'stl' || stat === 'steal' || stat.includes('steal')) return 'steals';
+    if (stat === 'blk' || stat === 'block' || stat.includes('block')) return 'blocks';
+    if (stat === '3pm' || stat === 'threes' || stat === 'three' || stat.includes('3pt')) return 'threes';
+    return stat;
+  };
+
   // ===== PROCESS PRIZE PICKS DATA =====
   const processPrizePicksData = (data: any): PlayerProp[] => {
     log('🔄 Processing PrizePicks Data from API');
@@ -487,12 +534,37 @@ const PrizePicksScreen = () => {
       const playerName = item.player || item.player_name || 'Unknown Player';
       
       const rawStat = item.stat_type || item.prop_type || item.stat || 'points';    
-      const statType = rawStat.replace(/^player_/, '').toLowerCase();
+      const statType = normalizeStatType(rawStat);
 
       const line = item.line || 0;
-      const offset = (Math.random() * 4) - 2;
-      let projection = parseFloat((line + offset).toFixed(1));
-      const projectionDiff = projection - line;
+      
+      // Try to get projection from various possible API fields
+      let projection = null;
+      let projectionDiff = 0;
+
+      if (item.projection !== undefined && item.projection !== null) {
+        projection = parseFloat(item.projection);
+      } else if (item.projected_value !== undefined && item.projected_value !== null) {
+        projection = parseFloat(item.projected_value);
+      } else if (item.projected_score !== undefined && item.projected_score !== null) {
+        projection = parseFloat(item.projected_score);
+      } else if (item.proj !== undefined && item.proj !== null) {
+        projection = parseFloat(item.proj);
+      } else if (item.projection_edge !== undefined && item.projection_edge !== null && line) {
+        const projEdge = parseFloat(item.projection_edge) || 0;
+        projection = line * (1 + projEdge);
+      } else if (item.edge !== undefined && item.edge !== null && line) {
+        const edge = parseFloat(item.edge) / 100 || 0;
+        projection = line * (1 + edge);
+      }
+
+      if (projection === null) {
+        projection = null;
+        projectionDiff = 0;
+      } else {
+        projection = parseFloat(projection.toFixed(1));
+        projectionDiff = projection - line;
+      }
 
       let overPrice = item.over_price;
       let underPrice = item.under_price;
@@ -504,8 +576,9 @@ const PrizePicksScreen = () => {
       underPrice = normalizeOdds(underPrice, 'under');
 
       const projectionValue = calculateProjectionValue(projection, line, overPrice, underPrice);
+      
       let kellyBetSize = 0;
-      if (projectionValue.edge > 0 && projectionValue.recommendedSide !== 'none') {
+      if (projection && projectionValue.edge > 0 && projectionValue.recommendedSide !== 'none') {
         const odds = projectionValue.recommendedSide === 'over' ? overPrice : underPrice;
         if (odds !== null) {
           const kellyResult = calculateKellyBetSize(projectionValue.edge, odds, bankrollAmount);
@@ -538,6 +611,7 @@ const PrizePicksScreen = () => {
         data_source: item.data_source || data.data_source,
         is_real_data: item.is_real_data,
         sport: item.sport || selectedSport,
+        league: item.league || selectedSport,
         last_update: item.last_updated || item.timestamp || new Date().toISOString(),
         id: item.id || `prop-${index}-${Date.now()}`,
         projection_confidence: projectionValue.confidence,
@@ -582,7 +656,7 @@ const PrizePicksScreen = () => {
     let filtered = [...props];
     if (enableProjectionFiltering) {
       filtered = filtered.filter(p => {
-        if (p.projection === undefined) return false;
+        if (p.projection === undefined || p.projection === null) return false;
         const diff = p.projection_diff || 0;
         const absDiff = Math.abs(diff);
         if (absDiff < projectionDifferenceThreshold) return false;
@@ -596,6 +670,7 @@ const PrizePicksScreen = () => {
     }
     if (onlyShowProjectionEdges) {
       filtered = filtered.filter(prop => {
+        if (prop.projection === null) return false;
         const projectionDirection = (prop.projection || 0) > prop.line ? 'over' : 'under';
         return prop.value_side === projectionDirection || prop.value_side === 'arbitrage-both';
       });
@@ -637,7 +712,7 @@ const PrizePicksScreen = () => {
     if (!combinedData.length) return [];
 
     let filtered = combinedData.filter(prop => {
-      if (selectedLeague !== 'All' && prop.sport !== selectedLeague) return false;
+      if (selectedLeague !== 'All' && prop.sport !== selectedLeague && prop.league !== selectedLeague) return false;
       if (debouncedSearch) {
         const query = debouncedSearch.toLowerCase();
         const player = (prop.player_name || prop.player || '').toLowerCase();
@@ -698,7 +773,7 @@ const PrizePicksScreen = () => {
       .slice(0, 10);
   }, [sortedProps, sortCriteria, positionFilter]);
 
-  // ===== GENERATOR (WITH REQUEST CHECK & FALLBACK) =====
+  // ===== GENERATOR =====
   const scorePropRelevance = (prop: PlayerProp, intent: QueryIntent): number => {
     let score = 0;
     const player = (prop.player_name || prop.player || '').toLowerCase();
@@ -724,113 +799,149 @@ const PrizePicksScreen = () => {
       return;
     }
 
-    // Check remaining requests (fallback works even if backend missing)
-    if (remainingRequests === null) return; // still loading
-    if (remainingRequests <= 0) {
-      setSnackbar({ open: true, message: 'No requests left. Please purchase more.', severity: 'warning' });
-      setShowPurchaseDialog(true);
-      return;
-    }
-
     setIsGenerating(true);
 
-    // Try to decrement on backend if available, otherwise just decrement locally
-    let newRemaining = remainingRequests - 1;
-    if (usingBackend) {
-      try {
-        const decrementRes = await fetch('/api/user/generations/decrement', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId }),
-        });
-        if (decrementRes.ok) {
-          const { remaining } = await decrementRes.json();
-          newRemaining = remaining;
-        } else {
-          // Backend returned an error – fallback to local decrement
-          console.warn('Decrement failed, using local decrement. Check backend.');
-          // keep newRemaining as remainingRequests - 1
-        }
-      } catch (error) {
-        console.warn('Decrement error, using local decrement. Check backend.', error);
-        // keep newRemaining as remainingRequests - 1
-      }
-    } else {
-      // No backend – just use local decrement
-      console.log('Using local request counter (backend not available).');
-    }
-
-    setRemainingRequests(newRemaining);
-
-    // Proceed with generation
     try {
       log('[Generator] Starting generation...');
       const source = ignoreFilters ? combinedData : sortedProps;
+      
       if (!source.length) {
-        alert('No props available to generate from.');
+        alert('No props available to generate from. Please refresh data.');
         setIsGenerating(false);
         return;
       }
 
-      let workingSet = [...source];
+      console.log(`[Generator] Source data: ${source.length} props`);
+      if (source.length > 0) {
+        console.log('[Generator] Sample source prop:', {
+          player: source[0].player_name || source[0].player,
+          stat: source[0].stat_type,
+          line: source[0].line,
+          projection: source[0].projection,
+          edge: source[0].edge,
+          projectionEdge: source[0].projectionEdge
+        });
+      }
 
+      let workingSet = [...source];
+      console.log(`[Generator] Working with ${workingSet.length} total props`);
+
+      // Apply query-based filtering if custom query exists
       if (debouncedGenQuery.trim()) {
         log('[Generator] Custom query:', debouncedGenQuery);
-        const intent = preprocessQuery(debouncedGenQuery);
-        log('[Generator] Query intent:', intent);
-
-        const statMapping: Record<string, string[]> = {
-          points: ['points', 'point', 'pts', 'scoring'],
-          rebounds: ['rebounds', 'rebound', 'rebs', 'boards'],
-          assists: ['assists', 'assist', 'asts', 'dimes'],
-          steals: ['steals', 'steal', 'stls'],
-          blocks: ['blocks', 'block', 'blks'],
-          threes: ['threes', 'three', '3pt', '3-pointers', '3pm'],
-        };
-
-        const detectedStats: string[] = [];
         const queryLower = debouncedGenQuery.toLowerCase();
-        Object.entries(statMapping).forEach(([stat, aliases]) => {
-          if (aliases.some(alias => queryLower.includes(alias))) {
-            detectedStats.push(stat);
-            detectedStats.push(stat.replace(/s$/, ''));
+        
+        // Sport detection
+        const sportMap: Record<string, string[]> = {
+          nba: ['nba', 'basketball'],
+          mlb: ['mlb', 'baseball'],
+          nhl: ['nhl', 'hockey']
+        };
+        
+        let detectedSport: string | null = null;
+        Object.entries(sportMap).forEach(([sport, keywords]) => {
+          if (keywords.some(k => queryLower.includes(k))) {
+            detectedSport = sport;
           }
         });
 
-        const keywords = [
-          intent.player,
-          intent.team,
-          ...intent.keywords,
-          intent.statType,
-          ...detectedStats,
-        ].filter(Boolean).map(k => k.toLowerCase());
-
-        log('[Generator] Keywords for filtering:', keywords);
-
-        if (keywords.length > 0) {
-          workingSet = workingSet.filter(p => {
-            const player = (p.player_name || p.player || '').toLowerCase();
-            const team = (p.team || '').toLowerCase();
-            const stat = (p.stat_type || '').toLowerCase();
-            const game = (p.game || '').toLowerCase();
-            return keywords.some(k =>
-              player.includes(k) || team.includes(k) || stat.includes(k) || game.includes(k)
-            );
-          });
-          console.log('[Generator] After keyword filter:', workingSet.length);
+        // Filter by detected sport, or fallback to selectedSport
+        if (detectedSport) {
+          const beforeCount = workingSet.length;
+          workingSet = workingSet.filter(p => 
+            p.sport?.toLowerCase() === detectedSport || 
+            p.league?.toLowerCase() === detectedSport
+          );
+          console.log(`[Generator] Filtered to ${workingSet.length} props for sport: ${detectedSport} (was ${beforeCount})`);
+        } else {
+          // Default to selected sport
+          const beforeCount = workingSet.length;
+          workingSet = workingSet.filter(p => 
+            p.sport?.toLowerCase() === selectedSport || 
+            p.league?.toLowerCase() === selectedSport
+          );
+          console.log(`[Generator] Defaulting to selected sport: ${selectedSport}, filtered to ${workingSet.length} props (was ${beforeCount})`);
         }
 
-        workingSet = workingSet
-          .map(p => ({ ...p, relevanceScore: scorePropRelevance(p, intent) }))
-          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
-        log('[Generator] After relevance scoring, top score:', workingSet[0]?.relevanceScore);
+        // Stat type mapping: keywords -> canonical stat names
+        const statTypeMap: Record<string, string[]> = {
+          points: ['points', 'pts'],
+          rebounds: ['rebounds', 'reb'],
+          assists: ['assists', 'ast'],
+          threes: ['threes', '3pm', '3pt', 'three'],
+          steals: ['steals', 'stl'],
+          blocks: ['blocks', 'blk'],
+          stocks: ['steals', 'blocks'], // special case
+        };
+
+        // Detect all stat types mentioned in the query
+        const detectedStatTypes = new Set<string>();
+        for (const [stat, keywords] of Object.entries(statTypeMap)) {
+          if (keywords.some(k => queryLower.includes(k))) {
+            if (stat === 'stocks') {
+              detectedStatTypes.add('steals');
+              detectedStatTypes.add('blocks');
+            } else {
+              detectedStatTypes.add(stat);
+            }
+          }
+        }
+
+        if (detectedStatTypes.size > 0) {
+          const statTypesArray = Array.from(detectedStatTypes);
+          const beforeCount = workingSet.length;
+          workingSet = workingSet.filter(p => {
+            const stat = (p.stat_type || '').toLowerCase();
+            return statTypesArray.some(s => stat.includes(s));
+          });
+          console.log(`[Generator] Filtered to ${workingSet.length} props for stats: ${statTypesArray.join(', ')} (was ${beforeCount})`);
+        }
+
+        // Apply value-based filtering based on query intent
+        const isHighEdge = queryLower.includes('high edge') || queryLower.includes('best edge');
+        const isBestValue = queryLower.includes('best value') || queryLower.includes('value');
+        const isTopProjection = queryLower.includes('top projection') || queryLower.includes('highest projection');
+        const isOver = queryLower.includes('over bet') || queryLower.includes('over best');
+        const isUnder = queryLower.includes('under bet') || queryLower.includes('under best');
+
+        if (isOver) {
+          workingSet = workingSet.filter(p => p.value_side === 'over' || p.recommendedSide === 'over');
+        } else if (isUnder) {
+          workingSet = workingSet.filter(p => p.value_side === 'under' || p.recommendedSide === 'under');
+        }
+
+        // Sort based on intent
+        if (isHighEdge) {
+          workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
+          console.log('[Generator] Sorting by edge');
+        } else if (isBestValue) {
+          workingSet.sort((a, b) => {
+            const scoreA = (a.projectionEdge || 0) * 100 + (Math.abs(a.projection_diff || 0) * 10);
+            const scoreB = (b.projectionEdge || 0) * 100 + (Math.abs(b.projection_diff || 0) * 10);
+            return scoreB - scoreA;
+          });
+          console.log('[Generator] Sorting by value score');
+        } else if (isTopProjection) {
+          workingSet.sort((a, b) => (b.projection || 0) - (a.projection || 0));
+          console.log('[Generator] Sorting by projection');
+        } else {
+          workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
+        }
+
       } else {
+        // No custom query - use selected strategy
+        console.log(`[Generator] Using strategy: ${genStrategy}`);
+        
         switch (genStrategy) {
           case 'edge':
             workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
             break;
           case 'value':
-            workingSet.sort((a, b) => (b.value_score || 0) - (a.value_score || 0));
+            workingSet.sort((a, b) => {
+              const scoreA = (a.projectionEdge || 0) * 100 + (Math.abs(a.projection_diff || 0) * 10);
+              const scoreB = (b.projectionEdge || 0) * 100 + (Math.abs(b.projection_diff || 0) * 10);
+              return scoreB - scoreA;
+            });
             break;
           case 'projection':
             workingSet.sort((a, b) => (b.projection || 0) - (a.projection || 0));
@@ -838,36 +949,136 @@ const PrizePicksScreen = () => {
         }
       }
 
-      // Limit to at most 3 props per request
-      const newSet = workingSet.slice(0, Math.min(genCount, 3));
-      log('[Generator] New set length:', newSet.length);
+      // Ensure we have results after filtering
+      if (workingSet.length === 0) {
+        console.log('[Generator] No results after filtering, using unfiltered data with default sorting');
+        workingSet = [...source];
+        workingSet.sort((a, b) => (b.edge || 0) - (a.edge || 0));
+      }
+
+      // DEDUPLICATE by player + stat_type, keeping the best one
+      const bestPropsMap = new Map();
+      
+      workingSet.forEach(prop => {
+        const playerName = prop.player_name || prop.player;
+        const statType = prop.stat_type || prop.prop_type;
+        if (!playerName || !statType) return;
+        
+        const key = `${playerName}-${statType}`;
+        
+        let qualityScore = 0;
+        
+        if (genStrategy === 'edge' || debouncedGenQuery.toLowerCase().includes('edge')) {
+          qualityScore = prop.edge || 0;
+        } else if (genStrategy === 'projection' || debouncedGenQuery.toLowerCase().includes('projection')) {
+          qualityScore = prop.projection || 0;
+        } else {
+          qualityScore = (prop.projectionEdge || 0) * 100 + (Math.abs(prop.projection_diff || 0) * 10);
+        }
+        
+        const existing = bestPropsMap.get(key);
+        if (!existing || qualityScore > existing.score) {
+          bestPropsMap.set(key, {
+            prop,
+            score: qualityScore
+          });
+        }
+      });
+
+      let uniqueProps = Array.from(bestPropsMap.values())
+        .map(item => item.prop)
+        .sort((a, b) => {
+          const scoreA = (a.projectionEdge || 0) * 100 + (Math.abs(a.projection_diff || 0) * 10);
+          const scoreB = (b.projectionEdge || 0) * 100 + (Math.abs(b.projection_diff || 0) * 10);
+          return scoreB - scoreA;
+        });
+
+      console.log(`[Generator] After deduplication: ${uniqueProps.length} unique player-stat combinations`);
+
+      // Take top N results
+      const newSet = uniqueProps.slice(0, Math.min(genCount, uniqueProps.length));
+      console.log('[Generator] Final selected set length:', newSet.length);
+      
+      if (newSet.length > 0) {
+        console.log('[Generator] First result:', {
+          player: newSet[0].player_name || newSet[0].player,
+          stat: newSet[0].stat_type || newSet[0].prop_type,
+          line: newSet[0].line,
+          projection: newSet[0].projection,
+          edge: newSet[0].edge,
+          projectionEdge: newSet[0].projectionEdge,
+          diff: newSet[0].projection_diff,
+          valueSide: newSet[0].value_side
+        });
+      }
 
       setGeneratedProps(newSet);
-      setGeneratedSets(prev => [...prev, newSet]);
-      setCurrentSetIndex(prev => prev + 1);
+      setGeneratedSets(prev => {
+        const newSets = [...prev, newSet];
+        setCurrentSetIndex(newSets.length - 1);
+        return newSets;
+      });
+      
+      console.log('[Generator] State updated - generatedProps length:', newSet.length);
+      console.log('[Generator] Total sets:', generatedSets.length + 1, 'Current index:', generatedSets.length);
 
+      const avgEdge = newSet.length > 0 
+        ? newSet.reduce((sum, p) => sum + (p.projectionEdge || 0) * 100, 0) / newSet.length 
+        : 0;
+      
       logPromptPerformance(
         debouncedGenQuery || genStrategy,
         newSet.length,
-        newSet.reduce((sum, p) => sum + (p.projectionEdge || 0) * 100, 0) / newSet.length,
+        avgEdge,
         'generator'
       );
+
+      if (newSet.length > 0) {
+        setSnackbar({
+          open: true,
+          message: `Generated ${newSet.length} props with avg edge ${avgEdge.toFixed(1)}%`,
+          severity: 'success'
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: 'No props matched your query criteria',
+          severity: 'warning'
+        });
+      }
+
     } catch (error: any) {
       console.error('[Generator] Error:', error);
-      alert('Generator error: ' + error.message);
+      setSnackbar({
+        open: true,
+        message: 'Generator error: ' + error.message,
+        severity: 'error'
+      });
     } finally {
       setIsGenerating(false);
     }
-  }, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps, debouncedGenQuery, remainingRequests, userId, usingBackend]);
+  }, [genStrategy, genCount, ignoreFilters, combinedData, sortedProps, debouncedGenQuery, userId, bankrollAmount, kellyFraction, selectedSport]);
 
   const handlePrevSet = () => {
-    setCurrentSetIndex(prev => prev - 1);
-    setGeneratedProps(generatedSets[currentSetIndex - 1]);
+    if (currentSetIndex > 0) {
+      const prevIndex = currentSetIndex - 1;
+      setCurrentSetIndex(prevIndex);
+      if (generatedSets[prevIndex]) {
+        setGeneratedProps(generatedSets[prevIndex]);
+      }
+    }
   };
+
   const handleNextSet = () => {
-    setCurrentSetIndex(prev => prev + 1);
-    setGeneratedProps(generatedSets[currentSetIndex + 1]);
+    if (currentSetIndex < generatedSets.length - 1) {
+      const nextIndex = currentSetIndex + 1;
+      setCurrentSetIndex(nextIndex);
+      if (generatedSets[nextIndex]) {
+        setGeneratedProps(generatedSets[nextIndex]);
+      }
+    }
   };
+
   const clearGenerated = () => {
     setGeneratedProps([]);
     setGeneratedSets([]);
@@ -880,39 +1091,6 @@ const PrizePicksScreen = () => {
   };
 
   // ===== UI COMPONENTS =====
-  const DebugInfo = () => (
-    <Paper sx={{ p: 2, mb: 2, bgcolor: '#f0f7ff', border: '2px solid #1976d2' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        <BugReport sx={{ mr: 1, color: '#1976d2' }} />
-        <Typography variant="subtitle1" sx={{ color: '#1976d2', fontWeight: 'bold' }}>
-          DEBUG INFO - API STATUS
-        </Typography>
-      </Box>
-      <Grid container spacing={1}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Typography variant="body2">
-            <strong>Data Source:</strong> {picksData?.data_source || picksData?.source || 'Unknown'}
-          </Typography>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Typography variant="body2">
-            <strong>Total Props:</strong> {combinedData?.length || 0}
-          </Typography>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Typography variant="body2">
-            <strong>Filtered Props:</strong> {filteredData.length}
-          </Typography>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Typography variant="body2">
-            <strong>Avg Edge:</strong> {filteredData.length > 0 ? 
-              (filteredData.reduce((sum, item) => sum + (item.edge || 0), 0) / filteredData.length).toFixed(1) : 0}%
-          </Typography>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
 
   const FilterPanel = () => (
     <Paper sx={{ p: 3, mb: 3, bgcolor: 'background.default' }}>
@@ -1096,10 +1274,25 @@ const PrizePicksScreen = () => {
     </Paper>
   );
 
-  const PlayerCard = React.memo(({ item }: { item: PlayerProp }) => {
-    const edge = typeof item.edge === 'number' ? item.edge : Number(item.edge) || 0;
-    const projectionEdge = typeof item.projectionEdge === 'number' ? item.projectionEdge : Number(item.projectionEdge) || 0;
-    const isOver = (item.projection || 0) > (item.line || 0);
+const PlayerCard = React.memo(({ item }: { item: PlayerProp }) => {
+    const edge = item && typeof item.edge === 'number' ? item.edge : (item?.edge ? Number(item.edge) : 0);
+    const projectionEdge = item && typeof item.projectionEdge === 'number' ? item.projectionEdge : (item?.projectionEdge ? Number(item.projectionEdge) : 0);
+    const projection = item?.projection || 0;
+    const line = item?.line || 0;
+    const isOver = projection > line;
+    
+    const playerName = item?.player_name || item?.player || 'Unknown Player';
+    const statType = item?.stat_type || item?.prop_type || 'N/A';
+    const team = item?.team || 'N/A';
+    const position = item?.position || 'N/A';
+    const projectionDiff = item?.projection_diff || 0;
+    const projectionConfidence = item?.projection_confidence || '';
+    const overPrice = item?.over_price;
+    const underPrice = item?.under_price;
+    const valueSide = item?.value_side || 'N/A';
+    const game = item?.game || '';
+    const kellyBetSize = item?.kellyBetSize || 0;
+    const bookmaker = item?.bookmaker || 'Multiple';
 
     return (
       <Card sx={{
@@ -1112,14 +1305,14 @@ const PrizePicksScreen = () => {
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Box>
               <Typography variant="h6" component="div" noWrap sx={{ fontWeight: 'bold' }}>
-                {item.player_name || item.player}
+                {playerName}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {item.team || 'N/A'} • {item.position || 'N/A'}
+                {team} • {position}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
-              <Chip label={item.stat_type || 'N/A'} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold' }} />
+              <Chip label={statType} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold' }} />
               {projectionEdge > 0 && (
                 <Chip
                   label={`+${(projectionEdge * 100).toFixed(1)}% Edge`}
@@ -1134,20 +1327,20 @@ const PrizePicksScreen = () => {
             <Grid container spacing={1}>
               <Grid item xs={6}>
                 <Typography variant="body2" color="text.secondary">Line</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 'bold' }}>{item.line || 'N/A'}</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 'bold' }}>{line || 'N/A'}</Typography>
               </Grid>
               <Grid item xs={6}>
                 <Typography variant="body2" color="text.secondary">Projection</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 'bold', color: isOver ? '#2e7d32' : '#d32f2f' }}>
-                  {item.projection || 'N/A'}
+                  {projection ? projection.toFixed(1) : 'N/A'}
                   {isOver ? <ArrowUpward sx={{ fontSize: 16, ml: 0.5 }} /> : <ArrowDownward sx={{ fontSize: 16, ml: 0.5 }} />}
                 </Typography>
               </Grid>
             </Grid>
             <Typography variant="body2" component="div" sx={{ mt: 1, textAlign: 'center' }}>
-              Difference: <strong>{(item.projection_diff || 0).toFixed(1)}</strong>
-              {item.projection_confidence && (
-                <> • <Chip label={item.projection_confidence} size="small" sx={{ fontSize: '0.6rem', height: '18px' }} /></>
+              Difference: <strong>{projectionDiff.toFixed(1)}</strong>
+              {projectionConfidence && (
+                <> • <Chip label={projectionConfidence} size="small" sx={{ fontSize: '0.6rem', height: '18px' }} /></>
               )}
             </Typography>
           </Box>
@@ -1162,40 +1355,40 @@ const PrizePicksScreen = () => {
             <LinearProgress variant="determinate" value={Math.min(edge, 100)} sx={{ height: 8, borderRadius: 4, '& .MuiLinearProgress-bar': { backgroundColor: edge > 15 ? '#4caf50' : edge > 8 ? '#ff9800' : '#f44336' } }} />
           </Box>
 
-          {showKellySizing && item.kellyBetSize && item.kellyBetSize > 0 && (
+          {showKellySizing && kellyBetSize > 0 && (
             <Box sx={{ mb: 2, p: 1, bgcolor: '#ecfdf5', borderRadius: 1, border: '1px solid #bbf7d0' }}>
               <Typography variant="body2" fontWeight="bold" color="#059669">
-                💰 Optimal Bet: ${((bankrollAmount * item.kellyBetSize) / 100).toFixed(2)} ({item.kellyBetSize.toFixed(1)}%)
+                💰 Optimal Bet: ${((bankrollAmount * kellyBetSize) / 100).toFixed(2)} ({kellyBetSize.toFixed(1)}%)
               </Typography>
             </Box>
           )}
 
           <Box sx={{ display: 'flex', borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider', mb: 2 }}>
-            <Box sx={{ flex: 1, textAlign: 'center', p: 1, bgcolor: item.over_price !== null ? '#10b981' : '#64748b', color: 'white', opacity: item.over_price !== null ? 1 : 0.7 }}>
+            <Box sx={{ flex: 1, textAlign: 'center', p: 1, bgcolor: overPrice !== null ? '#10b981' : '#64748b', color: 'white', opacity: overPrice !== null ? 1 : 0.7 }}>
               <Typography variant="caption">Over</Typography>
-              <Typography variant="body1" fontWeight="bold">{item.over_price !== null ? (item.over_price > 0 ? `+${item.over_price}` : item.over_price) : 'N/A'}</Typography>
+              <Typography variant="body1" fontWeight="bold">{overPrice !== null ? (overPrice > 0 ? `+${overPrice}` : overPrice) : 'N/A'}</Typography>
             </Box>
-            <Box sx={{ flex: 1, textAlign: 'center', p: 1, bgcolor: item.under_price !== null ? '#ef4444' : '#64748b', color: 'white', opacity: item.under_price !== null ? 1 : 0.7 }}>
+            <Box sx={{ flex: 1, textAlign: 'center', p: 1, bgcolor: underPrice !== null ? '#ef4444' : '#64748b', color: 'white', opacity: underPrice !== null ? 1 : 0.7 }}>
               <Typography variant="caption">Under</Typography>
-              <Typography variant="body1" fontWeight="bold">{item.under_price !== null ? (item.under_price > 0 ? `+${item.under_price}` : item.under_price) : 'N/A'}</Typography>
+              <Typography variant="body1" fontWeight="bold">{underPrice !== null ? (underPrice > 0 ? `+${underPrice}` : underPrice) : 'N/A'}</Typography>
             </Box>
           </Box>
 
           <Grid container spacing={1} sx={{ mt: 2 }}>
             <Grid item xs={6}>
               <Typography variant="body2" color="text.secondary">Bookmaker</Typography>
-              <Typography variant="body1" sx={{ fontWeight: 'bold' }}>{item.bookmaker || 'Multiple'}</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 'bold' }}>{bookmaker}</Typography>
             </Grid>
             <Grid item xs={6}>
               <Typography variant="body2" color="text.secondary">Value Side</Typography>
               <Typography variant="body1" sx={{ fontWeight: 'bold', color: isOver ? '#2e7d32' : '#d32f2f' }}>
-                {item.value_side?.toUpperCase() || 'N/A'}
+                {valueSide.toUpperCase()}
               </Typography>
             </Grid>
-            {item.game && (
+            {game && (
               <Grid item xs={12}>
                 <Typography variant="body2" color="text.secondary">Game</Typography>
-                <Typography variant="body2" noWrap>{item.game}</Typography>
+                <Typography variant="body2" noWrap>{game}</Typography>
               </Grid>
             )}
           </Grid>
@@ -1206,7 +1399,7 @@ const PrizePicksScreen = () => {
                 {projectionEdge > 0.05 ? '🎯 HIGH VALUE BET' : '✅ VALUE BET'}
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', color: '#0c4a6e' }}>
-                Edge: +{(projectionEdge * 100).toFixed(1)}% • Projection {isOver ? 'Over' : 'Under'} by {(item.projection_diff || 0).toFixed(1)}
+                Edge: +{(projectionEdge * 100).toFixed(1)}% • Projection {isOver ? 'Over' : 'Under'} by {projectionDiff.toFixed(1)}
               </Typography>
             </Box>
           )}
@@ -1220,37 +1413,9 @@ const PrizePicksScreen = () => {
     );
   });
 
-  const PurchaseDialog = () => (
-    <Dialog open={showPurchaseDialog} onClose={() => setShowPurchaseDialog(false)}>
-      <DialogTitle>Buy Generator Requests</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ mb: 2 }}>
-          Each generator run costs 1 request. You currently have {remainingRequests} requests.
-        </Typography>
-        <TextField
-          autoFocus
-          margin="dense"
-          label="Number of requests"
-          type="number"
-          fullWidth
-          variant="standard"
-          value={purchaseAmount}
-          onChange={(e) => setPurchaseAmount(parseInt(e.target.value) || 1)}
-          inputProps={{ min: 1, step: 1 }}
-        />
-        <Typography variant="caption" color="text.secondary">
-          (Payment integration placeholder – in production you would be redirected to Stripe.)
-        </Typography>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setShowPurchaseDialog(false)}>Cancel</Button>
-        <Button onClick={handlePurchase} variant="contained">Buy</Button>
-      </DialogActions>
-    </Dialog>
-  );
+  const PurchaseDialog = () => null;
 
   return (
-    // ===== BACKGROUND STYLING =====
     <Box sx={{
       minHeight: '100vh',
       background: 'linear-gradient(145deg, #f8fafc 0%, #eef2f6 100%), url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%239C92AC\' fill-opacity=\'0.08\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
@@ -1268,7 +1433,7 @@ const PrizePicksScreen = () => {
           </Typography>
         </Box>
 
-        {/* Live Data Dashboard (always visible) */}
+        {/* Live Data Dashboard */}
         <Box sx={{ mb: 2, p: 2, bgcolor: '#f0f9ff', borderRadius: 2, border: '1px solid #bae6fd' }}>
           <Typography variant="subtitle1" fontWeight="bold" color="#0369a1" gutterBottom>
             🎯 Live Data Dashboard
@@ -1298,19 +1463,8 @@ const PrizePicksScreen = () => {
           <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 2 }}>
             <FormControlLabel
               control={<Switch checked={autoRefreshEnabled} onChange={() => setAutoRefreshEnabled(!autoRefreshEnabled)} color="primary" />}
-              label="Auto-refresh (2 min)"
+              label="Auto-refresh (3 min)"
             />
-            <Chip
-              icon={<AttachMoney />}
-              label={`Requests: ${remainingRequests !== null ? remainingRequests : '...'}`}
-              color={remainingRequests && remainingRequests > 0 ? 'success' : 'error'}
-              variant="outlined"
-              onClick={() => setShowPurchaseDialog(true)}
-              sx={{ cursor: 'pointer' }}
-            />
-            {!usingBackend && (
-              <Chip label="Local mode" size="small" color="warning" variant="outlined" />
-            )}
           </Box>
         </Box>
 
@@ -1366,9 +1520,9 @@ const PrizePicksScreen = () => {
               </Typography>
 
               <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel>Quick Prompts (All Sports)</InputLabel>
+                <InputLabel>Quick Prompts (20 Prompts)</InputLabel>
                 <Select
-                  label="Quick Prompts (All Sports)"
+                  label="Quick Prompts (20 Prompts)"
                   value=""
                   onChange={(e) => {
                     const query = e.target.value;
@@ -1387,7 +1541,7 @@ const PrizePicksScreen = () => {
 
               <TextField
                 size="small"
-                placeholder="Custom query (e.g., 'Jokic points')"
+                placeholder="Custom query (e.g., 'nba points')"
                 value={genCustomQuery}
                 onChange={(e) => setGenCustomQuery(e.target.value)}
                 sx={{ minWidth: 250 }}
@@ -1433,13 +1587,21 @@ const PrizePicksScreen = () => {
 
               {generatedSets.length > 1 && (
                 <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
-                  <IconButton size="small" onClick={handlePrevSet} disabled={currentSetIndex === 0}>
+                  <IconButton 
+                    size="small" 
+                    onClick={handlePrevSet} 
+                    disabled={currentSetIndex === 0}
+                  >
                     <ExpandMore sx={{ transform: 'rotate(90deg)' }} />
                   </IconButton>
                   <Typography variant="caption" sx={{ mx: 1 }}>
                     {currentSetIndex + 1}/{generatedSets.length}
                   </Typography>
-                  <IconButton size="small" onClick={handleNextSet} disabled={currentSetIndex === generatedSets.length - 1}>
+                  <IconButton 
+                    size="small" 
+                    onClick={handleNextSet} 
+                    disabled={currentSetIndex === generatedSets.length - 1}
+                  >
                     <ExpandMore sx={{ transform: 'rotate(-90deg)' }} />
                   </IconButton>
                 </Box>
@@ -1463,21 +1625,48 @@ const PrizePicksScreen = () => {
               </Box>
             </Paper>
 
-            {generatedProps.length > 0 && (
-              <Box sx={{ mb: 3, minHeight: generatedProps.length ? 'auto' : 0 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="h6">✨ Generated Props ({generatedProps.length})</Typography>
-                  <Button size="small" onClick={clearGenerated}>Clear</Button>
+            {/* Generated Props Display */}
+            {generatedProps && generatedProps.length > 0 ? (
+              <Box sx={{ mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AutoAwesomeIcon color="primary" />
+                    ✨ Generated Props ({generatedProps.length})
+                  </Typography>
+                  <Button 
+                    size="small" 
+                    variant="outlined" 
+                    color="error" 
+                    onClick={clearGenerated}
+                    startIcon={<ExpandMore />}
+                  >
+                    Clear
+                  </Button>
                 </Box>
                 <Grid container spacing={2}>
-                  {generatedProps.map((prop, idx) => (
-                    <Grid item xs={12} sm={6} md={4} lg={3} key={prop.id || idx}>
-                      <PlayerCard item={prop} />
-                    </Grid>
-                  ))}
+                  {generatedProps.map((prop, idx) => {
+                    const propKey = prop.id || `generated-${idx}-${prop.player_name || prop.player}-${prop.stat_type}`;
+                    return (
+                      <Grid item xs={12} sm={6} md={4} key={propKey}>
+                        <PlayerCard item={prop} />
+                      </Grid>
+                    );
+                  })}
                 </Grid>
-                <Divider sx={{ my: 2 }} />
+                <Divider sx={{ my: 3 }} />
               </Box>
+            ) : (
+              !isGenerating && (
+                <Paper sx={{ p: 4, textAlign: 'center', bgcolor: '#fafafa', mb: 3 }}>
+                  <AutoAwesomeIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+                  <Typography variant="h6" color="text.secondary" gutterBottom>
+                    No Generated Props
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Select a prompt or enter a custom query and click Generate
+                  </Typography>
+                </Paper>
+              )
             )}
           </>
         )}
@@ -1519,13 +1708,10 @@ const PrizePicksScreen = () => {
           </Box>
         )}
 
-        {/* Debug Info (always visible) */}
-        <DebugInfo />
-
-        {/* Filter Panel (always visible) */}
+        {/* Filter Panel */}
         <FilterPanel />
 
-        {/* Value Distribution Summary (always visible) */}
+        {/* Value Distribution Summary */}
         {sortedProps.length > 0 && (
           <Paper sx={{ mb: 3, p: 2, bgcolor: '#f8fafc', border: '1px solid #e2e8f0' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -1609,8 +1795,6 @@ const PrizePicksScreen = () => {
         <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
           <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>{snackbar.message}</Alert>
         </Snackbar>
-
-        <PurchaseDialog />
       </Container>
     </Box>
   );

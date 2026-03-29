@@ -66,6 +66,7 @@ import { BarChart } from '@mui/x-charts/BarChart';
 import { PieChart } from '@mui/x-charts/PieChart';
 import { alpha } from '@mui/material/styles';
 import axios from 'axios';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ========== IMPORT UTILITIES ==========
 import { useDebounce } from '../utils/useDebounce';
@@ -138,10 +139,89 @@ interface Selection {
 }
 
 // ----------------------------------------------------------------------
+// Helper functions with safety fixes
+// ----------------------------------------------------------------------
+
+// Safe odds parsing helper
+const parseOddsToNumber = (odds: any): number => {
+  if (odds === undefined || odds === null) return -110;
+  
+  let oddsStr: string;
+  if (typeof odds === 'object') {
+    // If odds is an object, try to extract a usable value
+    oddsStr = String((odds as any).value || (odds as any).odds || '-110');
+  } else {
+    oddsStr = String(odds);
+  }
+  
+  // Remove + sign and any whitespace
+  const cleanOdds = oddsStr.replace(/\+/g, '').trim();
+  const oddsNum = parseInt(cleanOdds, 10);
+  
+  return isNaN(oddsNum) ? -110 : oddsNum;
+};
+
+// Safe edge parsing helper
+const parseEdgeValue = (edge: any): number => {
+  if (edge === undefined || edge === null) return 0;
+  const edgeStr = String(edge);
+  const cleanEdge = edgeStr.replace(/\+/g, '').replace(/%/g, '').trim();
+  const parsed = parseFloat(cleanEdge);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+// Updated calculateTotalOdds with safety fixes
+const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number } => {
+  let decimal = 1.0;
+  
+  legs.forEach(leg => {
+    const oddsNum = parseOddsToNumber(leg.odds);
+    
+    if (!isNaN(oddsNum) && oddsNum !== 0) {
+      // Convert American odds to decimal
+      if (oddsNum > 0) {
+        decimal *= 1 + oddsNum / 100;
+      } else {
+        decimal *= 1 - 100 / Math.abs(oddsNum);
+      }
+    } else {
+      // Default to -110 if odds are invalid
+      decimal *= 1.9091; // -110 as decimal
+    }
+  });
+  
+  // Convert decimal back to American odds
+  let totalOdds: string;
+  if (decimal >= 2.0) {
+    totalOdds = `+${Math.round((decimal - 1) * 100)}`;
+  } else if (decimal > 1.0 && decimal < 2.0) {
+    totalOdds = Math.round(-100 / (decimal - 1)).toString();
+  } else {
+    totalOdds = '-110'; // Default if something went wrong
+  }
+  
+  return { odds: totalOdds, decimal };
+};
+
+const getConfidence = (c: any): number => {
+  const num = Number(c);
+  return !isNaN(num) && num > 0 ? num : 75;
+};
+
+const computeConfidence = (s: Selection): number => {
+  let confidence = 75;
+  if (s.projection && s.line && s.line > 0) {
+    const surplus = (s.projection - s.line) / s.line;
+    confidence = Math.min(95, Math.max(60, 75 + Math.round(surplus * 50)));
+  }
+  return confidence;
+};
+
+// ----------------------------------------------------------------------
 // API client – fetch selections from appropriate backend
 // ----------------------------------------------------------------------
 
-// Fetch NBA odds from your odds API (placeholder)
+// Fetch NBA odds from your odds API
 const fetchNBAOdds = async (): Promise<Record<string, string>> => {
   try {
     const response = await axios.get(`${NODE_API_BASE}/api/prizepicks/selections?sport=nba`);
@@ -195,7 +275,7 @@ const fetchNBAPredictions = async (): Promise<Selection[]> => {
         stat: p.market || 'points',
         line: p.line || 0.5,
         projection: p.prediction || p.line,
-        odds,
+        odds: String(odds), // Force to string
         confidence: p.confidence || 75,
         edge,
         position: p.position || 'N/A',
@@ -224,7 +304,7 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
         stat: p.stat,
         line: p.line,
         projection: p.projection || p.line,
-        odds: p.odds || '-110',
+        odds: String(p.odds || '-110'), // Force to string
         confidence: p.confidence === 'high' ? 85 : p.confidence === 'medium' ? 70 : 55,
         edge: p.edge ? `${p.edge}%` : (p.projection > p.line ? '+5%' : '-2%'),
         position: p.position,
@@ -257,7 +337,7 @@ const fetchNHLSelections = async (): Promise<Selection[]> => {
         stat: p.stat,
         line: p.line,
         projection: p.projection || p.line,
-        odds: p.odds || '-110',
+        odds: String(p.odds || '-110'), // Force to string
         confidence: p.confidence === 'high' ? 85 : p.confidence === 'medium' ? 70 : 55,
         edge: p.edge ? `${p.edge}%` : (p.projection > p.line ? '+5%' : '-2%'),
         position: p.position || 'N/A',
@@ -270,6 +350,54 @@ const fetchNHLSelections = async (): Promise<Selection[]> => {
     console.error('[NHL] Failed to fetch from backend:', error);
     return [];
   }
+};
+
+// Mock NHL selections for fallback
+const generateMockNHLSelections = (): Selection[] => {
+  return [
+    {
+      id: 'mock-nhl-1',
+      player: 'Connor McDavid',
+      team: 'EDM',
+      stat: 'Points',
+      line: 1.5,
+      projection: 2.1,
+      odds: '-150',
+      confidence: 82,
+      edge: '+8%',
+      position: 'C',
+      sport: 'NHL',
+      injuryStatus: 'Active',
+    },
+    {
+      id: 'mock-nhl-2',
+      player: 'Nathan MacKinnon',
+      team: 'COL',
+      stat: 'Points',
+      line: 1.5,
+      projection: 1.9,
+      odds: '-120',
+      confidence: 75,
+      edge: '+5%',
+      position: 'C',
+      sport: 'NHL',
+      injuryStatus: 'Active',
+    },
+    {
+      id: 'mock-nhl-3',
+      player: 'Auston Matthews',
+      team: 'TOR',
+      stat: 'Goals',
+      line: 0.5,
+      projection: 0.8,
+      odds: '+110',
+      confidence: 70,
+      edge: '+3%',
+      position: 'C',
+      sport: 'NHL',
+      injuryStatus: 'Active',
+    },
+  ];
 };
 
 // Fetch function for all selected sports
@@ -287,51 +415,18 @@ const fetchSelectionsForSports = async (sports: string[]): Promise<Selection[]> 
   const flatResults = results.flat();
   console.log('[fetchSelectionsForSports] Total selections:', flatResults.length);
   
-  // Optional: If NHL was requested but returned 0, force a mock (fallback)
+  // If NHL was requested but returned 0, add mock selections
   if (sports.includes('NHL') && !flatResults.some(s => s.sport === 'NHL')) {
     console.warn('[fetchSelectionsForSports] NHL requested but no selections; adding fallback mock.');
-    flatResults.push(...generateMockNHLSelections()); // you may have this function elsewhere
+    flatResults.push(...generateMockNHLSelections());
   }
   
   return flatResults;
 };
 
 // ----------------------------------------------------------------------
-// Helper functions (unchanged)
+// Generate parlays from selections with safety fixes
 // ----------------------------------------------------------------------
-const getConfidence = (c: any): number => {
-  const num = Number(c);
-  return !isNaN(num) && num > 0 ? num : 75;
-};
-
-const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number } => {
-  let decimal = 1.0;
-  legs.forEach(leg => {
-    const oddsStr = leg.odds.replace('+', '');
-    const oddsNum = parseInt(oddsStr, 10);
-    if (!isNaN(oddsNum)) {
-      if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
-      else decimal *= 1 - 100 / Math.abs(oddsNum);
-    } else {
-      decimal *= 1.91;
-    }
-  });
-  const totalOdds = decimal >= 2.0
-    ? `+${Math.round((decimal - 1) * 100)}`
-    : Math.round(-100 / (decimal - 1)).toString();
-  return { odds: totalOdds, decimal };
-};
-
-const computeConfidence = (s: Selection): number => {
-  let confidence = 75;
-  if (s.projection && s.line && s.line > 0) {
-    const surplus = (s.projection - s.line) / s.line;
-    confidence = Math.min(95, Math.max(60, 75 + Math.round(surplus * 50)));
-  }
-  return confidence;
-};
-
-// ========== Generate parlays from selections ==========
 const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestion[] => {
   console.log('[generateParlaysFromSelections] Total selections received:', selections.length);
   if (selections.length === 0) {
@@ -361,15 +456,13 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
       .sort((a, b) => b.computedConfidence - a.computedConfidence)
       .slice(0, 10);
 
-    let beforeCount = suggestions.length;
-
     for (let i = 0; i < Math.min(3, topConfidence.length - 2); i++) {
       const legs = topConfidence.slice(i, i + 3).map((s, idx) => {
         const conf = s.computedConfidence;
         return {
           id: `conf-${sport}-${i}-${idx}-${Date.now()}`,
           description: `${s.player} ${s.stat} Over ${s.line}`,
-          odds: s.odds,
+          odds: String(s.odds), // Ensure odds is string
           confidence: conf,
           sport: sport,
           market: 'player_props',
@@ -385,7 +478,7 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
       if (legs.length < 2) continue;
       const { odds } = calculateTotalOdds(legs);
       const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-      const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
+      const avgEdge = legs.reduce((sum, l) => sum + parseEdgeValue(l.edge), 0) / legs.length;
       suggestions.push({
         id: `analytics-conf-${sport}-${i}-${Date.now()}`,
         name: `${sport} High Confidence Parlay ${i+1}`,
@@ -413,10 +506,13 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
 
     // Best value parlays
     const withEdge = withConfidence
-      .filter(s => s.edge && s.edge.startsWith('+'))
+      .filter(s => {
+        const edgeStr = String(s.edge || '');
+        return edgeStr.startsWith('+');
+      })
       .sort((a, b) => {
-        const edgeA = parseFloat(a.edge?.replace('+', '').replace('%', '') || '0');
-        const edgeB = parseFloat(b.edge?.replace('+', '').replace('%', '') || '0');
+        const edgeA = parseEdgeValue(a.edge);
+        const edgeB = parseEdgeValue(b.edge);
         return edgeB - edgeA;
       })
       .slice(0, 6);
@@ -427,7 +523,7 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
         return {
           id: `edge-${sport}-${i}-${idx}-${Date.now()}`,
           description: `${s.player} ${s.stat} Over ${s.line}`,
-          odds: s.odds,
+          odds: String(s.odds), // Ensure odds is string
           confidence: conf,
           sport: sport,
           market: 'player_props',
@@ -443,7 +539,7 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
       if (legs.length < 2) continue;
       const { odds } = calculateTotalOdds(legs);
       const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-      const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
+      const avgEdge = legs.reduce((sum, l) => sum + parseEdgeValue(l.edge), 0) / legs.length;
       suggestions.push({
         id: `analytics-edge-${sport}-${i}-${Date.now()}`,
         name: `${sport} Best Value Parlay ${i+1}`,
@@ -477,7 +573,7 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
         return {
           id: `rand-${sport}-${i}-${idx}-${Date.now()}`,
           description: `${s.player} ${s.stat} Over ${s.line}`,
-          odds: s.odds,
+          odds: String(s.odds), // Ensure odds is string
           confidence: conf,
           sport: sport,
           market: 'player_props',
@@ -492,7 +588,7 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
       });
       const { odds } = calculateTotalOdds(legs);
       const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-      const avgEdge = legs.reduce((sum, l) => sum + (parseFloat(l.edge?.replace('+','')||'0')||0), 0) / legs.length;
+      const avgEdge = legs.reduce((sum, l) => sum + parseEdgeValue(l.edge), 0) / legs.length;
       suggestions.push({
         id: `analytics-rand-${sport}-${i}-${Date.now()}`,
         name: `${sport} Balanced Parlay ${i+1}`,
@@ -517,9 +613,6 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
         is_real_data: true,
       });
     }
-
-    let afterCount = suggestions.length;
-    console.log(`[generate] Added ${afterCount - beforeCount} parlays for ${sport}`);
   });
 
   console.log('[generateParlaysFromSelections] Total parlays generated:', suggestions.length);
@@ -530,8 +623,8 @@ const generateParlaysFromSelections = (selections: Selection[]): ParlaySuggestio
 // Helper components
 // ----------------------------------------------------------------------
 const OddsChip = ({ odds }: { odds: string }) => {
-  const numericOdds = parseInt(odds, 10);
-  const isFavorite = numericOdds < 0;
+  const oddsNum = parseOddsToNumber(odds);
+  const isFavorite = oddsNum < 0;
   const color = isFavorite ? 'success' : 'error';
   return <Chip label={odds} size="small" color={color} variant="outlined" />;
 };
@@ -564,7 +657,6 @@ const getRiskChip = (risk: string | number) => {
 };
 
 const SportChip = ({ sport }: { sport: string }) => {
-  console.log('[SportChip] sport:', sport);
   let color: 'primary' | 'secondary' | 'success' | 'warning' = 'primary';
   if (sport === 'NBA') color = 'primary';
   else if (sport === 'MLB') color = 'success';
@@ -580,10 +672,9 @@ const InjuryChip = ({ status }: { status?: string }) => {
 };
 
 // ----------------------------------------------------------------------
-// Main Component
+// Main Content Component
 // ----------------------------------------------------------------------
-const ParlayAnalyticsScreen: React.FC = () => {
-  // 👇 CHANGED: default to only NBA, not all three
+const ParlayAnalyticsContent: React.FC = () => {
   const [selectedSports, setSelectedSports] = useState<string[]>(['NBA']);
 
   const [selectedTab, setSelectedTab] = useState<number>(0);
@@ -602,9 +693,6 @@ const ParlayAnalyticsScreen: React.FC = () => {
 
   // State to track expanded accordions per parlay ID
   const [expandedAccordions, setExpandedAccordions] = useState<Record<string, boolean>>({});
-
-  // 🔍 Log selectedSports whenever it changes
-  console.log('[State] selectedSports:', selectedSports);
 
   // Fetch selections for selected sports
   const {
@@ -625,13 +713,11 @@ const ParlayAnalyticsScreen: React.FC = () => {
   }, [selections]);
 
   const handleSportChange = (event: React.MouseEvent<HTMLElement>, newSports: string[]) => {
-    console.log('[Event] Sport change event value:', newSports);
     if (newSports.length === 0) return;
     setSelectedSports(newSports);
   };
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    console.log('[Event] Tab changed to:', newValue);
     setSelectedTab(newValue);
   };
 
@@ -652,13 +738,10 @@ const ParlayAnalyticsScreen: React.FC = () => {
   };
 
   const filteredParlays = useMemo(() => {
-    console.log('[Filter] Starting filter. Total parlays:', parlays.length);
     let filtered = parlays;
 
     if (selectedSports.length > 0) {
-      console.log('[Filter] Applying sport filter. Selected sports:', selectedSports);
       filtered = filtered.filter(p => selectedSports.includes(p.sport));
-      console.log('[Filter] After sport filter:', filtered.length);
     }
 
     if (debouncedSearch.trim()) {
@@ -675,20 +758,16 @@ const ParlayAnalyticsScreen: React.FC = () => {
         const analysisMatch = parlay.analysis.toLowerCase().includes(lowerQuery);
         return nameMatch || legMatch || analysisMatch;
       });
-      console.log('[Filter] After search filter:', filtered.length);
     }
 
     filtered = filtered.filter(p =>
       p.confidence >= confidenceRange[0] && p.confidence <= confidenceRange[1]
     );
-    console.log('[Filter] After confidence filter:', filtered.length);
 
     filtered = filtered.filter(p =>
       p.legs.length >= legCountRange[0] && p.legs.length <= legCountRange[1]
     );
-    console.log('[Filter] After leg count filter:', filtered.length);
 
-    console.log('[Filter] Final filtered parlays:', filtered.map(p => ({ name: p.name, sport: p.sport })));
     return filtered;
   }, [parlays, selectedSports, debouncedSearch, confidenceRange, legCountRange]);
 
@@ -771,7 +850,7 @@ const ParlayAnalyticsScreen: React.FC = () => {
             <IconButton onClick={() => setShowFilters(!showFilters)} color={showFilters ? 'primary' : 'default'}><FilterListIcon /></IconButton>
           </Tooltip>
 
-          {/* 🔁 Sport toggle buttons */}
+          {/* Sport toggle buttons */}
           <Paper sx={{ p: 0.5, bgcolor: 'background.paper' }}>
             <ToggleButtonGroup
               value={selectedSports}
@@ -840,21 +919,18 @@ const ParlayAnalyticsScreen: React.FC = () => {
 
       {/* Confidence Chart */}
       {filteredParlays.length > 0 && (
-        <>
-          {console.log('[FINAL] filteredParlays before chart:', filteredParlays.map(p => ({ name: p.name, sport: p.sport })))}
-          <Paper sx={{ p: 3, mb: 4 }}>
-            <Typography variant="h6" gutterBottom>Confidence Distribution</Typography>
-            <Box sx={{ height: 300, width: '100%' }}>
-              <BarChart
-                dataset={filteredParlays.map(p => ({ label: p.name.length > 20 ? p.name.substring(0,20)+'…' : p.name, confidence: p.confidence, id: p.id }))}
-                xAxis={[{ scaleType: 'band', dataKey: 'label' }]}
-                series={[{ dataKey: 'confidence', label: 'Confidence (%)', color: '#3b82f6' }]}
-                yAxis={[{ max: 100 }]}
-                tooltip={{ trigger: 'item' }}
-              />
-            </Box>
-          </Paper>
-        </>
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Typography variant="h6" gutterBottom>Confidence Distribution</Typography>
+          <Box sx={{ height: 300, width: '100%' }}>
+            <BarChart
+              dataset={filteredParlays.map(p => ({ label: p.name.length > 20 ? p.name.substring(0,20)+'…' : p.name, confidence: p.confidence, id: p.id }))}
+              xAxis={[{ scaleType: 'band', dataKey: 'label' }]}
+              series={[{ dataKey: 'confidence', label: 'Confidence (%)', color: '#3b82f6' }]}
+              yAxis={[{ max: 100 }]}
+              tooltip={{ trigger: 'item' }}
+            />
+          </Box>
+        </Paper>
       )}
 
       {/* Tabs */}
@@ -866,108 +942,105 @@ const ParlayAnalyticsScreen: React.FC = () => {
           {filteredParlays.length === 0 ? (
             <Grid item xs={12}><Alert severity="info">No parlays match your filters.</Alert></Grid>
           ) : (
-            filteredParlays.map((parlay) => {
-              console.log('[RENDER] Parlay:', parlay.name, 'sport:', parlay.sport, 'type:', typeof parlay.sport);
-              return (
-                <Grid item xs={12} md={6} key={parlay.id}>
-                  <Card
-                    variant="outlined"
-                    sx={{
-                      height: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      '&:hover': {
-                        borderColor: (theme) => theme.palette.primary.main,
-                        boxShadow: 2,
-                      },
-                    }}
-                    onClick={() => toggleAccordion(parlay.id)}
-                  >
-                    <CardContent>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                        <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
-                        <SportChip sport={parlay.sport} />
-                      </Box>
-                      <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
-                        <Chip label={`Odds: ${parlay.total_odds}`} size="small" variant="outlined" />
-                        {getRiskChip(parlay.risk_level)}
-                        <Chip label={`EV: ${parlay.expected_value}`} size="small" variant="outlined" />
-                      </Box>
-                      <Box mb={2}><Typography variant="body2" color="text.secondary" gutterBottom>Confidence</Typography><ConfidenceIndicator value={parlay.confidence} /></Box>
+            filteredParlays.map((parlay) => (
+              <Grid item xs={12} md={6} key={parlay.id}>
+                <Card
+                  variant="outlined"
+                  sx={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      borderColor: (theme) => theme.palette.primary.main,
+                      boxShadow: 2,
+                    },
+                  }}
+                  onClick={() => toggleAccordion(parlay.id)}
+                >
+                  <CardContent>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                      <Typography variant="h6" fontWeight="bold">{parlay.name}</Typography>
+                      <SportChip sport={parlay.sport} />
+                    </Box>
+                    <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
+                      <Chip label={`Odds: ${parlay.total_odds}`} size="small" variant="outlined" />
+                      {getRiskChip(parlay.risk_level)}
+                      <Chip label={`EV: ${parlay.expected_value}`} size="small" variant="outlined" />
+                    </Box>
+                    <Box mb={2}><Typography variant="body2" color="text.secondary" gutterBottom>Confidence</Typography><ConfidenceIndicator value={parlay.confidence} /></Box>
 
-                      <Accordion
-                        disableGutters
-                        elevation={0}
-                        square
-                        expanded={expandedAccordions[parlay.id] || false}
-                        onChange={() => {}}
-                        sx={{ border: 'none', '&:before': { display: 'none' } }}
+                    <Accordion
+                      disableGutters
+                      elevation={0}
+                      square
+                      expanded={expandedAccordions[parlay.id] || false}
+                      onChange={() => {}}
+                      sx={{ border: 'none', '&:before': { display: 'none' } }}
+                    >
+                      <AccordionSummary
+                        expandIcon={<ExpandMoreIcon />}
+                        sx={{ px: 0, cursor: 'default' }}
                       >
-                        <AccordionSummary
-                          expandIcon={<ExpandMoreIcon />}
-                          sx={{ px: 0, cursor: 'default' }}
-                        >
-                          <Typography variant="body2" fontWeight="medium">{parlay.legs.length} Legs</Typography>
-                        </AccordionSummary>
-                        <AccordionDetails sx={{ px: 0 }}>
-                          <TableContainer component={Paper} variant="outlined">
-                            <Table size="small">
-                              <TableHead>
-                                <TableRow>
-                                  <TableCell>Description</TableCell>
-                                  <TableCell align="right">Odds</TableCell>
-                                  <TableCell align="right">Confidence</TableCell>
-                                  <TableCell align="right">Status</TableCell>
+                        <Typography variant="body2" fontWeight="medium">{parlay.legs.length} Legs</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ px: 0 }}>
+                        <TableContainer component={Paper} variant="outlined">
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Description</TableCell>
+                                <TableCell align="right">Odds</TableCell>
+                                <TableCell align="right">Confidence</TableCell>
+                                <TableCell align="right">Status</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {parlay.legs.map(leg => (
+                                <TableRow key={leg.id}>
+                                  <TableCell>
+                                    <Typography variant="body2">{leg.description}</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                      {leg.sport} • {leg.market} {leg.projection && ` • Proj: ${leg.projection.toFixed(1)}`}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell align="right"><OddsChip odds={leg.odds} /></TableCell>
+                                  <TableCell align="right">
+                                    <Box display="flex" alignItems="center" justifyContent="flex-end">
+                                      <Typography variant="body2">{leg.confidence}%</Typography>
+                                      <Tooltip title={leg.confidence_level || 'N/A'}>
+                                        <InfoIcon fontSize="small" sx={{ ml: 0.5, color: 'text.secondary' }} />
+                                      </Tooltip>
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell align="right"><InjuryChip status={leg.injury_status} /></TableCell>
                                 </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {parlay.legs.map(leg => (
-                                  <TableRow key={leg.id}>
-                                    <TableCell>
-                                      <Typography variant="body2">{leg.description}</Typography>
-                                      <Typography variant="caption" color="text.secondary">
-                                        {leg.sport} • {leg.market} {leg.projection && ` • Proj: ${leg.projection.toFixed(1)}`}
-                                      </Typography>
-                                    </TableCell>
-                                    <TableCell align="right"><OddsChip odds={leg.odds} /></TableCell>
-                                    <TableCell align="right">
-                                      <Box display="flex" alignItems="center" justifyContent="flex-end">
-                                        <Typography variant="body2">{leg.confidence}%</Typography>
-                                        <Tooltip title={leg.confidence_level || 'N/A'}>
-                                          <InfoIcon fontSize="small" sx={{ ml: 0.5, color: 'text.secondary' }} />
-                                        </Tooltip>
-                                      </Box>
-                                    </TableCell>
-                                    <TableCell align="right"><InjuryChip status={leg.injury_status} /></TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </TableContainer>
-                        </AccordionDetails>
-                      </Accordion>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      </AccordionDetails>
+                    </Accordion>
 
-                      <Box mt={2}>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>AI Analysis</Typography>
-                        <Typography variant="body2">{parlay.analysis}</Typography>
-                      </Box>
-                      <Box mt={2} display="flex" gap={2} flexWrap="wrap">
-                        <Typography variant="caption" color="text.secondary">Avg Leg Confidence: {parlay.ai_metrics.avg_leg_confidence?.toFixed(1)}%</Typography>
-                        {parlay.ai_metrics.edge !== undefined && <Typography variant="caption" color="text.secondary">Edge: {(parlay.ai_metrics.edge * 100).toFixed(1)}%</Typography>}
-                        <Typography variant="caption" color="text.secondary">Stake: {parlay.ai_metrics.recommended_stake}</Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              );
-            })
+                    <Box mt={2}>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>AI Analysis</Typography>
+                      <Typography variant="body2">{parlay.analysis}</Typography>
+                    </Box>
+                    <Box mt={2} display="flex" gap={2} flexWrap="wrap">
+                      <Typography variant="caption" color="text.secondary">Avg Leg Confidence: {parlay.ai_metrics.avg_leg_confidence?.toFixed(1)}%</Typography>
+                      {parlay.ai_metrics.edge !== undefined && <Typography variant="caption" color="text.secondary">Edge: {(parlay.ai_metrics.edge * 100).toFixed(1)}%</Typography>}
+                      <Typography variant="caption" color="text.secondary">Stake: {parlay.ai_metrics.recommended_stake}</Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))
           )}
         </Grid>
       )}
 
-      {/* Tab Panel: Leg Analytics (unchanged) */}
+      {/* Tab Panel: Leg Analytics */}
       {selectedTab === 1 && (
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>Leg‑by‑Leg Performance Indicators</Typography>
@@ -1003,7 +1076,7 @@ const ParlayAnalyticsScreen: React.FC = () => {
                       if (!acc[sport]) acc[sport] = { count: 0, totalConfidence: 0, totalOdds: 0 };
                       acc[sport].count += 1;
                       acc[sport].totalConfidence += leg.confidence || 0;
-                      const oddsNum = parseInt(leg.odds, 10);
+                      const oddsNum = parseOddsToNumber(leg.odds);
                       acc[sport].totalOdds += isNaN(oddsNum) ? 0 : oddsNum;
                       return acc;
                     }, {})).map(([sport, stats]) => (
@@ -1022,7 +1095,7 @@ const ParlayAnalyticsScreen: React.FC = () => {
         </Paper>
       )}
 
-      {/* Generator Dialog (unchanged) */}
+      {/* Generator Dialog */}
       <Dialog open={generatorOpen} onClose={() => setGeneratorOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle><Box display="flex" alignItems="center" gap={1}><RocketLaunchIcon color="primary" /><Typography variant="h6">AI Parlay Generator</Typography></Box></DialogTitle>
         <DialogContent>
@@ -1061,6 +1134,18 @@ const ParlayAnalyticsScreen: React.FC = () => {
         <DialogActions>{!generating && <Button onClick={handleCloseGenerator} variant="contained" fullWidth>Close</Button>}</DialogActions>
       </Dialog>
     </Container>
+  );
+};
+
+// ----------------------------------------------------------------------
+// Main exported component wrapped with ProtectedRoute
+// ----------------------------------------------------------------------
+
+const ParlayAnalyticsScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="ParlayAnalytics">
+      <ParlayAnalyticsContent />
+    </ProtectedRoute>
   );
 };
 
