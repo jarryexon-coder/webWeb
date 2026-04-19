@@ -12,12 +12,14 @@ import {
   Stepper,
   Step,
   StepLabel,
+  Grid,
+  Divider,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
-  RocketLaunch as RocketIcon,
   ArrowBack as ArrowBackIcon,
   Dashboard as DashboardIcon,
+  Bolt as BoltIcon,
 } from '@mui/icons-material';
 import Confetti from 'react-confetti';
 import { useWindowSize } from '../hooks/useWindowSize';
@@ -33,8 +35,18 @@ const SubscriptionSuccess: React.FC = () => {
 
   const sessionId = searchParams.get('session_id');
   const purchaseType = searchParams.get('type'); // 'credits' or null
+  const creditsAmount = searchParams.get('credits');
+  const purchaseValue = searchParams.get('value');
 
   useEffect(() => {
+    // If this is a credits purchase, skip subscription verification
+    if (purchaseType === 'credits') {
+      console.log('✅ Credits purchase detected, skipping subscription verification');
+      setActiveStep(4);
+      setLoading(false);
+      return;
+    }
+
     const verifySubscription = async () => {
       if (!sessionId) {
         setError('No session ID found');
@@ -83,7 +95,7 @@ const SubscriptionSuccess: React.FC = () => {
     };
 
     verifySubscription();
-  }, [sessionId]);
+  }, [sessionId, purchaseType]);
 
   const handleGoToSubscription = () => {
     navigate('/subscription');
@@ -93,12 +105,16 @@ const SubscriptionSuccess: React.FC = () => {
     navigate('/dashboard');
   };
 
+  const handleGoToGenerator = () => {
+    navigate('/generator');
+  };
+
   if (loading) {
     return (
       <Container maxWidth="md" sx={{ py: 8, textAlign: 'center' }}>
         <CircularProgress size={60} />
         <Typography variant="h6" sx={{ mt: 3 }}>
-          Verifying your purchase...
+          {purchaseType === 'credits' ? 'Processing your credits...' : 'Verifying your purchase...'}
         </Typography>
         <Box sx={{ mt: 4 }}>
           <Stepper activeStep={activeStep} alternativeLabel>
@@ -158,13 +174,17 @@ const SubscriptionSuccess: React.FC = () => {
           }}
         >
           <Box>
-            <CheckCircleIcon sx={{ fontSize: 80, mb: 2 }} />
+            {isCredits ? (
+              <BoltIcon sx={{ fontSize: 80, mb: 2 }} />
+            ) : (
+              <CheckCircleIcon sx={{ fontSize: 80, mb: 2 }} />
+            )}
             <Typography variant="h2" fontWeight="bold" gutterBottom>
               {isCredits ? 'Credits Added! 🎉' : 'Thank You! 🎉'}
             </Typography>
             <Typography variant="h5" sx={{ opacity: 0.9 }}>
               {isCredits 
-                ? 'Your generator credits have been added successfully!' 
+                ? `You have successfully purchased ${creditsAmount || 'generator'} credits for $${purchaseValue || '0'}!` 
                 : `Your ${planName} Plan is now active!`}
             </Typography>
           </Box>
@@ -184,17 +204,19 @@ const SubscriptionSuccess: React.FC = () => {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {isCredits 
-                    ? 'Head to the Generator section to use your new credits for AI predictions.' 
-                    : 'Go to your analytics dashboard to access all your premium features.'}
+                    ? 'Head to the Generator section to use your new credits for AI predictions and player projections.' 
+                    : 'Go to your analytics dashboard to access all your premium features including real-time data and advanced analytics.'}
                 </Typography>
               </Box>
               
               <Box sx={{ mb: 4 }}>
                 <Typography variant="h6" gutterBottom color="primary">
-                  2. Check Your Subscription Status
+                  2. {isCredits ? 'Check Your Credit Balance' : 'Manage Your Subscription'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  View your active plan, billing history, and manage your subscription.
+                  {isCredits 
+                    ? 'View your remaining credits in the dashboard or generator page.' 
+                    : 'View your active plan, billing history, and manage your subscription settings.'}
                 </Typography>
               </Box>
               
@@ -204,7 +226,9 @@ const SubscriptionSuccess: React.FC = () => {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Contact our support team at{' '}
-                  <a href="mailto:support@sportsanalyticsgpt.com">support@sportsanalyticsgpt.com</a>
+                  <a href="mailto:support@sportsanalyticsgpt.com" style={{ color: '#667eea' }}>
+                    support@sportsanalyticsgpt.com
+                  </a>
                 </Typography>
               </Box>
             </Paper>
@@ -228,6 +252,19 @@ const SubscriptionSuccess: React.FC = () => {
                 Go to Dashboard
               </Button>
               
+              {isCredits && (
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  size="large"
+                  startIcon={<BoltIcon />}
+                  onClick={handleGoToGenerator}
+                  sx={{ mb: 2, py: 1.5 }}
+                >
+                  Go to Generator
+                </Button>
+              )}
+              
               <Button
                 fullWidth
                 variant="outlined"
@@ -236,15 +273,15 @@ const SubscriptionSuccess: React.FC = () => {
                 onClick={handleGoToSubscription}
                 sx={{ mb: 2, py: 1.5 }}
               >
-                Back to Subscription
+                {isCredits ? 'Buy More Credits' : 'Back to Subscription'}
               </Button>
               
               <Divider sx={{ my: 3 }} />
               
               <Typography variant="body2" color="text.secondary" align="center">
                 {isCredits 
-                  ? 'Your credits are available immediately.' 
-                  : 'Your subscription is now active.'}
+                  ? 'Your credits are available immediately. Check your balance in the dashboard.' 
+                  : 'Your subscription is now active. You can access all premium features.'}
               </Typography>
             </Paper>
           </Grid>

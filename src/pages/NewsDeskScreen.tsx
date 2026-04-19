@@ -469,8 +469,8 @@ const NewsDeskScreen = () => {
   const getSampleWins = useCallback((): WinPost[] => [
     {
       id: 'win-1',
-      title: 'Perfect Parlay Hit!',
-      description: '3-team NFL parlay with +450 odds. Chiefs, Packers, and Bills all covered!',
+      title: 'Perfect Combo Hit!',
+      description: '3-team NFL combo with +450 multiplier. Chiefs, Packers, and Bills all covered!',
       amount: '1250',
       sport: 'NFL',
       userName: 'ProBetter99',
@@ -492,7 +492,7 @@ const NewsDeskScreen = () => {
     {
       id: 'win-3',
       title: 'Underdog ML Winner',
-      description: 'Took the Panthers moneyline at +220 and they pulled off the upset!',
+      description: 'Took the Panthers match winner at +220 and they pulled off the upset!',
       amount: '880',
       sport: 'NHL',
       userName: 'IceCold',

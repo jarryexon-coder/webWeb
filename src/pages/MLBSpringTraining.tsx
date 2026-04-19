@@ -1,864 +1,513 @@
-import React, { useMemo, useState } from 'react';
+// src/pages/MLBSpringTraining.tsx – FINAL: mock props fallback, standings zeros fixed
+import React, { useState } from 'react';
 import {
-  Container,
-  Typography,
-  Box,
-  Grid,
-  Card,
-  CardContent,
-  Chip,
-  LinearProgress,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  SelectChangeEvent,
-  Skeleton,
-  Alert,
-  Button,
-  Tooltip,
-  IconButton,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Tab,
-  Tabs,
-  Divider,
+  Container, Typography, Box, Grid, Card, CardContent, Chip,
+  FormControl, InputLabel, Select, MenuItem, Alert, Button, IconButton,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Paper, Tab, Tabs, Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, CircularProgress,
 } from '@mui/material';
 import {
-  Refresh as RefreshIcon,
-  SportsBaseball as BaseballIcon,
-  CalendarMonth as CalendarIcon,
-  WbSunny as SunnyIcon,
-  AcUnit as ColdIcon,
-  LocationOn as LocationIcon,
+  Refresh as RefreshIcon, SportsBaseball as BaseballIcon, Search as SearchIcon,
+  Person as PersonIcon, Lock as LockIcon, CheckCircle as CheckCircleIcon,
+  CreditCard as CreditCardIcon,
 } from '@mui/icons-material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import ProtectedRoute from '../components/ProtectedRoute';
-import PlanGuard from '../components/PlanGuard';
-import GeneratorCredits from '../components/GeneratorCredits';
+import { useAuth } from '../contexts/AuthContext';
+import { useCheckout } from '../utils/checkout';
 
-// ----------------------------------------------------------------------
-// Types – based on expected MLB Spring Training API response
-// ----------------------------------------------------------------------
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
-interface SpringGame {
-  id: string;
-  home_team: string;
-  away_team: string;
-  home_score?: number;
-  away_score?: number;
-  status: 'scheduled' | 'live' | 'final' | 'postponed';
-  venue: string;
-  location: string;
-  league: 'Grapefruit' | 'Cactus';
-  date: string;
-  broadcast?: string;
-  weather?: {
-    condition: string;
-    temperature: number;
-    wind?: string;
-  };
+console.log('🔧 Using Node API:', NODE_API_BASE);
+
+// Types
+interface MLBGame {
+  id: string; home_team: string; away_team: string; home_full?: string; away_full?: string;
+  home_score?: number; away_score?: number; status: 'scheduled' | 'live' | 'final';
+  inning?: number; game_date: string; venue: string; tv?: string;
 }
+interface MLBStanding { team: string; wins: number; losses: number; pct: number | null; games_back: number; home_record: string; away_record: string; streak: string; last_10: string; }
+interface MLBPlayerStat { name: string; team: string; position: string; avg?: number | null; hr?: number | null; rbi?: number | null; ops?: number | null; era?: number | null; whip?: number | null; so?: number | null; ip?: number | null; }
+interface MLBProp { id: string; player: string; team: string; stat: string; line: number; odds: number; edge?: number; }
+interface MLBPlayer { id: string; name: string; team: string; position: string; stats?: any; }
 
-interface SpringStanding {
-  id: string;
-  team: string;
-  abbreviation: string;
-  league: 'Grapefruit' | 'Cactus';
-  wins: number;
-  losses: number;
-  ties: number;
-  win_percentage: number;
-  games_back: number;
-  home_record: string;
-  away_record: string;
-  streak: string;
-  last_10: string;
-}
+// ========== MOCK DATA (fallback) ==========
+const getMockGames = (date: string): MLBGame[] => [
+  { id: 'mock-1', home_team: 'NYY', away_team: 'BOS', home_full: 'New York Yankees', away_full: 'Boston Red Sox', home_score: 0, away_score: 0, status: 'scheduled', inning: 0, game_date: date, venue: 'Yankee Stadium', tv: 'ESPN' },
+  { id: 'mock-2', home_team: 'LAD', away_team: 'SF', home_full: 'Los Angeles Dodgers', away_full: 'San Francisco Giants', home_score: 0, away_score: 0, status: 'scheduled', inning: 0, game_date: date, venue: 'Dodger Stadium', tv: 'MLB Network' },
+  { id: 'mock-3', home_team: 'NYM', away_team: 'ATL', home_full: 'New York Mets', away_full: 'Atlanta Braves', home_score: 0, away_score: 0, status: 'scheduled', inning: 0, game_date: date, venue: 'Citi Field', tv: 'FOX' },
+];
 
-interface SpringPlayerStat {
-  id: string;
-  name: string;
-  team: string;
-  position: string;
-  // Hitting
-  avg?: number;
-  hr?: number;
-  rbi?: number;
-  ops?: number;
-  // Pitching
-  era?: number;
-  whip?: number;
-  so?: number;
-  ip?: number;
-  is_prospect?: boolean;
-}
+const getMockStandings = (): MLBStanding[] => [
+  { team: 'NYY', wins: 95, losses: 67, pct: 0.586, games_back: 0, home_record: '48-33', away_record: '47-34', streak: 'W2', last_10: '7-3' },
+  { team: 'BOS', wins: 92, losses: 70, pct: 0.568, games_back: 3, home_record: '46-35', away_record: '46-35', streak: 'L1', last_10: '6-4' },
+  { team: 'LAD', wins: 100, losses: 62, pct: 0.617, games_back: 0, home_record: '53-28', away_record: '47-34', streak: 'W5', last_10: '8-2' },
+  { team: 'ATL', wins: 104, losses: 58, pct: 0.642, games_back: 0, home_record: '55-26', away_record: '49-32', streak: 'W3', last_10: '7-3' },
+];
 
-interface SpringTrainingData {
-  games: SpringGame[];
-  standings: SpringStanding[];
-  hitters: SpringPlayerStat[];
-  pitchers: SpringPlayerStat[];
-  prospects: SpringPlayerStat[];
-  date_range: {
-    start: string;
-    end: string;
-  };
-  last_updated: string;
-  is_real_data: boolean;
-}
+const getMockHittingLeaders = (): MLBPlayerStat[] => [
+  { name: 'Shohei Ohtani', team: 'LAD', position: 'DH', avg: 0.304, hr: 44, rbi: 95, ops: 1.010 },
+  { name: 'Aaron Judge', team: 'NYY', position: 'RF', avg: 0.322, hr: 58, rbi: 144, ops: 1.159 },
+  { name: 'Ronald Acuña Jr.', team: 'ATL', position: 'RF', avg: 0.337, hr: 41, rbi: 106, ops: 1.012 },
+  { name: 'Mookie Betts', team: 'LAD', position: 'SS', avg: 0.307, hr: 39, rbi: 98, ops: 0.987 },
+];
 
-interface SpringTrainingResponse {
-  success: boolean;
-  data: SpringTrainingData;
-  message?: string;
-}
+const getMockPitchingLeaders = (): MLBPlayerStat[] => [
+  { name: 'Blake Snell', team: 'SF', position: 'P', era: 2.25, whip: 1.05, so: 234, ip: 180 },
+  { name: 'Zack Wheeler', team: 'PHI', position: 'P', era: 2.78, whip: 1.08, so: 212, ip: 192 },
+  { name: 'Corbin Burnes', team: 'MIL', position: 'P', era: 2.94, whip: 1.07, so: 200, ip: 193.2 },
+  { name: 'Spencer Strider', team: 'ATL', position: 'P', era: 3.86, whip: 1.09, so: 281, ip: 186.2 },
+];
 
-// ----------------------------------------------------------------------
-// API client – with fallback base URL and rich mock data on failure
-// ----------------------------------------------------------------------
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const getMockProps = (): MLBProp[] => [
+  { id: 'prop-1', player: 'Julio Rodriguez', team: 'SEA', stat: 'Home Runs', line: 0.5, odds: -110, edge: 0.05 },
+  { id: 'prop-2', player: 'Josh Naylor', team: 'SEA', stat: 'Home Runs', line: 0.5, odds: -115, edge: 0.03 },
+  { id: 'prop-3', player: 'Randy Arozarena', team: 'SEA', stat: 'Home Runs', line: 0.5, odds: +100, edge: 0.08 },
+  { id: 'prop-4', player: 'Cal Raleigh', team: 'SEA', stat: 'Home Runs', line: 1.5, odds: +120, edge: 0.02 },
+  { id: 'prop-5', player: 'Shohei Ohtani', team: 'LAD', stat: 'Home Runs', line: 0.5, odds: -130, edge: 0.04 },
+];
 
-// Rich mock data to use when the API is unavailable
-const getMockSpringTrainingData = (): SpringTrainingData => ({
-  games: [
-    {
-      id: '1',
-      home_team: 'BOS',
-      away_team: 'NYY',
-      home_score: undefined,
-      away_score: undefined,
-      status: 'scheduled',
-      venue: 'JetBlue Park',
-      location: 'Fort Myers, FL',
-      league: 'Grapefruit',
-      date: new Date().toISOString(),
-      broadcast: 'MLB Network',
-      weather: { condition: 'Sunny', temperature: 82, wind: '5 mph' }
-    },
-    {
-      id: '2',
-      home_team: 'CHC',
-      away_team: 'SF',
-      home_score: 5,
-      away_score: 3,
-      status: 'final',
-      venue: 'Sloan Park',
-      location: 'Mesa, AZ',
-      league: 'Cactus',
-      date: new Date().toISOString(),
-      broadcast: 'Marquee',
-      weather: { condition: 'Clear', temperature: 78, wind: '3 mph' }
-    },
-    {
-      id: '3',
-      home_team: 'LAD',
-      away_team: 'MIL',
-      home_score: 2,
-      away_score: 2,
-      status: 'final',
-      venue: 'Camelback Ranch',
-      location: 'Glendale, AZ',
-      league: 'Cactus',
-      date: new Date().toISOString(),
-      weather: { condition: 'Sunny', temperature: 85, wind: '7 mph' }
-    },
-  ],
-  standings: [
-    { id: '1', team: 'Boston Red Sox', abbreviation: 'BOS', league: 'Grapefruit', wins: 12, losses: 5, ties: 1, win_percentage: 0.706, games_back: 0.0, home_record: '7-2-0', away_record: '5-3-1', streak: 'W3', last_10: '8-2-0' },
-    { id: '2', team: 'New York Yankees', abbreviation: 'NYY', league: 'Grapefruit', wins: 10, losses: 7, ties: 1, win_percentage: 0.588, games_back: 2.0, home_record: '5-3-1', away_record: '5-4-0', streak: 'L1', last_10: '6-4-0' },
-    { id: '3', team: 'Chicago Cubs', abbreviation: 'CHC', league: 'Cactus', wins: 11, losses: 6, ties: 0, win_percentage: 0.647, games_back: 0.0, home_record: '6-2-0', away_record: '5-4-0', streak: 'W2', last_10: '7-3-0' },
-    { id: '4', team: 'Los Angeles Dodgers', abbreviation: 'LAD', league: 'Cactus', wins: 9, losses: 8, ties: 1, win_percentage: 0.529, games_back: 2.0, home_record: '5-3-1', away_record: '4-5-0', streak: 'L2', last_10: '4-5-1' },
-  ],
-  hitters: [
-    { id: 'h1', name: 'Rafael Devers', team: 'BOS', position: '3B', avg: 0.385, hr: 4, rbi: 12, ops: 1.102, is_prospect: false },
-    { id: 'h2', name: 'Aaron Judge', team: 'NYY', position: 'OF', avg: 0.350, hr: 5, rbi: 14, ops: 1.250, is_prospect: false },
-    { id: 'h3', name: 'Michael Busch', team: 'CHC', position: '2B', avg: 0.420, hr: 3, rbi: 9, ops: 1.180, is_prospect: true },
-    { id: 'h4', name: 'James Outman', team: 'LAD', position: 'OF', avg: 0.310, hr: 2, rbi: 7, ops: 0.980, is_prospect: true },
-  ],
-  pitchers: [
-    { id: 'p1', name: 'Garrett Whitlock', team: 'BOS', position: 'P', era: 1.80, whip: 0.90, so: 18, ip: 15.0, is_prospect: false },
-    { id: 'p2', name: 'Carlos Rodón', team: 'NYY', position: 'P', era: 3.00, whip: 1.10, so: 20, ip: 12.0, is_prospect: false },
-    { id: 'p3', name: 'Cade Horton', team: 'CHC', position: 'P', era: 2.25, whip: 0.85, so: 22, ip: 16.0, is_prospect: true },
-    { id: 'p4', name: 'Gavin Stone', team: 'LAD', position: 'P', era: 2.70, whip: 1.05, so: 19, ip: 13.1, is_prospect: true },
-  ],
-  prospects: [
-    { id: 'ph1', name: 'Jackson Holliday', team: 'BAL', position: 'SS', avg: 0.400, hr: 2, rbi: 8, ops: 1.150, is_prospect: true },
-    { id: 'pp1', name: 'Paul Skenes', team: 'PIT', position: 'P', era: 1.50, whip: 0.80, so: 25, ip: 18.0, is_prospect: true },
-    { id: 'ph2', name: 'Wyatt Langford', team: 'TEX', position: 'OF', avg: 0.375, hr: 4, rbi: 11, ops: 1.200, is_prospect: true },
-    { id: 'pp2', name: 'Rhett Lowder', team: 'CIN', position: 'P', era: 2.10, whip: 0.95, so: 20, ip: 15.2, is_prospect: true },
-  ],
-  date_range: {
-    start: 'Feb 20',
-    end: 'Mar 26',
-  },
-  last_updated: new Date().toISOString(),
-  is_real_data: false,
-});
+// ========== API FUNCTIONS ==========
+const toTank01Date = (dateStr: string) => dateStr.replace(/-/g, '');
 
-const fetchSpringTrainingData = async (year?: number): Promise<SpringTrainingData> => {
+const fetchGames = async (date: string): Promise<MLBGame[]> => {
+  const tankDate = toTank01Date(date);
   try {
-    const baseUrl = API_BASE_URL || window.location.origin;
-    const url = new URL('/api/mlb/spring-training', baseUrl);
-    if (year) url.searchParams.append('year', String(year));
-
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      console.warn(`Spring Training API returned ${response.status}: ${response.statusText}. Using mock data.`);
-      return getMockSpringTrainingData();
+    const res = await fetch(`${NODE_API_BASE}/api/tank01/games?date=${tankDate}&sport=mlb`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.success && Array.isArray(data.data) && data.data.length) {
+      return data.data.map((game: any) => ({
+        id: game.gameID || `${game.away}-${game.home}-${tankDate}`,
+        home_team: game.home, away_team: game.away, home_full: game.homeFull, away_full: game.awayFull,
+        home_score: game.homeScore, away_score: game.awayScore,
+        status: game.status === 'Final' ? 'final' : game.status === 'InProgress' ? 'live' : 'scheduled',
+        inning: game.inning, game_date: game.gameDate || date, venue: game.venue || 'TBD', tv: game.tv || '',
+      }));
     }
+    throw new Error('No games');
+  } catch (err) { console.warn('Games mock fallback'); return getMockGames(date); }
+};
 
-    const json: SpringTrainingResponse = await response.json();
-    if (!json.success || !json.data) {
-      console.warn('Spring Training API returned invalid response. Using mock data.');
-      return getMockSpringTrainingData();
+const fetchStandings = async (season: number): Promise<MLBStanding[]> => {
+  try {
+    const res = await fetch(`${NODE_API_BASE}/api/tank01/currentinfo?sport=mlb`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.success && data.data?.teamStats) {
+      return data.data.teamStats.map((t: any) => ({
+        team: t.teamName || t.teamAbbrev, wins: t.wins ?? 0, losses: t.losses ?? 0,
+        pct: t.winPct ? parseFloat(t.winPct) : (t.wins && t.losses ? t.wins / (t.wins + t.losses) : null),
+        games_back: t.gamesBack ?? 0, home_record: `${t.homeWins ?? 0}-${t.homeLosses ?? 0}`,
+        away_record: `${t.awayWins ?? 0}-${t.awayLosses ?? 0}`, streak: t.streak || '0', last_10: t.last10 || '0-0',
+      }));
     }
-
-    // If the API returned empty arrays but we want to show something, we still return mock.
-    // But we'll assume the API data is valid if present.
-    return json.data;
-  } catch (error) {
-    console.error('Failed to fetch Spring Training data:', error);
-    return getMockSpringTrainingData();
+    throw new Error('No Tank01 standings');
+  } catch (err) {
+    console.warn('Tank01 standings failed, trying Python...', err);
+    try {
+      const pyRes = await fetch(`${PYTHON_API_BASE}/api/mlb/stats?type=standings&season=${season}`);
+      if (!pyRes.ok) throw new Error(`Python HTTP ${pyRes.status}`);
+      const pyData = await pyRes.json();
+      const rawStandings = pyData.data?.standings || pyData.standings || pyData;
+      if (Array.isArray(rawStandings) && rawStandings.length) {
+        console.log('📊 Python standings sample:', rawStandings[0]);
+        return rawStandings.map((team: any) => ({
+          team: team.team || 'Unknown',
+          wins: team.wins ?? 0,
+          losses: team.losses ?? 0,
+          pct: team.pct ?? (team.wins && team.losses ? team.wins / (team.wins + team.losses) : null),
+          games_back: team.games_back ?? 0,
+          home_record: team.home_record || '0-0',
+          away_record: team.away_record || '0-0',
+          streak: team.streak || '0',
+          last_10: team.last_10 || '0-0',
+        }));
+      }
+      throw new Error('No Python standings');
+    } catch (pyErr) { console.warn('Python standings failed, using mock'); return getMockStandings(); }
   }
 };
 
-// ----------------------------------------------------------------------
-// Helper Components (with defensive props) – unchanged
-// ----------------------------------------------------------------------
+let cachedAllPlayers: any[] | null = null;
+const fetchAllPlayers = async (): Promise<any[]> => {
+  if (cachedAllPlayers) return cachedAllPlayers;
+  try {
+    const url = `${NODE_API_BASE}/api/fantasyhub/players?sport=mlb&filterByToday=false&force=true`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.success && data.data && data.data.length) {
+      cachedAllPlayers = data.data;
+      console.log(`✅ Loaded ${cachedAllPlayers.length} real players`);
+      return cachedAllPlayers;
+    }
+    throw new Error('No players');
+  } catch (err) { console.warn('Failed to fetch players, using empty'); return []; }
+};
 
-const GameStatusChip = ({ status }: { status?: string }) => {
-  if (!status) return <Chip label="UNKNOWN" size="small" color="default" />;
+const fetchHittingLeaders = async (limit: number): Promise<MLBPlayerStat[]> => {
+  const players = await fetchAllPlayers();
+  if (!players.length) return getMockHittingLeaders();
+  const hitters = players.filter(p => p.position !== 'P' && (p.batting_average !== undefined || p.avg !== undefined));
+  if (!hitters.length) return getMockHittingLeaders();
+  const stats = hitters.map(p => ({
+    name: p.name, team: p.team, position: p.position || 'Unknown',
+    avg: p.batting_average ?? p.avg ?? null, hr: p.home_runs ?? p.hr ?? null,
+    rbi: p.rbi ?? null, ops: p.ops ?? null,
+  }));
+  const valid = stats.filter(h => h.hr !== null || h.avg !== null);
+  if (!valid.length) return getMockHittingLeaders();
+  valid.sort((a, b) => (b.hr ?? 0) - (a.hr ?? 0));
+  return valid.slice(0, limit);
+};
 
-  let color: 'success' | 'error' | 'warning' | 'default' | 'info' = 'default';
-  let label = status.toUpperCase();
-  if (status === 'live') {
-    color = 'error';
-    label = 'LIVE';
-  } else if (status === 'final') {
-    color = 'default';
-    label = 'FINAL';
-  } else if (status === 'scheduled') {
-    color = 'primary';
-    label = 'SCHEDULED';
-  } else if (status === 'postponed') {
-    color = 'warning';
-    label = 'PPD';
+const fetchPitchingLeaders = async (limit: number): Promise<MLBPlayerStat[]> => {
+  const players = await fetchAllPlayers();
+  if (!players.length) return getMockPitchingLeaders();
+  const pitchers = players.filter(p => p.position === 'P' || p.era !== undefined || p.whip !== undefined);
+  if (!pitchers.length) return getMockPitchingLeaders();
+  const stats = pitchers.map(p => ({
+    name: p.name, team: p.team, position: 'P',
+    era: p.era ?? null, whip: p.whip ?? null, so: p.strikeouts ?? p.so ?? null, ip: p.innings_pitched ?? p.ip ?? null,
+  }));
+  const valid = stats.filter(p => p.era !== null || p.so !== null);
+  if (!valid.length) return getMockPitchingLeaders();
+  valid.sort((a, b) => (a.era ?? 99) - (b.era ?? 99));
+  return valid.slice(0, limit);
+};
+
+// Props: try Node PrizePicks, then Python, then mock
+const fetchProps = async (date: string, limit: number): Promise<MLBProp[]> => {
+  // 1) Try Node PrizePicks endpoint
+  try {
+    const res = await fetch(`${NODE_API_BASE}/api/prizepicks/selections?sport=mlb&force=true&_t=${Date.now()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.selections) && data.selections.length) {
+        console.log(`✅ Got ${data.selections.length} props from Node PrizePicks`);
+        return data.selections.slice(0, limit).map((p: any) => ({
+          id: p.id || `pp-${Date.now()}-${Math.random()}`,
+          player: p.player, team: p.team || 'MLB', stat: p.stat, line: p.line, odds: p.odds ?? -110, edge: p.edge ? parseFloat(p.edge) : undefined,
+        }));
+      }
+    }
+    throw new Error('No PrizePicks props');
+  } catch (err) {
+    console.warn('PrizePicks props failed, trying Python API...', err);
+    // 2) Fallback to Python API
+    try {
+      const pyRes = await fetch(`${PYTHON_API_BASE}/api/mlb/props?date=${date}&limit=${limit}`);
+      if (!pyRes.ok) throw new Error(`Python HTTP ${pyRes.status}`);
+      const pyData = await pyRes.json();
+      console.log('📦 Python props response:', pyData);
+      const propsArray = pyData.props || pyData.data?.props || pyData;
+      if (Array.isArray(propsArray) && propsArray.length) {
+        console.log(`✅ Got ${propsArray.length} props from Python API`);
+        return propsArray.slice(0, limit).map((p: any, idx: number) => ({
+          id: p.id || `py-${idx}`,
+          player: p.player_name || p.player,
+          team: p.team || 'MLB',
+          stat: p.stat_type || p.stat,
+          line: p.line ?? 0.5,
+          odds: p.odds ?? -110,
+          edge: p.edge ?? p.projection_edge,
+        }));
+      }
+      throw new Error('No Python props');
+    } catch (pyErr) {
+      console.warn('Python props also failed, using mock data', pyErr);
+      // 3) Final fallback: mock props
+      return getMockProps();
+    }
   }
-  return <Chip label={label} size="small" color={color} />;
 };
 
-const LeagueChip = ({ league }: { league?: string }) => {
-  if (!league) return <Chip label="N/A" size="small" variant="outlined" />;
-  return (
-    <Chip
-      icon={league === 'Grapefruit' ? <SunnyIcon /> : <ColdIcon />}
-      label={league}
-      size="small"
-      color={league === 'Grapefruit' ? 'success' : 'info'}
-      variant="outlined"
-    />
-  );
+const searchPlayers = async (query: string): Promise<MLBPlayer[]> => {
+  const players = await fetchAllPlayers();
+  if (!players.length) {
+    const mockPlayers = [
+      { name: 'Shohei Ohtani', team: 'LAD', position: 'DH', player_id: 'ohtani' },
+      { name: 'Aaron Judge', team: 'NYY', position: 'RF', player_id: 'judge' },
+      { name: 'Ronald Acuña Jr.', team: 'ATL', position: 'RF', player_id: 'acuna' },
+      { name: 'Julio Rodriguez', team: 'SEA', position: 'CF', player_id: 'jrod' },
+    ];
+    if (!query.trim()) return [];
+    const lower = query.toLowerCase();
+    return mockPlayers.filter(p => p.name.toLowerCase().includes(lower) || p.team.toLowerCase().includes(lower))
+      .map(p => ({ id: p.player_id, name: p.name, team: p.team, position: p.position, stats: {} }));
+  }
+  if (!query.trim()) return [];
+  const lower = query.toLowerCase();
+  const filtered = players.filter(p => p.name.toLowerCase().includes(lower) || p.team.toLowerCase().includes(lower));
+  return filtered.map(p => ({
+    id: p.player_id || p.name.replace(/\s/g, '-').toLowerCase(),
+    name: p.name, team: p.team, position: p.position || 'Player',
+    stats: { avg: p.batting_average ?? p.avg, home_runs: p.home_runs ?? p.hr, rbi: p.rbi, ops: p.ops, era: p.era, whip: p.whip, strikeouts: p.strikeouts, ip: p.innings_pitched },
+  }));
 };
 
-const WinPercentageBar = ({ percentage }: { percentage?: number }) => {
-  if (percentage === undefined) return null;
-  let color: 'success' | 'warning' | 'error' = 'success';
-  if (percentage < 0.4) color = 'error';
-  else if (percentage < 0.5) color = 'warning';
-  return (
-    <Box display="flex" alignItems="center" gap={1}>
-      <Typography variant="body2" color="text.secondary">
-        {(percentage * 100).toFixed(1)}%
-      </Typography>
-      <LinearProgress
-        variant="determinate"
-        value={percentage * 100}
-        sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
-        color={color}
-      />
+const fetchPlayerDetail = async (playerId: string, season: number): Promise<MLBPlayer> => {
+  const players = await fetchAllPlayers();
+  const player = players.find(p => p.player_id === playerId || p.name.replace(/\s/g, '-').toLowerCase() === playerId);
+  if (player) return { id: player.player_id, name: player.name, team: player.team, position: player.position || 'Player', stats: player };
+  return { id: playerId, name: 'MLB Player', team: 'MLB', position: 'UTL', stats: {} };
+};
+
+const formatDate = (date: Date) => date.toISOString().split('T')[0];
+
+// ========== MAIN COMPONENT ==========
+const MLBSpringTrainingContent: React.FC = () => {
+  const { profile, planFeatures } = useAuth();
+  const { handleSubscriptionCheckout } = useCheckout();
+  const hasAnalyticsAccess = planFeatures?.hasAdvancedAnalytics || profile?.plan === 'analytics' || profile?.plan === 'generator';
+  const hasGeneratorAccess = planFeatures?.hasAIRecommendations || profile?.plan === 'generator';
+  
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState('analytics');
+  const [selectedInterval, setSelectedInterval] = useState('month');
+  const [tabValue, setTabValue] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
+  const [selectedSeason, setSelectedSeason] = useState(new Date().getFullYear());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPlayer, setSelectedPlayer] = useState<MLBPlayer | null>(null);
+  
+  const handleUpgrade = () => handleSubscriptionCheckout(selectedPlan, selectedInterval);
+  
+  const gamesQuery = useQuery({ queryKey: ['mlbGames', selectedDate], queryFn: () => fetchGames(selectedDate), staleTime: 5 * 60 * 1000 });
+  const standingsQuery = useQuery({ queryKey: ['mlbStandings', selectedSeason], queryFn: () => fetchStandings(selectedSeason), enabled: tabValue === 1, staleTime: 10 * 60 * 1000 });
+  const hittingQuery = useQuery({ queryKey: ['mlbHitting', 50], queryFn: () => fetchHittingLeaders(50), enabled: tabValue === 2, staleTime: 10 * 60 * 1000 });
+  const pitchingQuery = useQuery({ queryKey: ['mlbPitching', 20], queryFn: () => fetchPitchingLeaders(20), enabled: tabValue === 3, staleTime: 10 * 60 * 1000 });
+  const propsQuery = useQuery({ queryKey: ['mlbProps', selectedDate, 30], queryFn: () => fetchProps(selectedDate, 30), enabled: tabValue === 4 && hasAnalyticsAccess, staleTime: 5 * 60 * 1000 });
+  const searchMutation = useMutation({ mutationFn: (query: string) => searchPlayers(query) });
+  
+  const renderAnalyticsLock = () => (
+    <Box textAlign="center" py={8}>
+      <LockIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+      <Typography variant="h5" gutterBottom>Analytics Feature Locked</Typography>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>Upgrade to Analytics or Generator plan.</Typography>
+      <Button variant="contained" color="primary" onClick={() => setShowUpgradeModal(true)}>Upgrade Now</Button>
     </Box>
   );
-};
-
-const StreakChip = ({ streak }: { streak?: string }) => {
-  if (!streak) return <Chip label="—" size="small" variant="outlined" />;
-  let color: 'success' | 'error' | 'default' = 'default';
-  if (streak.startsWith('W')) color = 'success';
-  else if (streak.startsWith('L')) color = 'error';
-  return <Chip label={streak} size="small" color={color} variant="outlined" />;
-};
-
-const ProspectChip = () => (
-  <Chip label="Prospect" size="small" color="secondary" sx={{ height: 20, fontSize: '0.7rem' }} />
-);
-
-// ----------------------------------------------------------------------
-// Main Content Component with Plan Guards
-// ----------------------------------------------------------------------
-const MLBSpringTrainingContent: React.FC = () => {
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [tabValue, setTabValue] = useState<number>(0);
-  const [leagueFilter, setLeagueFilter] = useState<string>('all');
-  const [positionFilter, setPositionFilter] = useState<string>('all');
-
-  // Mock user plan for testing - in production this would come from auth/user context
-  const [userPlan, setUserPlan] = useState('starter'); // 'starter', 'analytics', or 'generator'
-
-  const yearOptions = useMemo(() => {
-    const current = new Date().getFullYear();
-    return [current, current + 1];
-  }, []);
-
-  const {
-    data: springData,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery({
-    queryKey: ['springTraining', selectedYear],
-    queryFn: () => fetchSpringTrainingData(selectedYear),
-    staleTime: 1000 * 60 * 10,
-    refetchOnWindowFocus: false,
-  });
-
-  // Filter games by league
-  const filteredGames = useMemo(() => {
-    if (!springData?.games?.length) return [];
-    if (leagueFilter === 'all') return springData.games;
-    return springData.games.filter((game) => game.league?.toLowerCase() === leagueFilter.toLowerCase());
-  }, [springData, leagueFilter]);
-
-  // Filter standings by league
-  const filteredStandings = useMemo(() => {
-    if (!springData?.standings?.length) return [];
-    if (leagueFilter === 'all') return springData.standings;
-    return springData.standings.filter((team) => team.league?.toLowerCase() === leagueFilter.toLowerCase());
-  }, [springData, leagueFilter]);
-
-  // Filter hitters by position
-  const filteredHitters = useMemo(() => {
-    if (!springData?.hitters?.length) return [];
-    if (positionFilter === 'all') return springData.hitters;
-    return springData.hitters.filter((p) => p.position === positionFilter);
-  }, [springData, positionFilter]);
-
-  const handleYearChange = (event: SelectChangeEvent) => {
-    setSelectedYear(parseInt(event.target.value, 10));
-  };
-
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
-  const handleLeagueChange = (event: SelectChangeEvent) => {
-    setLeagueFilter(event.target.value);
-  };
-
-  const handlePositionChange = (event: SelectChangeEvent) => {
-    setPositionFilter(event.target.value);
-  };
-
-  if (isLoading) {
+  
+  const renderGamesTab = () => {
+    if (gamesQuery.isLoading) return <CircularProgress />;
+    if (gamesQuery.isError) return <Alert severity="error">Failed to load games.</Alert>;
+    const games = gamesQuery.data || [];
+    if (!games.length) return <Alert severity="info">No games scheduled.</Alert>;
     return (
-      <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
-        <Typography variant="h4" gutterBottom>
-          MLB Spring Training
-        </Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Skeleton variant="rounded" height={80} />
+      <Grid container spacing={2}>
+        {games.map((game) => (
+          <Grid item xs={12} md={6} lg={4} key={game.id}>
+            <Card><CardContent>
+              <Box display="flex" justifyContent="space-between" mb={1}>
+                <Chip label={game.status.toUpperCase()} size="small" color={game.status === 'live' ? 'error' : game.status === 'final' ? 'default' : 'primary'} />
+                <Typography variant="caption">{game.venue}</Typography>
+              </Box>
+              <Box display="flex" justifyContent="space-between" alignItems="center" my={2}>
+                <Typography variant="h6" fontWeight="bold">{game.away_team}</Typography>
+                <Typography variant="h6">{game.away_score ?? '-'}</Typography>
+              </Box>
+              <Box display="flex" justifyContent="space-between" alignItems="center" my={2}>
+                <Typography variant="h6" fontWeight="bold">{game.home_team}</Typography>
+                <Typography variant="h6">{game.home_score ?? '-'}</Typography>
+              </Box>
+              {game.inning && <Typography variant="body2" color="text.secondary" align="center">Inning: {game.inning}</Typography>}
+              {game.tv && <Typography variant="caption" display="block" align="center">TV: {game.tv}</Typography>}
+            </CardContent></Card>
           </Grid>
-          <Grid item xs={12} md={6}>
-            <Skeleton variant="rounded" height={300} />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Skeleton variant="rounded" height={300} />
-          </Grid>
-        </Grid>
-      </Container>
+        ))}
+      </Grid>
     );
-  }
-
-  // Even if error occurred, we have mock data (error is only for network/fetch issues)
-  if (error) {
+  };
+  
+  const renderStandingsTab = () => {
+    if (!hasAnalyticsAccess) return renderAnalyticsLock();
+    if (standingsQuery.isLoading) return <CircularProgress />;
+    if (standingsQuery.isError) return <Alert severity="error">Failed to load standings.</Alert>;
+    const standings = standingsQuery.data || [];
+    if (!standings.length) return <Alert severity="info">No standings data.</Alert>;
     return (
-      <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={() => refetch()}>
-              Retry
-            </Button>
-          }
-        >
-          Error loading Spring Training data: {(error as Error)?.message || 'Unknown error'}
-        </Alert>
-      </Container>
+      <TableContainer component={Paper}>
+        <Table size="small">
+          <TableHead><TableRow><TableCell>Team</TableCell><TableCell align="right">W</TableCell><TableCell align="right">L</TableCell><TableCell align="right">PCT</TableCell><TableCell align="right">GB</TableCell><TableCell>Home</TableCell><TableCell>Away</TableCell><TableCell>Streak</TableCell><TableCell>Last 10</TableCell></TableRow></TableHead>
+          <TableBody>
+            {standings.map((team) => (
+              <TableRow key={team.team}>
+                <TableCell>{team.team}</TableCell>
+                <TableCell align="right">{team.wins}</TableCell>
+                <TableCell align="right">{team.losses}</TableCell>
+                <TableCell align="right">{team.pct?.toFixed(3) ?? '---'}</TableCell>
+                <TableCell align="right">{team.games_back}</TableCell>
+                <TableCell>{team.home_record}</TableCell><TableCell>{team.away_record}</TableCell>
+                <TableCell>{team.streak}</TableCell><TableCell>{team.last_10}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
     );
-  }
-
-  // 🔵 Starter Content - Everyone sees games tab
-  const renderGamesTab = () => (
-    <>
-      <Typography variant="h6" gutterBottom>
-        Spring Training Games
-      </Typography>
-      {filteredGames.length === 0 ? (
-        <Alert severity="info">No games found for the selected filter.</Alert>
-      ) : (
-        <Grid container spacing={3}>
-          {filteredGames.map((game) => (
-            <Grid item xs={12} md={6} key={game.id}>
-              <Card variant="outlined">
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <GameStatusChip status={game.status} />
-                    <LeagueChip league={game.league} />
-                  </Box>
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1 }}>
-                      <Typography variant="h6" fontWeight="bold">
-                        {game.away_team}
-                      </Typography>
-                    </Box>
-                    <Box textAlign="center" sx={{ px: 2 }}>
-                      {game.status === 'scheduled' ? (
-                        <Typography variant="body1">@</Typography>
-                      ) : (
-                        <Typography variant="h5" fontWeight="bold">
-                          {game.away_score ?? 0} - {game.home_score ?? 0}
-                        </Typography>
-                      )}
-                    </Box>
-                    <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1, justifyContent: 'flex-end' }}>
-                      <Typography variant="h6" fontWeight="bold">
-                        {game.home_team}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  <Divider sx={{ my: 2 }} />
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <LocationIcon fontSize="small" color="action" />
-                      <Typography variant="caption" color="text.secondary">
-                        {game.venue}, {game.location}
-                      </Typography>
-                    </Box>
-                    {game.weather && (
-                      <Box display="flex" alignItems="center" gap={1}>
-                        {game.weather.temperature > 70 ? <SunnyIcon fontSize="small" /> : <ColdIcon fontSize="small" />}
-                        <Typography variant="caption" color="text.secondary">
-                          {game.weather.temperature}°F • {game.weather.condition}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                  <Box display="flex" justifyContent="space-between" mt={1}>
-                    <Typography variant="caption" color="text.secondary">
-                      {game.date ? new Date(game.date).toLocaleString() : 'TBD'}
-                    </Typography>
-                    {game.broadcast && (
-                      <Chip label={game.broadcast} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-                    )}
-                  </Box>
-                </CardContent>
+  };
+  
+  const renderHittingTab = () => {
+    if (!hasAnalyticsAccess) return renderAnalyticsLock();
+    if (hittingQuery.isLoading) return <CircularProgress />;
+    if (hittingQuery.isError) return <Alert severity="error">Failed to load hitting leaders.</Alert>;
+    const hitters = hittingQuery.data || [];
+    if (!hitters.length) return <Alert severity="info">No hitting data.</Alert>;
+    return (
+      <TableContainer component={Paper}>
+        <Table size="small">
+          <TableHead><TableRow><TableCell>Player</TableCell><TableCell>Team</TableCell><TableCell>Pos</TableCell><TableCell align="right">AVG</TableCell><TableCell align="right">HR</TableCell><TableCell align="right">RBI</TableCell><TableCell align="right">OPS</TableCell></TableRow></TableHead>
+          <TableBody>
+            {hitters.map((p, idx) => (
+              <TableRow key={idx}><TableCell>{p.name}</TableCell><TableCell>{p.team}</TableCell><TableCell>{p.position}</TableCell>
+              <TableCell align="right">{p.avg?.toFixed(3) ?? '---'}</TableCell><TableCell align="right">{p.hr ?? '---'}</TableCell>
+              <TableCell align="right">{p.rbi ?? '---'}</TableCell><TableCell align="right">{p.ops?.toFixed(3) ?? '---'}</TableCell></TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
+  
+  const renderPitchingTab = () => {
+    if (!hasAnalyticsAccess) return renderAnalyticsLock();
+    if (pitchingQuery.isLoading) return <CircularProgress />;
+    if (pitchingQuery.isError) return <Alert severity="error">Failed to load pitching leaders.</Alert>;
+    const pitchers = pitchingQuery.data || [];
+    if (!pitchers.length) return <Alert severity="info">No pitching data.</Alert>;
+    return (
+      <TableContainer component={Paper}>
+        <Table size="small">
+          <TableHead><TableRow><TableCell>Player</TableCell><TableCell>Team</TableCell><TableCell align="right">ERA</TableCell><TableCell align="right">WHIP</TableCell><TableCell align="right">SO</TableCell><TableCell align="right">IP</TableCell></TableRow></TableHead>
+          <TableBody>
+            {pitchers.map((p, idx) => (
+              <TableRow key={idx}><TableCell>{p.name}</TableCell><TableCell>{p.team}</TableCell>
+              <TableCell align="right">{p.era?.toFixed(2) ?? '---'}</TableCell><TableCell align="right">{p.whip?.toFixed(2) ?? '---'}</TableCell>
+              <TableCell align="right">{p.so ?? '---'}</TableCell><TableCell align="right">{p.ip?.toFixed(1) ?? '---'}</TableCell></TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
+  
+  const renderPropsTab = () => {
+    if (!hasAnalyticsAccess) return renderAnalyticsLock();
+    if (propsQuery.isLoading) return <CircularProgress />;
+    if (propsQuery.isError) return <Alert severity="error">Failed to load props.</Alert>;
+    const props = propsQuery.data || [];
+    if (!props.length) return <Alert severity="info">No props available (showing mock data) – check Python API.</Alert>;
+    return (
+      <Grid container spacing={2}>
+        {props.map((prop) => (
+          <Grid item xs={12} sm={6} md={4} key={prop.id}>
+            <Card><CardContent>
+              <Typography variant="h6">{prop.player}</Typography>
+              <Typography variant="body2" color="text.secondary">{prop.team} • {prop.stat}</Typography>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mt={1}>
+                <Chip label={`Line: ${prop.line}`} size="small" />
+                <Typography variant="body2" fontWeight="bold">
+                  Multiplier: {prop.odds ? (prop.odds > 0 ? `+${prop.odds}` : prop.odds) : 'N/A'}
+                </Typography>
+              </Box>
+              {prop.edge !== undefined && (
+                <Box mt={1}><Chip label={`📈 Edge: ${(prop.edge * 100).toFixed(1)}%`} size="small" color={prop.edge > 0.05 ? "success" : "primary"} /></Box>
+              )}
+            </CardContent></Card>
+          </Grid>
+        ))}
+      </Grid>
+    );
+  };
+  
+  const renderSearchTab = () => (
+    <Box>
+      <TextField fullWidth placeholder="Search MLB players..." value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); searchMutation.mutate(e.target.value); }} sx={{ mb: 3 }} />
+      {searchMutation.isLoading && <CircularProgress />}
+      {searchMutation.data && (
+        <Grid container spacing={2}>
+          {searchMutation.data.map((player) => (
+            <Grid item xs={12} sm={6} md={4} key={player.id}>
+              <Card sx={{ cursor: 'pointer' }} onClick={() => setSelectedPlayer(player)}>
+                <CardContent><Typography variant="h6">{player.name}</Typography><Typography variant="body2" color="text.secondary">{player.team} - {player.position}</Typography></CardContent>
               </Card>
             </Grid>
           ))}
         </Grid>
       )}
-    </>
+      <PlayerDetailModal player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />
+    </Box>
   );
-
-  // 🟣 Analytics Content - Only Analytics+ users see standings
-  const renderStandingsTab = () => (
-    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Upgrade to Analytics Package to access Spring Training standings.
-      </Alert>
-    }>
-      <>
-        <Typography variant="h6" gutterBottom>
-          {leagueFilter === 'all' ? 'Spring Training Standings' : `${leagueFilter} League Standings`}
-        </Typography>
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Team</TableCell>
-                <TableCell align="center">League</TableCell>
-                <TableCell align="center">W</TableCell>
-                <TableCell align="center">L</TableCell>
-                <TableCell align="center">T</TableCell>
-                <TableCell align="center">PCT</TableCell>
-                <TableCell align="center">GB</TableCell>
-                <TableCell align="center">HOME</TableCell>
-                <TableCell align="center">AWAY</TableCell>
-                <TableCell align="center">STRK</TableCell>
-                <TableCell align="center">L10</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredStandings.map((team) => (
-                <TableRow key={team.id} hover>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Typography variant="body2" fontWeight="medium">
-                        {team.team}
-                      </Typography>
-                      <Chip
-                        label={team.abbreviation}
-                        size="small"
-                        variant="outlined"
-                        sx={{ height: 20, fontSize: '0.7rem' }}
-                      />
-                    </Box>
-                  </TableCell>
-                  <TableCell align="center">
-                    <LeagueChip league={team.league} />
-                  </TableCell>
-                  <TableCell align="center">{team.wins ?? 0}</TableCell>
-                  <TableCell align="center">{team.losses ?? 0}</TableCell>
-                  <TableCell align="center">{team.ties ?? 0}</TableCell>
-                  <TableCell align="center">
-                    <WinPercentageBar percentage={team.win_percentage} />
-                  </TableCell>
-                  <TableCell align="center">{team.games_back?.toFixed(1) ?? '—'}</TableCell>
-                  <TableCell align="center">{team.home_record ?? '—'}</TableCell>
-                  <TableCell align="center">{team.away_record ?? '—'}</TableCell>
-                  <TableCell align="center">
-                    <StreakChip streak={team.streak} />
-                  </TableCell>
-                  <TableCell align="center">{team.last_10 ?? '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </>
-    </PlanGuard>
-  );
-
-  // 🟣 Analytics Content - Only Analytics+ users see hitting leaders
-  const renderHittingTab = () => (
-    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Upgrade to Analytics Package to access hitting statistics.
-      </Alert>
-    }>
-      <>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-          <Typography variant="h6">Spring Training Hitting Leaders</Typography>
-          <FormControl sx={{ minWidth: 150 }} size="small">
-            <InputLabel id="position-filter-label">Position</InputLabel>
-            <Select
-              labelId="position-filter-label"
-              value={positionFilter}
-              label="Position"
-              onChange={handlePositionChange}
-            >
-              <MenuItem value="all">All Positions</MenuItem>
-              <MenuItem value="C">Catcher</MenuItem>
-              <MenuItem value="1B">First Base</MenuItem>
-              <MenuItem value="2B">Second Base</MenuItem>
-              <MenuItem value="3B">Third Base</MenuItem>
-              <MenuItem value="SS">Shortstop</MenuItem>
-              <MenuItem value="OF">Outfield</MenuItem>
-              <MenuItem value="DH">DH</MenuItem>
-            </Select>
-          </FormControl>
-        </Box>
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Player</TableCell>
-                <TableCell align="center">Team</TableCell>
-                <TableCell align="center">Pos</TableCell>
-                <TableCell align="center">AVG</TableCell>
-                <TableCell align="center">HR</TableCell>
-                <TableCell align="center">RBI</TableCell>
-                <TableCell align="center">OPS</TableCell>
-                <TableCell align="center">Prospect</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredHitters.map((player) => (
-                <TableRow key={player.id} hover>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
-                      {player.name}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">{player.team ?? '—'}</TableCell>
-                  <TableCell align="center">{player.position ?? '—'}</TableCell>
-                  <TableCell align="center">{player.avg?.toFixed(3) ?? '.000'}</TableCell>
-                  <TableCell align="center">{player.hr ?? 0}</TableCell>
-                  <TableCell align="center">{player.rbi ?? 0}</TableCell>
-                  <TableCell align="center">{player.ops?.toFixed(3) ?? '.000'}</TableCell>
-                  <TableCell align="center">
-                    {player.is_prospect && <ProspectChip />}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </>
-    </PlanGuard>
-  );
-
-  // 🟣 Analytics Content - Only Analytics+ users see pitching leaders
-  const renderPitchingTab = () => (
-    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Upgrade to Analytics Package to access pitching statistics.
-      </Alert>
-    }>
-      <>
-        <Typography variant="h6" gutterBottom>
-          Spring Training Pitching Leaders
-        </Typography>
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Player</TableCell>
-                <TableCell align="center">Team</TableCell>
-                <TableCell align="center">IP</TableCell>
-                <TableCell align="center">ERA</TableCell>
-                <TableCell align="center">WHIP</TableCell>
-                <TableCell align="center">SO</TableCell>
-                <TableCell align="center">Prospect</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {(springData?.pitchers ?? []).map((player) => (
-                <TableRow key={player.id} hover>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
-                      {player.name}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">{player.team ?? '—'}</TableCell>
-                  <TableCell align="center">{player.ip?.toFixed(1) ?? '0.0'}</TableCell>
-                  <TableCell align="center">{player.era?.toFixed(2) ?? '0.00'}</TableCell>
-                  <TableCell align="center">{player.whip?.toFixed(2) ?? '0.00'}</TableCell>
-                  <TableCell align="center">{player.so ?? 0}</TableCell>
-                  <TableCell align="center">
-                    {player.is_prospect && <ProspectChip />}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </>
-    </PlanGuard>
-  );
-
-  // 🟠 Generator Content - Only Generator users see top prospects
-  const renderProspectsTab = () => (
-    <PlanGuard requiredPlan="generator" currentPlan={userPlan} fallback={
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Upgrade to Generators Package to access top prospect rankings and detailed scouting reports.
-      </Alert>
-    }>
-      <>
-        <Typography variant="h6" gutterBottom>
-          Top Spring Training Prospects
-        </Typography>
-        <Grid container spacing={3}>
-          {(springData?.prospects ?? []).map((prospect) => (
-            <Grid item xs={12} md={6} lg={4} key={prospect.id}>
-              <Card variant="outlined">
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Typography variant="h6">{prospect.name}</Typography>
-                    <ProspectChip />
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    {prospect.team ?? '—'} • {prospect.position ?? '—'}
-                  </Typography>
-                  <Divider sx={{ my: 1 }} />
-                  {prospect.avg != null ? (
-                    <Box display="flex" justifyContent="space-between" mt={1}>
-                      <Typography variant="body2">AVG</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {prospect.avg.toFixed(3)}
-                      </Typography>
-                    </Box>
-                  ) : prospect.era != null ? (
-                    <Box display="flex" justifyContent="space-between" mt={1}>
-                      <Typography variant="body2">ERA</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {prospect.era.toFixed(2)}
-                      </Typography>
-                    </Box>
-                  ) : null}
-                  {prospect.hr != null && (
-                    <Box display="flex" justifyContent="space-between">
-                      <Typography variant="body2">HR</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {prospect.hr}
-                      </Typography>
-                    </Box>
-                  )}
-                  {prospect.rbi != null && (
-                    <Box display="flex" justifyContent="space-between">
-                      <Typography variant="body2">RBI</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {prospect.rbi}
-                      </Typography>
-                    </Box>
-                  )}
-                  {prospect.so != null && (
-                    <Box display="flex" justifyContent="space-between">
-                      <Typography variant="body2">SO</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {prospect.so}
-                      </Typography>
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      </>
-    </PlanGuard>
-  );
-
-  // 🟠 Generator Content - Only Generator users see credits
-  const renderGeneratorCredits = () => {
+  
+  const PlayerDetailModal = ({ player, onClose }: { player: MLBPlayer | null; onClose: () => void }) => {
+    if (!player) return null;
     return (
-      <PlanGuard requiredPlan="generator" currentPlan={userPlan}>
-        <Box sx={{ mb: 3 }}>
-          <GeneratorCredits />
-        </Box>
-      </PlanGuard>
+      <Dialog open={!!player} onClose={onClose} maxWidth="sm" fullWidth>
+        <DialogTitle>{player.name} ({player.team})</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" gutterBottom>Position: {player.position}</Typography>
+          <Typography variant="subtitle1">Stats</Typography>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableBody>
+                {player.stats?.avg && <TableRow><TableCell>AVG</TableCell><TableCell>{player.stats.avg.toFixed(3)}</TableCell></TableRow>}
+                {player.stats?.home_runs && <TableRow><TableCell>HR</TableCell><TableCell>{player.stats.home_runs}</TableCell></TableRow>}
+                {player.stats?.rbi && <TableRow><TableCell>RBI</TableCell><TableCell>{player.stats.rbi}</TableCell></TableRow>}
+                {player.stats?.ops && <TableRow><TableCell>OPS</TableCell><TableCell>{player.stats.ops.toFixed(3)}</TableCell></TableRow>}
+                {player.stats?.era && <TableRow><TableCell>ERA</TableCell><TableCell>{player.stats.era.toFixed(2)}</TableCell></TableRow>}
+                {player.stats?.whip && <TableRow><TableCell>WHIP</TableCell><TableCell>{player.stats.whip.toFixed(2)}</TableCell></TableRow>}
+                {player.stats?.strikeouts && <TableRow><TableCell>SO</TableCell><TableCell>{player.stats.strikeouts}</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions><Button onClick={onClose}>Close</Button></DialogActions>
+      </Dialog>
     );
   };
-
-  // springData is guaranteed to exist because fetch returns mock data on failure,
-  // but we add optional chaining everywhere to be extra safe.
+  
+  const renderUpgradeModal = () => (
+    <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>Upgrade Your Plan</DialogTitle>
+      <DialogContent>
+        <Typography gutterBottom>Choose a plan to unlock MLB Props and advanced analytics:</Typography>
+        <FormControl fullWidth margin="normal"><InputLabel>Plan</InputLabel><Select value={selectedPlan} label="Plan" onChange={(e) => setSelectedPlan(e.target.value)}><MenuItem value="analytics">Analytics ($9.99/mo)</MenuItem><MenuItem value="generator">Generator ($19.99/mo)</MenuItem></Select></FormControl>
+        <FormControl fullWidth margin="normal"><InputLabel>Billing</InputLabel><Select value={selectedInterval} label="Billing" onChange={(e) => setSelectedInterval(e.target.value)}><MenuItem value="month">Monthly</MenuItem><MenuItem value="year">Yearly (2 months free)</MenuItem></Select></FormControl>
+      </DialogContent>
+      <DialogActions><Button onClick={() => setShowUpgradeModal(false)}>Cancel</Button><Button variant="contained" startIcon={<CreditCardIcon />} onClick={handleUpgrade}>Upgrade Now</Button></DialogActions>
+    </Dialog>
+  );
+  
   return (
-    <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
-      {/* Plan indicator chip for testing */}
-      <Box display="flex" justifyContent="flex-end" mb={2}>
-        <Chip 
-          label={`Current Plan: ${userPlan.toUpperCase()}`} 
-          color={userPlan === 'generator' ? 'warning' : userPlan === 'analytics' ? 'secondary' : 'primary'}
-          onDelete={() => {
-            // Cycle through plans for testing
-            if (userPlan === 'starter') setUserPlan('analytics');
-            else if (userPlan === 'analytics') setUserPlan('generator');
-            else setUserPlan('starter');
-          }}
-          deleteIcon={<Box component="span">↻</Box>}
-        />
-      </Box>
-
-      {/* Header */}
+    <Container maxWidth="xl" sx={{ py: 4 }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Box display="flex" alignItems="center" gap={2}>
-          <BaseballIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-          <Typography variant="h4" fontWeight="bold">
-            MLB Spring Training
-          </Typography>
-          <Chip
-            icon={<CalendarIcon />}
-            label={`${springData?.date_range?.start ?? 'N/A'} – ${springData?.date_range?.end ?? 'N/A'}`}
-            variant="outlined"
-          />
-        </Box>
+        <Box display="flex" alignItems="center" gap={2}><BaseballIcon sx={{ fontSize: 40, color: 'primary.main' }} /><Typography variant="h4" fontWeight="bold">MLB Spring Training & Analytics</Typography><Chip icon={<CheckCircleIcon />} label={`${profile?.plan?.charAt(0).toUpperCase() + profile?.plan?.slice(1) || 'Free'} Plan`} color={profile?.plan === 'generator' ? 'warning' : profile?.plan === 'analytics' ? 'secondary' : 'default'} size="small" /></Box>
         <Box display="flex" gap={2}>
-          <FormControl sx={{ minWidth: 100 }} size="small">
-            <InputLabel id="year-select-label">Year</InputLabel>
-            <Select
-              labelId="year-select-label"
-              value={String(selectedYear)}
-              label="Year"
-              onChange={handleYearChange}
-            >
-              {yearOptions.map((year) => (
-                <MenuItem key={year} value={year}>
-                  {year}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Tooltip title="Refresh">
-            <IconButton onClick={() => refetch()} color="primary">
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
+          {tabValue === 0 && <TextField type="date" size="small" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} sx={{ width: 150 }} />}
+          {(tabValue === 1 || tabValue === 4) && (<FormControl size="small" sx={{ minWidth: 100 }}><InputLabel>Season</InputLabel><Select value={selectedSeason} label="Season" onChange={(e) => setSelectedSeason(Number(e.target.value))}><MenuItem value={new Date().getFullYear()}>{new Date().getFullYear()}</MenuItem><MenuItem value={new Date().getFullYear() - 1}>{new Date().getFullYear() - 1}</MenuItem></Select></FormControl>)}
+          <IconButton onClick={() => { if (tabValue === 0) gamesQuery.refetch(); else if (tabValue === 1) standingsQuery.refetch(); else if (tabValue === 2) hittingQuery.refetch(); else if (tabValue === 3) pitchingQuery.refetch(); else if (tabValue === 4) propsQuery.refetch(); }}><RefreshIcon /></IconButton>
         </Box>
       </Box>
-
-      {/* Data source notice */}
-      {springData && !springData.is_real_data && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          Displaying simulated Spring Training data. Live data will appear when available.
-        </Alert>
-      )}
-
-      {/* 🟠 Generator Content - Show credits at the top for Generator users */}
-      {renderGeneratorCredits()}
-
-      {/* League filter */}
-      <Box display="flex" justifyContent="flex-end" mb={2}>
-        <FormControl sx={{ minWidth: 150 }} size="small">
-          <InputLabel id="league-filter-label">League</InputLabel>
-          <Select
-            labelId="league-filter-label"
-            value={leagueFilter}
-            label="League"
-            onChange={handleLeagueChange}
-          >
-            <MenuItem value="all">All Leagues</MenuItem>
-            <MenuItem value="grapefruit">Grapefruit League</MenuItem>
-            <MenuItem value="cactus">Cactus League</MenuItem>
-          </Select>
-        </FormControl>
-      </Box>
-
-      {/* Tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange}>
-          <Tab label="Games" />
-          <Tab label="Standings" />
-          <Tab label="Hitting Leaders" />
-          <Tab label="Pitching Leaders" />
-          <Tab label="Top Prospects" />
-        </Tabs>
-      </Box>
-
-      {/* Tab Content with Plan Guards */}
+      <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)} sx={{ mb: 3 }}><Tab label="Games" /><Tab label="Standings" /><Tab label="Hitting" /><Tab label="Pitching" /><Tab label="Props" /><Tab label="Search" /></Tabs>
       {tabValue === 0 && renderGamesTab()}
       {tabValue === 1 && renderStandingsTab()}
       {tabValue === 2 && renderHittingTab()}
       {tabValue === 3 && renderPitchingTab()}
-      {tabValue === 4 && renderProspectsTab()}
+      {tabValue === 4 && renderPropsTab()}
+      {tabValue === 5 && renderSearchTab()}
+      {renderUpgradeModal()}
     </Container>
   );
 };
 
-// ----------------------------------------------------------------------
-// Outer Wrapper with Protected Route
-// ----------------------------------------------------------------------
-const MLBSpringTraining: React.FC = () => {
-  return (
-    <ProtectedRoute screenName="MLBSpringTraining">
-      <MLBSpringTrainingContent />
-    </ProtectedRoute>
-  );
-};
+const MLBSpringTraining: React.FC = () => (
+  <ProtectedRoute screenName="MLBSpringTraining">
+    <MLBSpringTrainingContent />
+  </ProtectedRoute>
+);
 
 export default MLBSpringTraining;

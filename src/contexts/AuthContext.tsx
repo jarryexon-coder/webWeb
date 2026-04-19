@@ -1,4 +1,5 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+// src/contexts/AuthContext.tsx
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { auth } from '../firebase';
 import {
   signInWithEmailAndPassword,
@@ -6,24 +7,31 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   updateProfile,
-  User as FirebaseUser
 } from 'firebase/auth';
+import { getPlanFeatures, PlanFeatures, PlanType, hasAccessToFeature } from '../utils/subscription';
 
-// Rich user profile interface from backend
 interface UserProfile {
-  displayName: string;
+  id: string;
   email: string;
-  memberSince: string;
-  plan: string;
+  displayName: string;
+  plan: PlanType;
+  subscription_status: string;
+  subscription_id?: string;
   credits: number;
+  current_period_end?: string;
+  memberSince: string;
   winRate: number;
   lifetimeSpent: number;
+  isInfluencerEligible?: boolean;   // NEW
 }
 
 interface AuthContextType {
   user: UserProfile | null;
   token: string | null;
   loading: boolean;
+  planFeatures: PlanFeatures;
+  hasFeature: (requiredPlan: PlanType) => boolean;
+  isInfluencer: boolean;
   login: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -36,25 +44,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [planFeatures, setPlanFeatures] = useState<PlanFeatures>(getPlanFeatures('free'));
 
-  // Fetch full user profile from backend using the current token
+  const isInfluencer = user?.plan === 'influencer';
+
+  const hasFeature = useCallback((requiredPlan: PlanType): boolean => {
+    if (isInfluencer) return true;
+    const userPlan = user?.plan || 'free';
+    return hasAccessToFeature(userPlan, requiredPlan);
+  }, [user, isInfluencer]);
+
   const fetchProfile = async (idToken: string) => {
-    console.log('🔄 fetchProfile called with token:', idToken.substring(0, 20) + '...');
     if (!idToken) return null;
     try {
       const url = `${import.meta.env.VITE_API_BASE_PYTHON}/api/user/profile`;
-      console.log('🌐 Fetching profile from:', url);
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${idToken}` }
       });
-      console.log('📡 Response status:', res.status);
       if (res.ok) {
         const data = await res.json();
-        console.log('✅ Profile data:', data);
         setUser(data);
         return data;
       } else {
-        console.error('Profile fetch failed:', res.status, await res.text());
+        console.error('Profile fetch failed:', res.status);
         return null;
       }
     } catch (error) {
@@ -63,19 +75,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Main auth state listener
+  useEffect(() => {
+    if (user?.plan) {
+      setPlanFeatures(getPlanFeatures(user.plan));
+    }
+  }, [user]);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('🔥 onAuthStateChanged, user:', firebaseUser?.email);
       if (firebaseUser) {
         const idToken = await firebaseUser.getIdToken(true);
-        console.log('✅ Token obtained:', idToken.substring(0, 20) + '...');
         setToken(idToken);
         localStorage.setItem('authToken', idToken);
         await fetchProfile(idToken);
         setLoading(false);
       } else {
-        console.log('❌ No user, clearing state');
         setToken(null);
         setUser(null);
         localStorage.removeItem('authToken');
@@ -85,15 +99,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Test listener to confirm Firebase is initialized (runs once on mount)
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log('🔥 onAuthStateChanged test:', user?.email);
-    });
-    return unsubscribe;
-  }, []);
-
-  // Fetch profile whenever token changes (ensures profile is up‑to‑date)
   useEffect(() => {
     if (token) {
       fetchProfile(token);
@@ -104,11 +109,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const firebaseUser = userCredential.user;
-      const idToken = await firebaseUser.getIdToken(true);
+      const idToken = await userCredential.user.getIdToken(true);
       setToken(idToken);
       localStorage.setItem('authToken', idToken);
-      // Profile will be fetched by the onAuthStateChanged listener
     } catch (error) {
       console.error('Login failed:', error);
       setLoading(false);
@@ -116,15 +119,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Sign up function integrated from file 1
   const signUp = async (email: string, password: string, displayName: string) => {
     setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const firebaseUser = userCredential.user;
-      await updateProfile(firebaseUser, { displayName });
-      // The onAuthStateChanged listener will automatically set the token and fetch profile
-      // No need to manually set token here, the listener will handle it
+      await updateProfile(userCredential.user, { displayName });
     } catch (error) {
       console.error('Sign up failed:', error);
       setLoading(false);
@@ -134,7 +133,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     await signOut(auth);
-    // State will be cleared by onAuthStateChanged
   };
 
   const refreshProfile = async () => {
@@ -143,7 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, signUp, logout, refreshProfile }}>
+    <AuthContext.Provider value={{ user, token, loading, planFeatures, hasFeature, isInfluencer, login, signUp, logout, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

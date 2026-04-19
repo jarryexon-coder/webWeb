@@ -1,4 +1,4 @@
-// pages/WorldCup2026Screen.tsx
+// pages/WorldCup2026Screen.tsx - UPDATED WITH PLAN-BASED ACCESS CONTROL
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -10,6 +10,8 @@ import {
   CardHeader,
   Avatar,
   Chip,
+  AlertTitle,
+  Container,
   Button,
   Tab,
   Tabs,
@@ -26,7 +28,16 @@ import {
   TableHead,
   TableRow,
   useTheme,
-  alpha
+  alpha,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  SelectChangeEvent,
 } from '@mui/material';
 import {
   EmojiEvents,
@@ -47,11 +58,22 @@ import {
   Map,
   Analytics,
   MenuBook,
-  MilitaryTech
+  MilitaryTech,
+  Lock as LockIcon,
+  CheckCircle as CheckCircleIcon,
+  CreditCard as CreditCardIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
+import { useCheckout } from '../utils/checkout';
 import ProtectedRoute from '../components/ProtectedRoute';
+
+// =============================================
+// CONSTANTS
+// =============================================
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://python-api-fresh-production.up.railway.app';
 
 // =============================================
 // TYPES
@@ -271,8 +293,6 @@ const GROUP_STANDINGS: WorldCupGroup[] = [
 // API FUNCTIONS (Connects to your Flask backend)
 // =============================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://python-api-fresh-production.up.railway.app';
-
 const fetchWorldCupOdds = async () => {
   try {
     const response = await axios.get(`${API_BASE_URL}/api/odds/soccer_world_cup`);
@@ -307,20 +327,37 @@ const fetchWorldCupNews = async () => {
 
 const WorldCup2026Content: React.FC = () => {
   const theme = useTheme();
+  const { user, getIdToken, profile, planFeatures } = useAuth();
+  const { handleSubscriptionCheckout } = useCheckout();
+  
+  // Plan-based access control - World Cup is part of Starter package (hasPlayerStats)
+  const hasWorldCupAccess = planFeatures?.hasPlayerStats || false;
+  
+  // State for upgrade modal and plan selection
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>('starter');
+  const [selectedInterval, setSelectedInterval] = useState<string>('month');
+  
   const [tabValue, setTabValue] = useState(0);
   const [selectedGroup, setSelectedGroup] = useState('A');
 
-  // Fetch data from your backend
+  const handleUpgrade = () => {
+    handleSubscriptionCheckout(selectedPlan, selectedInterval);
+  };
+
+  // Fetch data from your backend (only if hasWorldCupAccess is true)
   const { data: oddsData, isLoading: oddsLoading } = useQuery({
     queryKey: ['worldCupOdds'],
     queryFn: fetchWorldCupOdds,
-    staleTime: 5 * 60 * 1000
+    staleTime: 5 * 60 * 1000,
+    enabled: hasWorldCupAccess,
   });
 
   const { data: newsData, isLoading: newsLoading } = useQuery({
     queryKey: ['worldCupNews'],
     queryFn: fetchWorldCupNews,
-    staleTime: 10 * 60 * 1000
+    staleTime: 10 * 60 * 1000,
+    enabled: hasWorldCupAccess,
   });
 
   // Filter teams by selected group
@@ -339,6 +376,174 @@ const WorldCup2026Content: React.FC = () => {
   const displayedMatches = getFilteredMatches();
   const currentGroup = GROUP_STANDINGS.find(g => g.name === selectedGroup);
 
+  // No access state - show dynamic upgrade prompt based on current plan
+  if (!hasWorldCupAccess) {
+    return (
+      <Box sx={{ 
+        minHeight: '100vh', 
+        bgcolor: theme.palette.mode === 'dark' ? '#0a0f1c' : '#f8fafc',
+        pb: 8
+      }}>
+        <Box sx={{
+          background: theme.palette.mode === 'dark'
+            ? 'linear-gradient(135deg, #1a1f2e 0%, #0d1425 100%)'
+            : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+          pt: { xs: 4, md: 6 },
+          pb: { xs: 6, md: 8 },
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <Box sx={{ maxWidth: 1200, mx: 'auto', px: 3, position: 'relative' }}>
+            <Box display="flex" alignItems="center" gap={2} mb={3}>
+              <EmojiEvents sx={{ fontSize: 40 }} />
+              <Typography variant="h4" fontWeight="bold">
+                FIFA World Cup 2026™
+              </Typography>
+              <Chip
+                icon={<LockIcon />}
+                label="Requires Access"
+                color="warning"
+                size="small"
+                sx={{ bgcolor: 'rgba(0,0,0,0.2)', color: 'white' }}
+              />
+            </Box>
+          </Box>
+        </Box>
+
+        <Container maxWidth="lg" sx={{ py: 4 }}>
+          <Card sx={{ textAlign: 'center', py: 8, px: 4 }}>
+            <LockIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 3 }} />
+            <Typography variant="h5" gutterBottom>
+              {profile?.plan === 'free' 
+                ? 'Upgrade to Access World Cup 2026 Coverage'
+                : 'Your current plan does not include World Cup data'}
+            </Typography>
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 500, mx: 'auto' }}>
+              {profile?.plan === 'free'
+                ? 'The Starter plan includes complete tournament schedules, group standings, match predictions, and analytics. Upgrade now to get full access.'
+                : 'World Cup data is included in Starter, Analytics, and Generator plans. Please upgrade your plan.'}
+            </Typography>
+            
+            {/* Dynamic plan selection */}
+            <Box sx={{ maxWidth: 400, mx: 'auto', mb: 4 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Plan</InputLabel>
+                    <Select
+                      value={selectedPlan}
+                      label="Plan"
+                      onChange={(e: SelectChangeEvent) => setSelectedPlan(e.target.value)}
+                    >
+                      <MenuItem value="starter">Starter - $5.99/month</MenuItem>
+                      <MenuItem value="analytics">Analytics - $19.99/month</MenuItem>
+                      <MenuItem value="generator">Generator - $39.99/month</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Billing</InputLabel>
+                    <Select
+                      value={selectedInterval}
+                      label="Billing"
+                      onChange={(e: SelectChangeEvent) => setSelectedInterval(e.target.value)}
+                    >
+                      <MenuItem value="month">Monthly</MenuItem>
+                      <MenuItem value="year">Yearly (Save 20%)</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Box>
+            
+            <Button 
+              variant="contained" 
+              size="large"
+              startIcon={<CreditCardIcon />}
+              onClick={handleUpgrade}
+              sx={{ bgcolor: '#f59e0b', '&:hover': { bgcolor: '#d97706' } }}
+            >
+              Upgrade to {selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} ({selectedInterval}ly)
+            </Button>
+          </Card>
+
+          {/* Upgrade Modal */}
+          <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+            <DialogTitle>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <LockIcon sx={{ color: '#f59e0b' }} />
+                <Typography variant="h6">Upgrade Your Plan</Typography>
+              </Box>
+            </DialogTitle>
+            <DialogContent>
+              <Typography paragraph>
+                Get access to FIFA World Cup 2026 schedules, standings, predictions, and analytics.
+              </Typography>
+              
+              {/* Plan Selection */}
+              <Box sx={{ my: 3 }}>
+                <Typography variant="subtitle2" gutterBottom>Select Plan:</Typography>
+                <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                  <Select
+                    value={selectedPlan}
+                    onChange={(e: SelectChangeEvent) => setSelectedPlan(e.target.value)}
+                  >
+                    <MenuItem value="starter">Starter - $5.99/month</MenuItem>
+                    <MenuItem value="analytics">Analytics - $19.99/month</MenuItem>
+                    <MenuItem value="generator">Generator - $39.99/month</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={selectedInterval}
+                    onChange={(e: SelectChangeEvent) => setSelectedInterval(e.target.value)}
+                  >
+                    <MenuItem value="month">Monthly</MenuItem>
+                    <MenuItem value="year">Yearly (Save 20%)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+              
+              <Box sx={{ my: 3 }}>
+                {[
+                  'Complete match schedule and results',
+                  'Group standings and knockout bracket',
+                  'AI-powered match predictions',
+                  'Tournament multipliers and analytics',
+                  'Team statistics and player profiles',
+                  'Host city and venue information',
+                  'Live updates and news',
+                  'Golden Boot and winner predictions',
+                ].map((feature) => (
+                  <Box key={feature} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                    <Typography variant="body2">{feature}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Button
+                fullWidth
+                variant="contained"
+                size="large"
+                onClick={handleUpgrade}
+                sx={{ bgcolor: '#f59e0b', '&:hover': { bgcolor: '#d97706' } }}
+              >
+                Subscribe Now - {selectedPlan === 'starter' ? '$5.99' : selectedPlan === 'analytics' ? '$19.99' : '$39.99'}/{selectedInterval === 'month' ? 'mo' : 'yr'}
+              </Button>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
+            </DialogActions>
+          </Dialog>
+        </Container>
+      </Box>
+    );
+  }
+
+  // Access granted - show full content
   return (
     <Box sx={{ 
       minHeight: '100vh', 
@@ -402,6 +607,13 @@ const WorldCup2026Content: React.FC = () => {
                   <Typography>104 Matches</Typography>
                 </Box>
               </Box>
+              <Chip
+                icon={<CheckCircleIcon />}
+                label={`${profile?.plan?.charAt(0).toUpperCase() + profile?.plan?.slice(1) || 'Active'} Plan`}
+                color="success"
+                size="small"
+                sx={{ mt: 2, bgcolor: 'rgba(255,255,255,0.2)' }}
+              />
             </Grid>
             <Grid item xs={12} md={4} sx={{ display: { xs: 'none', md: 'block' } }}>
               <Box sx={{ 
@@ -433,7 +645,7 @@ const WorldCup2026Content: React.FC = () => {
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                   <Typography color="text.secondary" variant="body2">
-                    Tournament Odds
+                    Tournament Multipliers
                   </Typography>
                   <MilitaryTech color="primary" />
                 </Box>
@@ -505,7 +717,7 @@ const WorldCup2026Content: React.FC = () => {
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                   <Typography color="text.secondary" variant="body2">
-                    USA Odds
+                    USA Multipliers
                   </Typography>
                   <TrendingUp color="primary" />
                 </Box>
@@ -543,7 +755,8 @@ const WorldCup2026Content: React.FC = () => {
           </Tabs>
         </Paper>
 
-        {/* Tab Panels */}
+        {/* Tab Panels - Same as original but with content */}
+        {/* (Rest of the component remains the same as original) */}
         <Box sx={{ mt: 3 }}>
           {/* Matches Panel */}
           {tabValue === 0 && (
@@ -844,7 +1057,7 @@ const WorldCup2026Content: React.FC = () => {
                       <Divider sx={{ my: 2 }} />
                       
                       <Typography variant="subtitle2" gutterBottom>
-                        Group Stage Odds
+                        Group Stage Multipliers
                       </Typography>
                       
                       {filteredTeams.slice(0, 4).map((team) => (
@@ -1028,7 +1241,7 @@ const WorldCup2026Content: React.FC = () => {
                         </Box>
                       </Box>
                       <Box sx={{ mt: 2 }}>
-                        <Typography variant="caption" color="text.secondary">Odds</Typography>
+                        <Typography variant="caption" color="text.secondary">Multipliers</Typography>
                         <Typography variant="body2">
                           USA +180 · Draw +220 · Mexico +160
                         </Typography>
@@ -1075,7 +1288,7 @@ const WorldCup2026Content: React.FC = () => {
                         </Box>
                       </Box>
                       <Box sx={{ mt: 2 }}>
-                        <Typography variant="caption" color="text.secondary">Odds</Typography>
+                        <Typography variant="caption" color="text.secondary">Multipliers</Typography>
                         <Typography variant="body2">
                           USA +150 · Draw +200 · Uruguay +190
                         </Typography>

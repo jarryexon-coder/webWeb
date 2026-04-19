@@ -270,7 +270,7 @@ const SportsAnalyticsSubscription: React.FC = () => {
                             </Box>
                             <Box display="flex" alignItems="center" gap={1} mb={1}>
                               <BasketballIcon color="primary" />
-                              <Typography>Edge Analysis & Value Betting</Typography>
+                              <Typography>Advantage Analysis & Value Analytics</Typography>
                             </Box>
                           </Box>
                         )}
@@ -286,7 +286,7 @@ const SportsAnalyticsSubscription: React.FC = () => {
                             </Box>
                             <Box display="flex" alignItems="center" gap={1} mb={1}>
                               <BasketballIcon color="warning" />
-                              <Typography>Parlay Builder & Generator</Typography>
+                              <Typography>Combo Builder & Generator</Typography>
                             </Box>
                             <Box display="flex" alignItems="center" gap={1} mb={1}>
                               <BasketballIcon color="warning" />
@@ -316,7 +316,7 @@ const SportsAnalyticsSubscription: React.FC = () => {
               Purchase Generator Credits
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-              Credits are used for AI-powered generator features including Secret Phrases, Daily Picks, and Parlay Builder.
+              Credits are used for AI-powered generator features including Secret Phrases, Daily Picks, and Combo Builder.
             </Typography>
 
             <Grid container spacing={3}>

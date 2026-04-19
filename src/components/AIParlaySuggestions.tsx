@@ -42,7 +42,7 @@ export const AIParlaySuggestions: React.FC<AIParlaySuggestionsProps> = ({
           <View style={styles.titleContainer}>
             <Icon name="robot" size={24} color={theme.primary} />
             <Text style={[styles.title, { color: theme.text }]}>
-              AI Parlay Suggestions
+              AI Combo Suggestions
             </Text>
           </View>
         </View>
@@ -66,7 +66,7 @@ export const AIParlaySuggestions: React.FC<AIParlaySuggestionsProps> = ({
         <View style={styles.titleContainer}>
           <Icon name="robot" size={24} color={theme.primary} />
           <Text style={[styles.title, { color: theme.text }]}>
-            AI Parlay Suggestions
+            AI Combo Suggestions
           </Text>
         </View>
         {lastUpdated && (
@@ -118,7 +118,7 @@ export const AIParlaySuggestions: React.FC<AIParlaySuggestionsProps> = ({
             <View style={styles.footer}>
               <View>
                 <Text style={[styles.oddsLabel, { color: theme.secondaryText }]}>
-                  Odds
+                  Multiplier
                 </Text>
                 <Text style={[styles.oddsValue, { color: theme.primary }]}>
                   +{suggestion.total_odds}
@@ -127,7 +127,7 @@ export const AIParlaySuggestions: React.FC<AIParlaySuggestionsProps> = ({
               {suggestion.expected_value && (
                 <View>
                   <Text style={[styles.evLabel, { color: theme.secondaryText }]}>
-                    EV
+                    Exp. Value
                   </Text>
                   <Text style={[styles.evValue, { color: '#4CAF50' }]}>
                     {suggestion.expected_value}
@@ -157,7 +157,7 @@ export const AIParlaySuggestions: React.FC<AIParlaySuggestionsProps> = ({
               onPress={() => onSelectSuggestion(suggestion.legs)}
             >
               <Text style={[styles.useButtonText, { color: theme.primary }]}>
-                Use This Parlay
+                Add to Tracker
               </Text>
             </TouchableOpacity>
           </TouchableOpacity>

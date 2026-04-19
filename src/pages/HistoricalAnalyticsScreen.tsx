@@ -32,14 +32,14 @@ import { useQuery } from '@tanstack/react-query';
 
 interface SportPerformance {
   name: string;
-  roi: number;
-  volume: number;
+  efficiency: number;     // formerly roi
+  pickCount: number;      // formerly volume
 }
 
 interface HistoricalData {
-  roi: number[];
-  hitRate: number[];
-  volume: number[];
+  efficiency: number[];   // formerly roi
+  accuracy: number[];     // formerly hitRate
+  pickCount: number[];    // formerly volume
   labels: string[];
   topSports: SportPerformance[];
 }
@@ -52,15 +52,15 @@ const fetchHistoricalData = async (period: string): Promise<HistoricalData> => {
   // Simulate API call – replace with real endpoint
   await new Promise(resolve => setTimeout(resolve, 800));
   return {
-    roi: [12.3, 15.1, 8.4, 18.2, 14.5, 21.3, 17.8],
-    hitRate: [62, 64, 58, 68, 65, 71, 67],
-    volume: [145, 152, 138, 167, 158, 182, 175],
+    efficiency: [12.3, 15.1, 8.4, 18.2, 14.5, 21.3, 17.8],
+    accuracy: [62, 64, 58, 68, 65, 71, 67],
+    pickCount: [145, 152, 138, 167, 158, 182, 175],
     labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7'],
     topSports: [
-      { name: 'NBA', roi: 18.4, volume: 342 },
-      { name: 'NFL', roi: 12.7, volume: 289 },
-      { name: 'NHL', roi: 8.3, volume: 156 },
-      { name: 'MLB', roi: 6.2, volume: 98 },
+      { name: 'NBA', efficiency: 18.4, pickCount: 342 },
+      { name: 'NFL', efficiency: 12.7, pickCount: 289 },
+      { name: 'NHL', efficiency: 8.3, pickCount: 156 },
+      { name: 'MLB', efficiency: 6.2, pickCount: 98 },
     ],
   };
 };
@@ -146,11 +146,11 @@ const HistoricalAnalyticsScreen: React.FC = () => {
     );
   }
 
-  // Derived summary stats
-  const totalProfit = 1847; // This could be computed from actual data
-  const winRate = 67.3;
-  const avgEdge = 12.4;
-  const totalBets = 847;
+  // Derived summary stats – neutral terminology
+  const totalSimulatedGain = 1847;    // formerly totalProfit
+  const forecastAccuracy = 67.3;     // formerly winRate
+  const avgAnalyticalAdvantage = 12.4; // formerly avgEdge
+  const totalPicks = 847;            // formerly totalBets
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -180,16 +180,16 @@ const HistoricalAnalyticsScreen: React.FC = () => {
         </FormControl>
       </Box>
 
-      {/* Key Stats Cards */}
+      {/* Key Stats Cards – Gambling-free metrics */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <Card variant="outlined" sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                Total Profit
+                Total Simulated Gain
               </Typography>
               <Typography variant="h4" fontWeight="bold" color="success.main">
-                +${totalProfit}
+                +${totalSimulatedGain}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Last 30 days
@@ -201,10 +201,10 @@ const HistoricalAnalyticsScreen: React.FC = () => {
           <Card variant="outlined" sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                Win Rate
+                Forecast Accuracy
               </Typography>
               <Typography variant="h4" fontWeight="bold">
-                {winRate}%
+                {forecastAccuracy}%
               </Typography>
               <Typography variant="caption" color="success.main">
                 +5.2% vs prev
@@ -216,13 +216,13 @@ const HistoricalAnalyticsScreen: React.FC = () => {
           <Card variant="outlined" sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                Avg Edge
+                Avg Analytical Advantage
               </Typography>
               <Typography variant="h4" fontWeight="bold" color="success.main">
-                +{avgEdge}%
+                +{avgAnalyticalAdvantage}%
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Per bet
+                Per pick
               </Typography>
             </CardContent>
           </Card>
@@ -231,27 +231,27 @@ const HistoricalAnalyticsScreen: React.FC = () => {
           <Card variant="outlined" sx={{ height: '100%' }}>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                Volume
+                Total Picks
               </Typography>
               <Typography variant="h4" fontWeight="bold">
-                {totalBets}
+                {totalPicks}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Total bets
+                Total selections
               </Typography>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      {/* ROI Chart */}
+      {/* Efficiency Chart (formerly ROI) */}
       <Paper sx={{ p: 3, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
-          ROI % Over Time
+          Efficiency % Over Time
         </Typography>
         <Box sx={{ height: 300, width: '100%' }}>
           <LineChart
-            dataset={historicalData.roi.map((value, index) => ({
+            dataset={historicalData.efficiency.map((value, index) => ({
               x: historicalData.labels[index],
               y: value,
             }))}
@@ -259,25 +259,25 @@ const HistoricalAnalyticsScreen: React.FC = () => {
             series={[
               {
                 dataKey: 'y',
-                label: 'ROI %',
+                label: 'Efficiency %',
                 color: theme.palette.success.main,
                 showMark: true,
               },
             ]}
-            yAxis={[{ label: 'ROI %' }]}
+            yAxis={[{ label: 'Efficiency %' }]}
             tooltip={{ trigger: 'item' }}
           />
         </Box>
       </Paper>
 
-      {/* Hit Rate Chart */}
+      {/* Selection Accuracy Chart (formerly Hit Rate) */}
       <Paper sx={{ p: 3, mb: 4 }}>
         <Typography variant="h6" gutterBottom>
-          Prop Hit Rate %
+          Selection Accuracy %
         </Typography>
         <Box sx={{ height: 300, width: '100%' }}>
           <LineChart
-            dataset={historicalData.hitRate.map((value, index) => ({
+            dataset={historicalData.accuracy.map((value, index) => ({
               x: historicalData.labels[index],
               y: value,
             }))}
@@ -285,18 +285,18 @@ const HistoricalAnalyticsScreen: React.FC = () => {
             series={[
               {
                 dataKey: 'y',
-                label: 'Hit Rate %',
+                label: 'Accuracy %',
                 color: theme.palette.primary.main,
                 showMark: true,
               },
             ]}
-            yAxis={[{ label: 'Hit Rate %' }]}
+            yAxis={[{ label: 'Accuracy %' }]}
             tooltip={{ trigger: 'item' }}
           />
         </Box>
       </Paper>
 
-      {/* Performance by Sport */}
+      {/* Performance by Sport – neutral labels */}
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
           📊 Performance by Sport
@@ -319,14 +319,14 @@ const HistoricalAnalyticsScreen: React.FC = () => {
                   <Typography variant="body1" fontWeight="medium">
                     {sport.name}
                   </Typography>
-                  <Chip label={`${sport.volume} bets`} size="small" variant="outlined" />
+                  <Chip label={`${sport.pickCount} picks`} size="small" variant="outlined" />
                 </Box>
                 <Typography
                   variant="body1"
                   fontWeight="bold"
-                  color={sport.roi > 0 ? 'success.main' : 'error.main'}
+                  color={sport.efficiency > 0 ? 'success.main' : 'error.main'}
                 >
-                  {sport.roi > 0 ? '+' : ''}{sport.roi}% ROI
+                  {sport.efficiency > 0 ? '+' : ''}{sport.efficiency}% Efficiency
                 </Typography>
               </Box>
               <Divider sx={{ my: 1 }} />

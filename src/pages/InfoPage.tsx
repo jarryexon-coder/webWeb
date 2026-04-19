@@ -58,7 +58,7 @@ const InfoPage: React.FC = () => {
     {
       icon: <TimelineIcon sx={{ fontSize: 32 }} />,
       title: 'Real-Time Analytics',
-      description: 'Live game tracking with minute-by-minute updates, player performance metrics, and dynamic odds analysis.',
+      description: 'Live game tracking with minute-by-minute updates, player performance metrics, and dynamic multiplier analysis.',
       color: '#3b82f6'
     },
     {
@@ -69,7 +69,7 @@ const InfoPage: React.FC = () => {
     },
     {
       icon: <PsychologyIcon sx={{ fontSize: 32 }} />,
-      title: 'Parlay Architect',
+      title: 'Combo Architect',
       description: 'Build optimized parlays with correlated outcomes analysis and expected value calculations.',
       color: '#f59e0b'
     }
@@ -88,12 +88,12 @@ const InfoPage: React.FC = () => {
     },
     {
       title: 'Generate Winning Picks',
-      description: 'Use our generators to get AI-powered prop predictions, parlay recommendations, and betting insights.',
+      description: 'Use our generators to get AI-powered prop predictions, combo recommendations, and analytics insights.',
       icon: <AIIcon />
     },
     {
       title: 'Track & Optimize',
-      description: 'Monitor your results, adjust strategies, and leverage advanced analytics to improve your edge.',
+      description: 'Monitor your results, adjust strategies, and leverage advanced analytics to improve your advantage.',
       icon: <TrendingIcon />
     }
   ];

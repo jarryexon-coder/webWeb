@@ -115,7 +115,7 @@ const PredictionMarketsScreen: React.FC = () => {
           Sportsbook Arbitrage Opportunities
         </Typography>
         <Alert severity="info" sx={{ mb: 2 }}>
-          Comparing Kalshi odds with traditional sportsbooks…
+          Comparing Kalshi multipliers with traditional sportsbooks…
         </Alert>
         <TableContainer>
           <Table size="small">

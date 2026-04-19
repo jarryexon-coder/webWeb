@@ -1,10 +1,11 @@
-// src/pages/SportsWireScreen.tsx
+// src/pages/SportsWireScreen.tsx – Updated with PlanGuard for analytics package
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
   Container,
   Grid,
+  AlertTitle,
   Card,
   CardContent,
   CardMedia,
@@ -66,12 +67,20 @@ import {
   Timeline,
   Sports,
   MedicalServices,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  Lock as LockIcon,
+  CheckCircle as CheckCircleIcon,
+  CreditCard as CreditCardIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
+import { useCheckout } from '../utils/checkout';
+import { PlanFeaturesDisplay } from '../components/PlanFeaturesDisplay';
+import PlanGuard from '../components/PlanGuard';
+import ProtectedRoute from '../components/ProtectedRoute';
 
-// ============= INJURY STATUS STANDARDIZATION (Matches FantasyHub) =============
+// ============= INJURY STATUS STANDARDIZATION =============
 export const INJURY_STATUS_STANDARD = {
   OUT: 'Out',
   QUESTIONABLE: 'Questionable',
@@ -84,9 +93,7 @@ export const INJURY_STATUS_STANDARD = {
 
 export const normalizeInjuryStatus = (status: string | undefined): string => {
   if (!status) return INJURY_STATUS_STANDARD.HEALTHY;
-  
   const lowerStatus = status.toLowerCase();
-  
   if (lowerStatus.includes('out')) return INJURY_STATUS_STANDARD.OUT;
   if (lowerStatus.includes('questionable')) return INJURY_STATUS_STANDARD.QUESTIONABLE;
   if (lowerStatus.includes('doubtful')) return INJURY_STATUS_STANDARD.DOUBTFUL;
@@ -94,7 +101,6 @@ export const normalizeInjuryStatus = (status: string | undefined): string => {
   if (lowerStatus.includes('probable')) return INJURY_STATUS_STANDARD.PROBABLE;
   if (lowerStatus.includes('healthy')) return INJURY_STATUS_STANDARD.HEALTHY;
   if (lowerStatus.includes('injured') || lowerStatus.includes('injury')) return INJURY_STATUS_STANDARD.INJURED;
-  
   return INJURY_STATUS_STANDARD.HEALTHY;
 };
 
@@ -127,6 +133,7 @@ export const getInjuryStatusLabel = (status: string): string => {
 // ============= CONFIGURATION =============
 const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 // ============= CONSTANTS =============
 const SPORT_COLORS: Record<string, string> = {
@@ -244,14 +251,11 @@ interface InjuryDashboard {
   }>;
 }
 
-// ============= FALLBACK MOCK DATA (Only used if API fails) =============
+// ============= FALLBACK MOCK DATA =============
 const COMPLETE_NBA_INJURIES_FALLBACK = [
-  // Atlanta Hawks
   { player: 'Jalen Johnson', team: 'ATL', status: 'Out', detail: 'Shoulder injury - season ending', expectedReturn: 'season' },
   { player: 'Larry Nance Jr.', team: 'ATL', status: 'Out', detail: 'Knee surgery', expectedReturn: '2-3 weeks' },
-  // Boston Celtics
   { player: 'Kristaps Porzingis', team: 'BOS', status: 'Day-to-day', detail: 'Illness', expectedReturn: 'day-to-day' },
-  // Add more fallback injuries as needed
 ];
 
 const NBA_BEAT_WRITERS_FALLBACK: BeatWriter[] = [
@@ -267,7 +271,6 @@ const generateInjuryNewsFallback = (): PlayerProp[] => {
     const normalizedStatus = normalizeInjuryStatus(injury.status);
     const timeAgo = Math.floor(Math.random() * 240) + 30;
     const publishedAt = new Date(now.getTime() - timeAgo * 60000).toISOString();
-    
     return {
       id: `injury-fallback-${index}-${Date.now()}`,
       playerName: injury.player,
@@ -305,13 +308,11 @@ const generateBeatWriterNewsFallback = (): PlayerProp[] => {
   const now = new Date();
   const players = ['LeBron James', 'Stephen Curry', 'Giannis Antetokounmpo', 'Kevin Durant'];
   const teams = ['LAL', 'GSW', 'MIL', 'PHX'];
-  
   return NBA_BEAT_WRITERS_FALLBACK.flatMap((writer, idx) => {
     const player = players[idx % players.length];
     const team = teams[idx % teams.length];
     const timeAgo = Math.floor(Math.random() * 180) + 10;
     const publishedAt = new Date(now.getTime() - timeAgo * 60000).toISOString();
-    
     return {
       id: `beat-fallback-${idx}-${Date.now()}`,
       playerName: player,
@@ -347,9 +348,11 @@ const generateBeatWriterNewsFallback = (): PlayerProp[] => {
 };
 
 // ============= MAIN COMPONENT =============
-const SportsWireScreen = () => {
+const SportsWireContent: React.FC = () => {
   const theme = useTheme();
   const navigate = useNavigate();
+  const { profile, planFeatures } = useAuth();
+  const { handleSubscriptionCheckout, handleCreditsCheckout } = useCheckout();
   
   const [selectedSport, setSelectedSport] = useState<'nba' | 'nfl' | 'mlb' | 'nhl'>('nba');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -361,7 +364,10 @@ const SportsWireScreen = () => {
   const [showTeamNewsModal, setShowTeamNewsModal] = useState(false);
   const [showSearchResultsModal, setShowSearchResultsModal] = useState(false);
   const [showErrorSnackbar, setShowErrorSnackbar] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState<string>('analytics');
+  const [selectedInterval, setSelectedInterval] = useState<string>('month');
 
   const [bookmarked, setBookmarked] = useState<(string | number)[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -378,64 +384,52 @@ const SportsWireScreen = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [usingMockData, setUsingMockData] = useState(false);
   
+  // Access plan features
+  const hasPlayerStatsAccess = planFeatures?.hasPlayerStats ?? false;
+  const hasAdvancedAnalytics = planFeatures?.hasAdvancedAnalytics ?? false;
+  const hasAIRecommendations = planFeatures?.hasAIRecommendations ?? false;
+  const hasLiveData = planFeatures?.hasLiveData ?? false;
+  const hasBettingInsights = planFeatures?.hasBettingInsights ?? false;
+  const hasGeneratorCredits = planFeatures?.hasGeneratorCredits ?? false;
+  const unlimitedGenerations = planFeatures?.unlimitedGenerations ?? false;
+  
+  const hasPremiumAccess = hasAdvancedAnalytics || hasBettingInsights || hasAIRecommendations;
+  
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
 
-  // Update teams when sport changes
   useEffect(() => {
     setTeams(STATIC_TEAMS_BY_SPORT[selectedSport] || []);
     setSelectedTeam('');
   }, [selectedSport]);
 
-  // ============= LOAD DATA FROM BACKEND =============
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     setUsingMockData(false);
-    
     try {
       const token = localStorage.getItem('token');
       const url = `${API_BASE_URL}/api/sports-wire/frontend-format?sport=${selectedSport}`;
-      
-      console.log(`📡 Fetching data from: ${url}`);
-      
       const response = await fetch(url, {
-        headers: token ? {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        } : {
-          'Content-Type': 'application/json'
-        }
+        headers: token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
-      console.log('📦 Backend response:', result);
-      
       if (result.success) {
-        // Set the transformed data directly
         const news = result.processedNews || [];
         const injuries = result.injuryNews || [];
         const beatWriters = result.beatWriterNews || [];
-        
         setProcessedNews(news);
         setInjuryNews(injuries);
         setBeatWriterNews(beatWriters);
-        
-        // Set injury dashboard if available
         if (result.injuryDashboard) {
           setInjuryDashboard(result.injuryDashboard);
         } else if (injuries.length > 0) {
-          // Create dashboard from injury data if not provided
           const severityBreakdown = {
             severe: injuries.filter(i => i.injuryStatus === 'Out').length,
             moderate: injuries.filter(i => i.injuryStatus === 'Questionable').length,
             mild: injuries.filter(i => i.injuryStatus === 'Day-to-day').length
           };
-          
           const statusBreakdown = {
             out: injuries.filter(i => i.injuryStatus === 'Out').length,
             questionable: injuries.filter(i => i.injuryStatus === 'Questionable').length,
@@ -443,12 +437,8 @@ const SportsWireScreen = () => {
             day_to_day: injuries.filter(i => i.injuryStatus === 'Day-to-day').length,
             probable: injuries.filter(i => i.injuryStatus === 'Probable').length
           };
-          
           const teamInjuries: Record<string, number> = {};
-          injuries.forEach(i => {
-            teamInjuries[i.team] = (teamInjuries[i.team] || 0) + 1;
-          });
-          
+          injuries.forEach(i => { teamInjuries[i.team] = (teamInjuries[i.team] || 0) + 1; });
           setInjuryDashboard({
             total_injuries: injuries.length,
             severity_breakdown: severityBreakdown,
@@ -463,36 +453,25 @@ const SportsWireScreen = () => {
             }))
           });
         }
-        
-        console.log(`✅ Loaded ${news.length} total items (${injuries.length} injuries, ${beatWriters.length} beat writers)`);
       } else {
         throw new Error(result.error || 'Failed to load data');
       }
     } catch (err) {
-      console.error('❌ Error loading data:', err);
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      setError(errorMsg);
+      console.error('Error loading data:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error');
       setShowErrorSnackbar(true);
-      setErrorMessage(`Failed to load data: ${errorMsg}. Using mock data.`);
-      
-      // Fallback to mock data
-      console.log('🔄 Falling back to mock data');
+      setErrorMessage(`Failed to load data: ${err instanceof Error ? err.message : 'Unknown error'}. Using mock data.`);
       setUsingMockData(true);
-      
       const injuries = generateInjuryNewsFallback();
       const beatWriters = generateBeatWriterNewsFallback();
-      
       setInjuryNews(injuries);
       setBeatWriterNews(beatWriters);
       setProcessedNews([...injuries, ...beatWriters]);
-      
-      // Create mock injury dashboard
       const severityBreakdown = {
         severe: injuries.filter(i => i.injuryStatus === 'Out').length,
         moderate: injuries.filter(i => i.injuryStatus === 'Questionable').length,
         mild: injuries.filter(i => i.injuryStatus === 'Day-to-day').length
       };
-      
       const statusBreakdown = {
         out: injuries.filter(i => i.injuryStatus === 'Out').length,
         questionable: injuries.filter(i => i.injuryStatus === 'Questionable').length,
@@ -500,12 +479,8 @@ const SportsWireScreen = () => {
         day_to_day: injuries.filter(i => i.injuryStatus === 'Day-to-day').length,
         probable: injuries.filter(i => i.injuryStatus === 'Probable').length
       };
-      
       const teamInjuries: Record<string, number> = {};
-      injuries.forEach(i => {
-        teamInjuries[i.team] = (teamInjuries[i.team] || 0) + 1;
-      });
-      
+      injuries.forEach(i => { teamInjuries[i.team] = (teamInjuries[i.team] || 0) + 1; });
       setInjuryDashboard({
         total_injuries: injuries.length,
         severity_breakdown: severityBreakdown,
@@ -524,20 +499,14 @@ const SportsWireScreen = () => {
     }
   }, [selectedSport]);
 
-  // Initial load
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  // ============= SEARCH HANDLER =============
+  const handleUpgrade = () => { handleSubscriptionCheckout(selectedPlan, selectedInterval); };
+
   const handleSearchChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSearchQuery(value);
-    
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     if (value.trim().length > 2) {
       setIsSearching(true);
       searchTimeoutRef.current = setTimeout(() => {
@@ -548,9 +517,7 @@ const SportsWireScreen = () => {
           item.line?.toLowerCase().includes(value.toLowerCase())
         ).slice(0, 10);
         setSearchResults(filtered);
-        if (filtered.length > 0) {
-          setShowSearchResultsModal(true);
-        }
+        if (filtered.length > 0) setShowSearchResultsModal(true);
         setIsSearching(false);
       }, 500);
     } else {
@@ -560,19 +527,14 @@ const SportsWireScreen = () => {
 
   const handleClearSearch = () => {
     setSearchQuery('');
-    if (searchInputRef.current) {
-      searchInputRef.current.value = '';
-    }
+    if (searchInputRef.current) searchInputRef.current.value = '';
     setSearchResults([]);
     setShowSearchResultsModal(false);
   };
 
-  // ============= FILTERED NEWS =============
   const filteredNews = useMemo(() => {
     if (!processedNews.length) return [];
-
     let filtered = [...processedNews];
-    
     if (selectedCategory !== 'all') {
       if (selectedCategory === 'injuries' || selectedCategory === 'injury') {
         filtered = filtered.filter(item => item.category === 'injury');
@@ -584,7 +546,6 @@ const SportsWireScreen = () => {
         filtered = filtered.filter(item => item.confidence > 80);
       }
     }
-    
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
       filtered = filtered.filter(item => 
@@ -593,46 +554,30 @@ const SportsWireScreen = () => {
         item.line.toLowerCase().includes(query)
       );
     }
-    
     return filtered;
   }, [processedNews, selectedCategory, searchQuery]);
 
-  // ============= EVENT HANDLERS =============
   const handleSportChange = (event: any) => {
     setSelectedSport(event.target.value);
     setSearchQuery('');
     setSelectedTeam('');
     setSelectedCategory('all');
-    if (searchInputRef.current) {
-      searchInputRef.current.value = '';
-    }
+    if (searchInputRef.current) searchInputRef.current.value = '';
   };
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadData().finally(() => {
-      setRefreshing(false);
-    });
+    loadData().finally(() => setRefreshing(false));
   };
 
   const handleBookmark = (id: string | number) => {
-    setBookmarked(prev => {
-      if (prev.includes(id)) {
-        return prev.filter(item => item !== id);
-      } else {
-        return [...prev, id];
-      }
-    });
+    setBookmarked(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
 
   const handleShare = (prop: PlayerProp) => {
     const shareText = `${prop.playerName}: ${prop.line}`;
     if (navigator.share) {
-      navigator.share({
-        title: prop.playerName,
-        text: shareText,
-        url: prop.url || window.location.href,
-      }).catch(() => {
+      navigator.share({ title: prop.playerName, text: shareText, url: prop.url || window.location.href }).catch(() => {
         navigator.clipboard.writeText(shareText);
         setErrorMessage('Link copied to clipboard');
         setShowErrorSnackbar(true);
@@ -645,130 +590,47 @@ const SportsWireScreen = () => {
   };
 
   const fetchTeamNews = (team: string) => {
-    const filtered = processedNews.filter(item => 
-      item.team?.toLowerCase() === team.toLowerCase()
-    );
+    const filtered = processedNews.filter(item => item.team?.toLowerCase() === team.toLowerCase());
     setTeamNews(filtered.length ? filtered : []);
     setShowTeamNewsModal(true);
   };
 
-  const fetchInjuryDashboard = () => {
-    setShowInjuryDashboardModal(true);
-  };
+  const fetchInjuryDashboard = () => { setShowInjuryDashboardModal(true); };
 
-  // ============= RENDER FUNCTIONS =============
+  // ============= RENDER FUNCTIONS (unchanged from original) =============
   const renderInjuryCard = (prop: PlayerProp) => {
     const status = prop.injuryStatus || normalizeInjuryStatus(prop.rawInjuryStatus);
     const statusColor = getInjuryStatusColor(status);
     const statusLabel = getInjuryStatusLabel(status);
-    
     const searchUrl = prop.playerName 
       ? `https://www.google.com/search?q=${encodeURIComponent(prop.playerName + ' ' + (prop.team || '') + ' injury update')}`
       : '#';
-    
     return (
-      <Card 
-        key={prop.id} 
-        sx={{ 
-          mb: 2,
-          borderLeft: `6px solid ${statusColor}`,
-          bgcolor: '#fff1f0',
-          '&:hover': { bgcolor: '#ffe4e2' }
-        }}
-      >
+      <Card key={prop.id} sx={{ mb: 2, borderLeft: `6px solid ${statusColor}`, bgcolor: '#fff1f0', '&:hover': { bgcolor: '#ffe4e2' } }}>
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-              <Chip 
-                icon={<LocalHospital />}
-                label={statusLabel}
-                size="small"
-                sx={{ 
-                  bgcolor: statusColor,
-                  color: 'white',
-                  fontWeight: 'bold'
-                }}
-              />
-              <Chip 
-                label={prop.sport}
-                size="small"
-                sx={{ 
-                  bgcolor: `${SPORT_COLORS[prop.sport] || '#3b82f6'}20`,
-                  color: SPORT_COLORS[prop.sport] || '#3b82f6',
-                  fontWeight: 'bold'
-                }}
-              />
-              {prop.team && (
-                <Chip 
-                  label={prop.team}
-                  size="small"
-                  variant="outlined"
-                  sx={{ borderColor: statusColor, color: statusColor }}
-                />
-              )}
+              <Chip icon={<LocalHospital />} label={statusLabel} size="small" sx={{ bgcolor: statusColor, color: 'white', fontWeight: 'bold' }} />
+              <Chip label={prop.sport} size="small" sx={{ bgcolor: `${SPORT_COLORS[prop.sport] || '#3b82f6'}20`, color: SPORT_COLORS[prop.sport] || '#3b82f6', fontWeight: 'bold' }} />
+              {prop.team && <Chip label={prop.team} size="small" variant="outlined" sx={{ borderColor: statusColor, color: statusColor }} />}
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
-              <Typography variant="caption" color="text.secondary">
-                {prop.time}
-              </Typography>
-            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} /><Typography variant="caption" color="text.secondary">{prop.time}</Typography></Box>
           </Box>
-          
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-            <Avatar sx={{ bgcolor: statusColor, width: 48, height: 48 }}>
-              <Healing />
-            </Avatar>
+            <Avatar sx={{ bgcolor: statusColor, width: 48, height: 48 }}><Healing /></Avatar>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                {prop.playerName}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                {prop.team} • {prop.sport}
-              </Typography>
-              <Typography variant="body1" sx={{ mt: 1, fontWeight: 500 }}>
-                {prop.line}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                {prop.matchup}
-              </Typography>
-              
-              {prop.expectedReturn && (
-                <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <MedicalServices sx={{ fontSize: 16, color: '#3b82f6' }} />
-                  <Typography variant="body2" color="#3b82f6">
-                    Expected return: {prop.expectedReturn}
-                  </Typography>
-                </Box>
-              )}
+              <Typography variant="h6" fontWeight="bold" gutterBottom>{prop.playerName}</Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>{prop.team} • {prop.sport}</Typography>
+              <Typography variant="body1" sx={{ mt: 1, fontWeight: 500 }}>{prop.line}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{prop.matchup}</Typography>
+              {prop.expectedReturn && (<Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}><MedicalServices sx={{ fontSize: 16, color: '#3b82f6' }} /><Typography variant="body2" color="#3b82f6">Expected return: {prop.expectedReturn}</Typography></Box>)}
             </Box>
           </Box>
-          
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-            <Button 
-              variant="contained" 
-              size="small"
-              onClick={() => window.open(searchUrl, '_blank')}
-              sx={{ 
-                bgcolor: statusColor,
-                '&:hover': { bgcolor: statusColor, filter: 'brightness(0.9)' }
-              }}
-              startIcon={<Search />}
-            >
-              View Injury Details
-            </Button>
-            
+            <Button variant="contained" size="small" onClick={() => window.open(searchUrl, '_blank')} sx={{ bgcolor: statusColor, '&:hover': { bgcolor: statusColor, filter: 'brightness(0.9)' } }} startIcon={<Search />}>View Injury Details</Button>
             <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
-              <IconButton size="small" onClick={() => handleShare(prop)}>
-                <Share sx={{ fontSize: 18 }} />
-              </IconButton>
-              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>
-                {bookmarked.includes(prop.id) ? (
-                  <Bookmark sx={{ fontSize: 18, color: statusColor }} />
-                ) : (
-                  <BookmarkBorder sx={{ fontSize: 18 }} />
-                )}
-              </IconButton>
+              <IconButton size="small" onClick={() => handleShare(prop)}><Share sx={{ fontSize: 18 }} /></IconButton>
+              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>{bookmarked.includes(prop.id) ? <Bookmark sx={{ fontSize: 18, color: statusColor }} /> : <BookmarkBorder sx={{ fontSize: 18 }} />}</IconButton>
             </Box>
           </Box>
         </CardContent>
@@ -778,100 +640,30 @@ const SportsWireScreen = () => {
 
   const renderBeatWriterCard = (prop: PlayerProp) => {
     return (
-      <Card 
-        key={prop.id} 
-        sx={{ 
-          mb: 2,
-          borderLeft: '6px solid #8b5cf6',
-          bgcolor: '#f5f3ff',
-          '&:hover': { bgcolor: '#ede9fe' }
-        }}
-      >
+      <Card key={prop.id} sx={{ mb: 2, borderLeft: '6px solid #8b5cf6', bgcolor: '#f5f3ff', '&:hover': { bgcolor: '#ede9fe' } }}>
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-              <Chip 
-                icon={<Twitter />}
-                label={prop.author || prop.outlet || 'Beat Writer'}
-                size="small"
-                sx={{ 
-                  bgcolor: '#8b5cf6',
-                  color: 'white',
-                  fontWeight: 'bold'
-                }}
-              />
-              <Chip 
-                label={prop.sport}
-                size="small"
-                sx={{ 
-                  bgcolor: `${SPORT_COLORS[prop.sport] || '#3b82f6'}20`,
-                  color: SPORT_COLORS[prop.sport] || '#3b82f6',
-                  fontWeight: 'bold'
-                }}
-              />
-              {prop.twitter && (
-                <Chip 
-                  icon={<Twitter />}
-                  label={prop.twitter}
-                  size="small"
-                  variant="outlined"
-                  sx={{ borderColor: '#8b5cf6', color: '#8b5cf6' }}
-                />
-              )}
+              <Chip icon={<Twitter />} label={prop.author || prop.outlet || 'Beat Writer'} size="small" sx={{ bgcolor: '#8b5cf6', color: 'white', fontWeight: 'bold' }} />
+              <Chip label={prop.sport} size="small" sx={{ bgcolor: `${SPORT_COLORS[prop.sport] || '#3b82f6'}20`, color: SPORT_COLORS[prop.sport] || '#3b82f6', fontWeight: 'bold' }} />
+              {prop.twitter && <Chip icon={<Twitter />} label={prop.twitter} size="small" variant="outlined" sx={{ borderColor: '#8b5cf6', color: '#8b5cf6' }} />}
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
-              <Typography variant="caption" color="text.secondary">
-                {prop.time}
-              </Typography>
-            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} /><Typography variant="caption" color="text.secondary">{prop.time}</Typography></Box>
           </Box>
-          
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-            <Avatar sx={{ bgcolor: '#8b5cf6', width: 48, height: 48 }}>
-              {prop.author?.charAt(0) || prop.outlet?.charAt(0) || 'BW'}
-            </Avatar>
+            <Avatar sx={{ bgcolor: '#8b5cf6', width: 48, height: 48 }}>{prop.author?.charAt(0) || prop.outlet?.charAt(0) || 'BW'}</Avatar>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                {prop.playerName}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                {prop.team} • {prop.author || prop.outlet || 'Beat Writer'}
-              </Typography>
-              <Typography variant="body1" sx={{ mt: 1, fontWeight: 500 }}>
-                {prop.line}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                {prop.matchup}
-              </Typography>
+              <Typography variant="h6" fontWeight="bold" gutterBottom>{prop.playerName}</Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>{prop.team} • {prop.author || prop.outlet || 'Beat Writer'}</Typography>
+              <Typography variant="body1" sx={{ mt: 1, fontWeight: 500 }}>{prop.line}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{prop.matchup}</Typography>
             </Box>
           </Box>
-          
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-            <Button 
-              variant="contained" 
-              size="small"
-              onClick={() => window.open(prop.url || `https://www.google.com/search?q=${encodeURIComponent(prop.playerName + ' ' + prop.team + ' news')}`, '_blank')}
-              sx={{ 
-                bgcolor: '#8b5cf6',
-                '&:hover': { bgcolor: '#7c3aed' }
-              }}
-              startIcon={<Article />}
-            >
-              Read Full Article
-            </Button>
-            
+            <Button variant="contained" size="small" onClick={() => window.open(prop.url || `https://www.google.com/search?q=${encodeURIComponent(prop.playerName + ' ' + prop.team + ' news')}`, '_blank')} sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' } }} startIcon={<Article />}>Read Full Article</Button>
             <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
-              <IconButton size="small" onClick={() => handleShare(prop)}>
-                <Share sx={{ fontSize: 18 }} />
-              </IconButton>
-              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>
-                {bookmarked.includes(prop.id) ? (
-                  <Bookmark sx={{ fontSize: 18, color: '#8b5cf6' }} />
-                ) : (
-                  <BookmarkBorder sx={{ fontSize: 18 }} />
-                )}
-              </IconButton>
+              <IconButton size="small" onClick={() => handleShare(prop)}><Share sx={{ fontSize: 18 }} /></IconButton>
+              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>{bookmarked.includes(prop.id) ? <Bookmark sx={{ fontSize: 18, color: '#8b5cf6' }} /> : <BookmarkBorder sx={{ fontSize: 18 }} />}</IconButton>
             </Box>
           </Box>
         </CardContent>
@@ -882,106 +674,33 @@ const SportsWireScreen = () => {
   const renderNewsCard = (prop: PlayerProp) => {
     if (prop.isBeatWriter) return renderBeatWriterCard(prop);
     if (prop.category === 'injury') return renderInjuryCard(prop);
-    
     const sportColor = SPORT_COLORS[prop.sport] || theme.palette.primary.main;
     const isBookmarked = bookmarked.includes(prop.id);
     const categoryColor = CATEGORY_COLORS[prop.category || 'news'] || '#6b7280';
-    
     return (
       <Card key={prop.id} sx={{ mb: 3 }}>
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-              <Chip 
-                label={prop.category || 'News'}
-                size="small"
-                sx={{ 
-                  bgcolor: categoryColor,
-                  color: 'white',
-                  fontWeight: 'bold',
-                  textTransform: 'capitalize'
-                }}
-              />
-              <Chip 
-                label={prop.sport}
-                size="small"
-                sx={{ 
-                  bgcolor: `${sportColor}20`,
-                  color: sportColor,
-                  fontWeight: 'bold'
-                }}
-              />
+              <Chip label={prop.category || 'News'} size="small" sx={{ bgcolor: categoryColor, color: 'white', fontWeight: 'bold', textTransform: 'capitalize' }} />
+              <Chip label={prop.sport} size="small" sx={{ bgcolor: `${sportColor}20`, color: sportColor, fontWeight: 'bold' }} />
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} />
-              <Typography variant="caption" color="text.secondary">
-                {prop.time}
-              </Typography>
-            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><AccessTime sx={{ fontSize: 14, color: 'text.secondary' }} /><Typography variant="caption" color="text.secondary">{prop.time}</Typography></Box>
           </Box>
-          
           <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2, gap: 2 }}>
-            {prop.image && (
-              <CardMedia
-                component="img"
-                image={prop.image}
-                alt={prop.playerName}
-                sx={{ 
-                  width: 100, 
-                  height: 100, 
-                  borderRadius: 2, 
-                  objectFit: 'cover',
-                  display: { xs: 'none', sm: 'block' }
-                }}
-              />
-            )}
+            {prop.image && (<CardMedia component="img" image={prop.image} alt={prop.playerName} sx={{ width: 100, height: 100, borderRadius: 2, objectFit: 'cover', display: { xs: 'none', sm: 'block' } }} />)}
             <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" fontWeight="bold" gutterBottom>
-                {prop.playerName}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                {prop.team} • {prop.sport}
-              </Typography>
-              <Typography variant="body1" paragraph sx={{ fontWeight: 500 }}>
-                {prop.line}
-              </Typography>
+              <Typography variant="h6" fontWeight="bold" gutterBottom>{prop.playerName}</Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>{prop.team} • {prop.sport}</Typography>
+              <Typography variant="body1" paragraph sx={{ fontWeight: 500 }}>{prop.line}</Typography>
             </Box>
           </Box>
-          
-          {prop.matchup && (
-            <Box sx={{ mb: 2, bgcolor: '#f8f9fa', p: 2, borderRadius: 1 }}>
-              <Typography variant="body2" color="text.secondary">
-                {prop.matchup}
-              </Typography>
-            </Box>
-          )}
-          
+          {prop.matchup && (<Box sx={{ mb: 2, bgcolor: '#f8f9fa', p: 2, borderRadius: 1 }}><Typography variant="body2" color="text.secondary">{prop.matchup}</Typography></Box>)}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            {prop.url && prop.url !== '#' && (
-              <Button 
-                variant="contained" 
-                size="small"
-                onClick={() => window.open(prop.url, '_blank')}
-                sx={{ 
-                  bgcolor: '#3b82f6',
-                  '&:hover': { bgcolor: '#2563eb' }
-                }}
-              >
-                Read Full Story
-              </Button>
-            )}
-            
+            {prop.url && prop.url !== '#' && (<Button variant="contained" size="small" onClick={() => window.open(prop.url, '_blank')} sx={{ bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' } }}>Read Full Story</Button>)}
             <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
-              <IconButton size="small" onClick={() => handleShare(prop)}>
-                <Share sx={{ fontSize: 18 }} />
-              </IconButton>
-              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>
-                {isBookmarked ? (
-                  <Bookmark sx={{ fontSize: 18, color: '#3b82f6' }} />
-                ) : (
-                  <BookmarkBorder sx={{ fontSize: 18 }} />
-                )}
-              </IconButton>
+              <IconButton size="small" onClick={() => handleShare(prop)}><Share sx={{ fontSize: 18 }} /></IconButton>
+              <IconButton size="small" onClick={() => handleBookmark(prop.id)}>{isBookmarked ? <Bookmark sx={{ fontSize: 18, color: '#3b82f6' }} /> : <BookmarkBorder sx={{ fontSize: 18 }} />}</IconButton>
             </Box>
           </Box>
         </CardContent>
@@ -989,36 +708,29 @@ const SportsWireScreen = () => {
     );
   };
 
-  // ============= MODAL COMPONENTS =============
+  // ============= MODAL COMPONENTS (with PlanGuard) =============
   const TeamNewsModal = () => (
     <Dialog open={showTeamNewsModal} onClose={() => setShowTeamNewsModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: '#3b82f6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <TeamIcon />
-        {selectedTeam} News
-        <IconButton onClick={() => setShowTeamNewsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
-          <Close />
-        </IconButton>
+        <TeamIcon /> {selectedTeam} News
+        <IconButton onClick={() => setShowTeamNewsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
-        {teamNews.length > 0 ? (
-          <Box>
-            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-              Latest updates from {selectedTeam}
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            {teamNews.map(news => renderNewsCard(news))}
-          </Box>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Sports sx={{ fontSize: 60, color: '#3b82f6', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              No news for {selectedTeam}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Check back later for updates
-            </Typography>
-          </Box>
-        )}
+        <PlanGuard requiredPlan="analytics">
+          {teamNews.length > 0 ? (
+            <Box>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">Latest updates from {selectedTeam}</Typography>
+              <Divider sx={{ my: 2 }} />
+              {teamNews.map(news => renderNewsCard(news))}
+            </Box>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Sports sx={{ fontSize: 60, color: '#3b82f6', mb: 2 }} />
+              <Typography variant="h6" gutterBottom>No news for {selectedTeam}</Typography>
+              <Typography variant="body2" color="text.secondary">Check back later for updates</Typography>
+            </Box>
+          )}
+        </PlanGuard>
       </DialogContent>
     </Dialog>
   );
@@ -1026,74 +738,40 @@ const SportsWireScreen = () => {
   const InjuryDashboardModal = () => (
     <Dialog open={showInjuryDashboardModal} onClose={() => setShowInjuryDashboardModal(false)} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Timeline />
-        Injury Dashboard - {selectedSport.toUpperCase()}
-        <IconButton onClick={() => setShowInjuryDashboardModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
-          <Close />
-        </IconButton>
+        <Timeline /> Injury Dashboard - {selectedSport.toUpperCase()}
+        <IconButton onClick={() => setShowInjuryDashboardModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
-        {injuryDashboard ? (
-          <Grid container spacing={3}>
-            <Grid item xs={12}>
-              <Paper sx={{ p: 3, bgcolor: '#f8fafc' }}>
-                <Typography variant="h6" gutterBottom>📊 Injury Summary</Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={4}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" color="#ef4444" fontWeight="bold">{injuryDashboard.total_injuries}</Typography>
-                      <Typography variant="body2" color="text.secondary">Total Injuries</Typography>
-                    </Box>
+        <PlanGuard requiredPlan="analytics">
+          {injuryDashboard ? (
+            <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 3, bgcolor: '#f8fafc' }}>
+                  <Typography variant="h6" gutterBottom>📊 Injury Summary</Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={4}><Box textAlign="center"><Typography variant="h3" color="#ef4444" fontWeight="bold">{injuryDashboard.total_injuries}</Typography><Typography variant="body2" color="text.secondary">Total Injuries</Typography></Box></Grid>
+                    <Grid item xs={12} sm={4}><Box textAlign="center"><Typography variant="h3" color="#f59e0b" fontWeight="bold">{injuryDashboard.severity_breakdown?.severe || 0}</Typography><Typography variant="body2" color="text.secondary">Severe Injuries</Typography></Box></Grid>
+                    <Grid item xs={12} sm={4}><Box textAlign="center"><Typography variant="h3" color="#10b981" fontWeight="bold">{injuryDashboard.status_breakdown?.day_to_day || 0}</Typography><Typography variant="body2" color="text.secondary">Day-to-Day</Typography></Box></Grid>
                   </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" color="#f59e0b" fontWeight="bold">{injuryDashboard.severity_breakdown?.severe || 0}</Typography>
-                      <Typography variant="body2" color="text.secondary">Severe Injuries</Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Box sx={{ textAlign: 'center' }}>
-                      <Typography variant="h3" color="#10b981" fontWeight="bold">{injuryDashboard.status_breakdown?.day_to_day || 0}</Typography>
-                      <Typography variant="body2" color="text.secondary">Day-to-Day</Typography>
-                    </Box>
-                  </Grid>
-                </Grid>
-              </Paper>
+                </Paper>
+              </Grid>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 3 }}>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Top Injured Teams</Typography>
+                  <List>{injuryDashboard.top_injured_teams?.map(([team, count]) => (<ListItem key={team}><ListItemText primary={team} secondary={`${count} injured player${count !== 1 ? 's' : ''}`} /></ListItem>))}</List>
+                </Paper>
+              </Grid>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 3 }}>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>All Injuries</Typography>
+                  <List dense>{injuryDashboard.injuries?.map((injury, idx) => (<ListItem key={idx} divider><ListItemText primary={injury.player} secondary={`${injury.team} - ${getInjuryStatusLabel(injury.status)}`} /></ListItem>))}</List>
+                </Paper>
+              </Grid>
             </Grid>
-            <Grid item xs={12}>
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Top Injured Teams</Typography>
-                <List>
-                  {injuryDashboard.top_injured_teams?.map(([team, count]: [string, number]) => (
-                    <ListItem key={team}>
-                      <ListItemText primary={team} secondary={`${count} injured player${count !== 1 ? 's' : ''}`} />
-                    </ListItem>
-                  ))}
-                </List>
-              </Paper>
-            </Grid>
-            <Grid item xs={12}>
-              <Paper sx={{ p: 3 }}>
-                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>All Injuries</Typography>
-                <List dense>
-                  {injuryDashboard.injuries?.map((injury: any, idx: number) => (
-                    <ListItem key={idx} divider>
-                      <ListItemText 
-                        primary={injury.player}
-                        secondary={`${injury.team} - ${getInjuryStatusLabel(injury.status)}`}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              </Paper>
-            </Grid>
-          </Grid>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <CircularProgress />
-            <Typography sx={{ mt: 2 }}>Loading injury dashboard...</Typography>
-          </Box>
-        )}
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /><Typography sx={{ mt: 2 }}>Loading injury dashboard...</Typography></Box>
+          )}
+        </PlanGuard>
       </DialogContent>
       <DialogActions>
         <Button onClick={() => { setShowInjuryDashboardModal(false); setSelectedCategory('injuries'); }} sx={{ color: '#ef4444' }}>View All Injuries</Button>
@@ -1105,18 +783,14 @@ const SportsWireScreen = () => {
   const InjuryModal = () => (
     <Dialog open={showInjuryModal} onClose={() => setShowInjuryModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <LocalHospital />
-        Injury Report - {selectedSport.toUpperCase()}
-        <IconButton onClick={() => setShowInjuryModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
-          <Close />
-        </IconButton>
+        <LocalHospital /> Injury Report - {selectedSport.toUpperCase()}
+        <IconButton onClick={() => setShowInjuryModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
+        {/* Injury list is free – no PlanGuard */}
         {injuryNews.length > 0 ? (
           <Box>
-            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-              {injuryNews.length} Active Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}
-            </Typography>
+            <Typography variant="subtitle1" gutterBottom fontWeight="bold">{injuryNews.length} Active Injury {injuryNews.length === 1 ? 'Update' : 'Updates'}</Typography>
             <Divider sx={{ my: 2 }} />
             {injuryNews.map(injury => renderInjuryCard(injury))}
           </Box>
@@ -1124,16 +798,12 @@ const SportsWireScreen = () => {
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <MonitorHeart sx={{ fontSize: 60, color: '#10b981', mb: 2 }} />
             <Typography variant="h6" gutterBottom>No Current Injuries</Typography>
-            <Typography variant="body2" color="text.secondary">
-              All {selectedSport.toUpperCase()} players are healthy
-            </Typography>
+            <Typography variant="body2" color="text.secondary">All {selectedSport.toUpperCase()} players are healthy</Typography>
           </Box>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => { setShowInjuryModal(false); fetchInjuryDashboard(); }} sx={{ color: '#ef4444' }}>
-          View Dashboard
-        </Button>
+        <Button onClick={() => { setShowInjuryModal(false); fetchInjuryDashboard(); }} sx={{ color: '#ef4444' }}>View Dashboard</Button>
         <Button onClick={() => setShowInjuryModal(false)}>Close</Button>
       </DialogActions>
     </Dialog>
@@ -1142,9 +812,8 @@ const SportsWireScreen = () => {
   const BeatWritersModal = () => (
     <Dialog open={showBeatWritersModal} onClose={() => setShowBeatWritersModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Twitter />
-        Beat Writers & Insiders
-        <Box sx={{ flex: 1 }} />
+        <Twitter /> Beat Writers & Insiders
+        <Box flex={1} />
         <FormControl size="small" sx={{ minWidth: 200, bgcolor: 'rgba(255,255,255,0.2)', borderRadius: 1 }}>
           <Select value={selectedTeam} displayEmpty onChange={(e) => { setSelectedTeam(e.target.value); if (e.target.value) fetchTeamNews(e.target.value); }} sx={{ color: 'white' }}>
             <MenuItem value="">All Teams</MenuItem>
@@ -1154,21 +823,21 @@ const SportsWireScreen = () => {
         <IconButton onClick={() => setShowBeatWritersModal(false)} sx={{ color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
-        {beatWriterNews.length > 0 ? (
-          <Box>
-            <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-              {beatWriterNews.length} Updates from Beat Writers {selectedTeam && ` • ${selectedTeam}`}
-            </Typography>
-            <Divider sx={{ my: 2 }} />
-            {beatWriterNews.filter(item => !selectedTeam || item.team === selectedTeam).map(writer => renderBeatWriterCard(writer))}
-          </Box>
-        ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <Twitter sx={{ fontSize: 60, color: '#8b5cf6', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>No Beat Writer Updates</Typography>
-            <Typography variant="body2" color="text.secondary">Check back later for the latest insider news</Typography>
-          </Box>
-        )}
+        <PlanGuard requiredPlan="analytics">
+          {beatWriterNews.length > 0 ? (
+            <Box>
+              <Typography variant="subtitle1" gutterBottom fontWeight="bold">{beatWriterNews.length} Updates from Beat Writers {selectedTeam && ` • ${selectedTeam}`}</Typography>
+              <Divider sx={{ my: 2 }} />
+              {beatWriterNews.filter(item => !selectedTeam || item.team === selectedTeam).map(writer => renderBeatWriterCard(writer))}
+            </Box>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Twitter sx={{ fontSize: 60, color: '#8b5cf6', mb: 2 }} />
+              <Typography variant="h6" gutterBottom>No Beat Writer Updates</Typography>
+              <Typography variant="body2" color="text.secondary">Check back later for the latest insider news</Typography>
+            </Box>
+          )}
+        </PlanGuard>
       </DialogContent>
       <DialogActions>
         <Button onClick={() => { setShowBeatWritersModal(false); setSelectedCategory('beat-writers'); }} sx={{ color: '#8b5cf6' }}>View All Beat News</Button>
@@ -1180,60 +849,21 @@ const SportsWireScreen = () => {
   const SearchResultsModal = () => (
     <Dialog open={showSearchResultsModal} onClose={() => setShowSearchResultsModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: '#8b5cf6', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <SearchIcon />
-        Search Results: "{searchQuery}"
-        <IconButton onClick={() => setShowSearchResultsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}>
-          <Close />
-        </IconButton>
+        <SearchIcon /> Search Results: "{searchQuery}"
+        <IconButton onClick={() => setShowSearchResultsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
         {searchResults.length > 0 ? (
           <List>
             {searchResults.map((result, index) => (
-              <ListItem 
-                key={index} 
-                divider 
-                button
-                onClick={() => {
-                  setShowSearchResultsModal(false);
-                  // Scroll to or highlight the selected item
-                  const element = document.getElementById(`news-${result.id}`);
-                  if (element) {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  }
-                }}
-              >
-                <ListItemAvatar>
-                  <Avatar sx={{ bgcolor: result.isBeatWriter ? '#8b5cf6' : result.category === 'injury' ? '#ef4444' : '#3b82f6' }}>
-                    {result.isBeatWriter ? <Twitter /> : result.category === 'injury' ? <LocalHospital /> : <Person />}
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary={result.playerName}
-                  secondary={
-                    <>
-                      <Typography variant="caption" display="block" color="text.secondary">
-                        {result.team} • {result.sport}
-                      </Typography>
-                      {result.injuryStatus && (
-                        <Chip 
-                          label={getInjuryStatusLabel(result.injuryStatus)} 
-                          size="small" 
-                          sx={{ mt: 0.5, height: 20, fontSize: '0.7rem' }} 
-                        />
-                      )}
-                    </>
-                  }
-                />
+              <ListItem key={index} divider button onClick={() => { setShowSearchResultsModal(false); const element = document.getElementById(`news-${result.id}`); if (element) element.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>
+                <ListItemAvatar><Avatar sx={{ bgcolor: result.isBeatWriter ? '#8b5cf6' : result.category === 'injury' ? '#ef4444' : '#3b82f6' }}>{result.isBeatWriter ? <Twitter /> : result.category === 'injury' ? <LocalHospital /> : <Person />}</Avatar></ListItemAvatar>
+                <ListItemText primary={result.playerName} secondary={<>{result.team} • {result.sport}{result.injuryStatus && <Chip label={getInjuryStatusLabel(result.injuryStatus)} size="small" sx={{ mt: 0.5, height: 20, fontSize: '0.7rem' }} />}</>} />
               </ListItem>
             ))}
           </List>
         ) : (
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <SearchIcon sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>No results found</Typography>
-            <Typography variant="body2" color="text.secondary">Try searching for a player, team, or beat writer</Typography>
-          </Box>
+          <Box sx={{ textAlign: 'center', py: 4 }}><SearchIcon sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} /><Typography variant="h6" gutterBottom>No results found</Typography><Typography variant="body2" color="text.secondary">Try searching for a player, team, or beat writer</Typography></Box>
         )}
       </DialogContent>
     </Dialog>
@@ -1242,51 +872,104 @@ const SportsWireScreen = () => {
   const AnalyticsDashboardModal = () => (
     <Dialog open={showAnalyticsModal} onClose={() => setShowAnalyticsModal(false)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Analytics />
-        SportsWire Analytics Dashboard
+        <Analytics /> SportsWire Analytics Dashboard
         <IconButton onClick={() => setShowAnalyticsModal(false)} sx={{ position: 'absolute', right: 8, top: 8, color: 'white' }}><Close /></IconButton>
       </DialogTitle>
       <DialogContent sx={{ pt: 3 }}>
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="h4" fontWeight="bold">{processedNews.length}</Typography><Typography variant="caption">Total News</Typography></Paper></Grid>
-          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fff1f0' }}><Typography variant="h4" fontWeight="bold" color="#ef4444">{injuryNews.length}</Typography><Typography variant="caption">Injuries</Typography></Paper></Grid>
-          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f5f3ff' }}><Typography variant="h4" fontWeight="bold" color="#8b5cf6">{beatWriterNews.length}</Typography><Typography variant="caption">Beat Writers</Typography></Paper></Grid>
-          <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="h4" fontWeight="bold">{bookmarked.length}</Typography><Typography variant="caption">Bookmarks</Typography></Paper></Grid>
-        </Grid>
-        
-        {usingMockData && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Using mock data - API connection failed
-          </Alert>
-        )}
-        
-        <Divider sx={{ my: 2 }} />
-        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Category Breakdown</Typography>
-        <Grid container spacing={1}>
-          {Object.entries(processedNews.reduce((acc: Record<string, number>, item) => { const cat = item.category || 'other'; acc[cat] = (acc[cat] || 0) + 1; return acc; }, {})).map(([category, count]) => (
-            <Grid item xs={6} sm={4} md={3} key={category}>
-              <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
-                <Typography variant="caption" display="block" fontWeight="bold">{category.toUpperCase()}</Typography>
-                <Typography variant="h6" sx={{ color: CATEGORY_COLORS[category] || '#6b7280' }}>{count}</Typography>
-              </Box>
-            </Grid>
-          ))}
-        </Grid>
+        <PlanGuard requiredPlan="analytics">
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="h4" fontWeight="bold">{processedNews.length}</Typography><Typography variant="caption">Total News</Typography></Paper></Grid>
+            <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fff1f0' }}><Typography variant="h4" fontWeight="bold" color="#ef4444">{injuryNews.length}</Typography><Typography variant="caption">Injuries</Typography></Paper></Grid>
+            <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f5f3ff' }}><Typography variant="h4" fontWeight="bold" color="#8b5cf6">{beatWriterNews.length}</Typography><Typography variant="caption">Beat Writers</Typography></Paper></Grid>
+            <Grid item xs={6} sm={3}><Paper sx={{ p: 2, textAlign: 'center' }}><Typography variant="h4" fontWeight="bold">{bookmarked.length}</Typography><Typography variant="caption">Bookmarks</Typography></Paper></Grid>
+          </Grid>
+          {usingMockData && (<Alert severity="warning" sx={{ mb: 2 }}>Using mock data - API connection failed</Alert>)}
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>Category Breakdown</Typography>
+          <Grid container spacing={1}>
+            {Object.entries(processedNews.reduce((acc: Record<string, number>, item) => { const cat = item.category || 'other'; acc[cat] = (acc[cat] || 0) + 1; return acc; }, {})).map(([category, count]) => (
+              <Grid item xs={6} sm={4} md={3} key={category}>
+                <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
+                  <Typography variant="caption" display="block" fontWeight="bold">{category.toUpperCase()}</Typography>
+                  <Typography variant="h6" sx={{ color: CATEGORY_COLORS[category] || '#6b7280' }}>{count}</Typography>
+                </Box>
+              </Grid>
+            ))}
+          </Grid>
+        </PlanGuard>
       </DialogContent>
       <DialogActions><Button onClick={() => setShowAnalyticsModal(false)}>Close</Button></DialogActions>
     </Dialog>
   );
 
-  // ============= LOADING STATE =============
+  const UpgradeModal = () => (
+    <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <LockIcon sx={{ color: '#f59e0b' }} />
+          <Typography variant="h6">Upgrade to Premium</Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Typography paragraph>Unlock advanced sports analytics, insider reports, and exclusive content.</Typography>
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel>Select Plan</InputLabel>
+          <Select value={selectedPlan} label="Select Plan" onChange={(e) => setSelectedPlan(e.target.value)}>
+            <MenuItem value="starter">Starter - $5.99/month</MenuItem>
+            <MenuItem value="analytics">Analytics - $19.99/month</MenuItem>
+            <MenuItem value="generator">Generator - $39.99/month</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl fullWidth sx={{ mb: 3 }}>
+          <InputLabel>Billing Interval</InputLabel>
+          <Select value={selectedInterval} label="Billing Interval" onChange={(e) => setSelectedInterval(e.target.value)}>
+            <MenuItem value="month">Monthly</MenuItem>
+            <MenuItem value="year">Yearly (Save 20%)</MenuItem>
+          </Select>
+        </FormControl>
+        <Box sx={{ my: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            {selectedPlan === 'starter' && 'Starter Plan Features:'}
+            {selectedPlan === 'analytics' && 'Analytics Plan Features:'}
+            {selectedPlan === 'generator' && 'Generator Plan Features:'}
+          </Typography>
+          {selectedPlan === 'starter' && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Basic news aggregation</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Player stats & rankings</Typography></Box>
+            </>
+          )}
+          {selectedPlan === 'analytics' && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">All Starter features</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Advanced injury analytics</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Beat writer insights & insider reports</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Team news aggregation</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Player performance trends</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">AI-powered predictions</Typography></Box>
+            </>
+          )}
+          {selectedPlan === 'generator' && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">All Analytics features</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Historical data analysis</Typography></Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">Export data & reports</Typography></Box>
+            </>
+          )}
+        </Box>
+        <Button fullWidth variant="contained" size="large" onClick={handleUpgrade} sx={{ mt: 2 }}>Upgrade to {selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} ({selectedInterval}ly)</Button>
+      </DialogContent>
+      <DialogActions><Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button></DialogActions>
+    </Dialog>
+  );
+
   if (loading && processedNews.length === 0) {
     return (
       <Container maxWidth="lg">
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
           <CircularProgress size={60} />
           <Typography sx={{ mt: 3 }} variant="h6">Loading {selectedSport.toUpperCase()} news...</Typography>
-          <Typography sx={{ mt: 1 }} variant="body2" color="text.secondary">
-            Fetching latest updates from {API_BASE_URL}
-          </Typography>
+          <Typography sx={{ mt: 1 }} variant="body2" color="text.secondary">Fetching latest updates from {API_BASE_URL}</Typography>
         </Box>
       </Container>
     );
@@ -1295,16 +978,8 @@ const SportsWireScreen = () => {
   // ============= MAIN RENDER =============
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
-      {/* Error Snackbar */}
-      <Snackbar
-        open={showErrorSnackbar}
-        autoHideDuration={6000}
-        onClose={() => setShowErrorSnackbar(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setShowErrorSnackbar(false)} severity={usingMockData ? "warning" : "info"} sx={{ width: '100%' }}>
-          {errorMessage || (usingMockData ? "Using mock data - API connection issue" : "Ready")}
-        </Alert>
+      <Snackbar open={showErrorSnackbar} autoHideDuration={6000} onClose={() => setShowErrorSnackbar(false)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert onClose={() => setShowErrorSnackbar(false)} severity={usingMockData ? "warning" : "info"}>{errorMessage || (usingMockData ? "Using mock data - API connection issue" : "Ready")}</Alert>
       </Snackbar>
 
       {/* Header */}
@@ -1313,29 +988,17 @@ const SportsWireScreen = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
             <IconButton onClick={() => navigate(-1)} sx={{ color: 'white' }}><ArrowBack /></IconButton>
             <Box sx={{ flex: 1 }}>
-              <Typography variant="h4" fontWeight="bold">SportsWire</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                <Typography variant="h4" fontWeight="bold">SportsWire</Typography>
+                {hasPremiumAccess && <Chip icon={<CheckCircleIcon />} label="Premium" color="success" size="small" sx={{ bgcolor: '#10b981', color: 'white' }} />}
+              </Box>
               <Typography variant="body1">Latest {selectedSport.toUpperCase()} news and updates</Typography>
-              {usingMockData && (
-                <Chip 
-                  icon={<ErrorIcon />}
-                  label="Using Mock Data" 
-                  size="small" 
-                  sx={{ mt: 1, bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} 
-                />
-              )}
+              {usingMockData && <Chip icon={<ErrorIcon />} label="Using Mock Data" size="small" sx={{ mt: 1, bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} />}
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
               {teams.length > 0 && (
                 <FormControl size="small" sx={{ minWidth: 200, mr: 1 }}>
-                  <Select 
-                    value={selectedTeam} 
-                    displayEmpty 
-                    onChange={(e) => { 
-                      setSelectedTeam(e.target.value); 
-                      if (e.target.value) fetchTeamNews(e.target.value); 
-                    }} 
-                    sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}
-                  >
+                  <Select value={selectedTeam} displayEmpty onChange={(e) => { setSelectedTeam(e.target.value); if (e.target.value) fetchTeamNews(e.target.value); }} sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}>
                     <MenuItem value="">Select Team</MenuItem>
                     {teams.map(team => <MenuItem key={team} value={team}>{team}</MenuItem>)}
                   </Select>
@@ -1348,25 +1011,14 @@ const SportsWireScreen = () => {
               <Badge badgeContent={injuryNews.length} color="error">
                 <IconButton onClick={() => setShowInjuryModal(true)} sx={{ color: 'white', bgcolor: 'rgba(239,68,68,0.3)' }}><LocalHospital /></IconButton>
               </Badge>
-              <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)' }}>
-                <UpdateIcon />
-              </IconButton>
+              <IconButton onClick={handleRefresh} disabled={refreshing} sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)' }}><UpdateIcon /></IconButton>
             </Box>
           </Box>
           <Grid container spacing={2} sx={{ mt: 2 }}>
             <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth sx={{ bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 1 }}>
                 <InputLabel sx={{ color: 'white' }}>Sport</InputLabel>
-                <Select 
-                  value={selectedSport} 
-                  label="Sport" 
-                  onChange={handleSportChange} 
-                  sx={{ 
-                    color: 'white', 
-                    '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }, 
-                    '& .MuiSvgIcon-root': { color: 'white' } 
-                  }}
-                >
+                <Select value={selectedSport} label="Sport" onChange={handleSportChange} sx={{ color: 'white', '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' }, '& .MuiSvgIcon-root': { color: 'white' } }}>
                   <MenuItem value="nba">NBA</MenuItem>
                   <MenuItem value="nfl">NFL</MenuItem>
                   <MenuItem value="mlb">MLB</MenuItem>
@@ -1385,34 +1037,27 @@ const SportsWireScreen = () => {
         </Box>
       </Paper>
 
-      {/* Search Bar */}
+      {/* Plan Features Display */}
+      {profile && <Box sx={{ mb: 3 }}><PlanFeaturesDisplay currentPlan={profile.plan} compact /></Box>}
+
+      {/* Upgrade Banner for free users */}
+      {!hasPremiumAccess && (
+        <Alert severity="info" sx={{ mb: 3 }} action={<Button color="inherit" size="small" onClick={() => setShowUpgradeModal(true)}>Upgrade Now</Button>}>
+          <AlertTitle>Unlock Premium Sports Analytics</AlertTitle>
+          Get access to advanced injury analytics, beat writer insights, team news aggregation, and more.
+        </Alert>
+      )}
+
+      {/* ===== MAIN CONTENT – NOW FREE FOR ALL USERS ===== */}
       <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <TextField 
-          fullWidth 
-          variant="outlined" 
-          placeholder="Search players, teams, beat writers, or news..." 
-          defaultValue={searchQuery} 
-          onChange={handleSearchChange} 
-          inputRef={searchInputRef} 
-          InputProps={{
-            startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
-            endAdornment: <InputAdornment position="end">
-              {isSearching && <CircularProgress size={20} sx={{ mr: 1 }} />}
-              {searchQuery && <IconButton onClick={handleClearSearch} size="small"><Close /></IconButton>}
-            </InputAdornment>
-          }} 
-        />
+        <TextField fullWidth variant="outlined" placeholder="Search players, teams, beat writers, or news..." defaultValue={searchQuery} onChange={handleSearchChange} inputRef={searchInputRef} InputProps={{
+          startAdornment: <InputAdornment position="start"><Search /></InputAdornment>,
+          endAdornment: <InputAdornment position="end">{isSearching && <CircularProgress size={20} sx={{ mr: 1 }} />}{searchQuery && <IconButton onClick={handleClearSearch} size="small"><Close /></IconButton>}</InputAdornment>
+        }} />
       </Paper>
 
-      {/* Category Tabs */}
       <Paper sx={{ mb: 3, borderRadius: 2, overflow: 'hidden' }}>
-        <Tabs 
-          value={selectedCategory} 
-          onChange={(e, newValue) => setSelectedCategory(newValue)} 
-          variant="scrollable" 
-          scrollButtons="auto" 
-          sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}
-        >
+        <Tabs value={selectedCategory} onChange={(e, newValue) => setSelectedCategory(newValue)} variant="scrollable" scrollButtons="auto" sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
           <Tab value="all" label="All Sports" icon={<Bolt />} iconPosition="start" />
           <Tab value="NBA" label="NBA" icon={<SportsBasketball />} iconPosition="start" />
           <Tab value="NFL" label="NFL" icon={<SportsFootball />} iconPosition="start" />
@@ -1432,7 +1077,6 @@ const SportsWireScreen = () => {
         </Box>
       </Paper>
 
-      {/* Alert Banners */}
       {beatWriterNews.length > 0 && selectedCategory !== 'beat-writers' && (
         <Alert severity="info" sx={{ mb: 3, bgcolor: '#f5f3ff', color: '#8b5cf6' }} icon={<Twitter />} action={<Button color="inherit" size="small" onClick={() => setSelectedCategory('beat-writers')}>View {beatWriterNews.length} Beat Writer {beatWriterNews.length === 1 ? 'Update' : 'Updates'}</Button>}>
           <Typography variant="body2" fontWeight="bold">✍️ {beatWriterNews.length} {beatWriterNews.length === 1 ? 'Update' : 'Updates'} from Beat Writers & Insiders</Typography>
@@ -1444,24 +1088,15 @@ const SportsWireScreen = () => {
         </Alert>
       )}
 
-      {/* News Feed */}
       {refreshing && <LinearProgress sx={{ mb: 2 }} />}
       {filteredNews.length > 0 ? (
-        filteredNews.map(item => (
-          <div key={item.id} id={`news-${item.id}`}>
-            {renderNewsCard(item)}
-          </div>
-        ))
+        filteredNews.map(item => <div key={item.id} id={`news-${item.id}`}>{renderNewsCard(item)}</div>)
       ) : (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Newspaper sx={{ fontSize: 60, color: '#cbd5e1', mb: 2 }} />
           <Typography variant="h6" gutterBottom>No news found</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            {searchQuery ? `No results for "${searchQuery}"` : `No ${selectedCategory === 'all' ? 'news' : selectedCategory} available`}
-          </Typography>
-          <Button variant="contained" onClick={handleRefresh} startIcon={<UpdateIcon />}>
-            Refresh
-          </Button>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>{searchQuery ? `No results for "${searchQuery}"` : `No ${selectedCategory === 'all' ? 'news' : selectedCategory} available`}</Typography>
+          <Button variant="contained" onClick={handleRefresh} startIcon={<UpdateIcon />}>Refresh</Button>
         </Paper>
       )}
 
@@ -1472,7 +1107,16 @@ const SportsWireScreen = () => {
       <TeamNewsModal />
       <SearchResultsModal />
       <AnalyticsDashboardModal />
+      <UpgradeModal />
     </Container>
+  );
+};
+
+const SportsWireScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="SportsWireScreen">
+      <SportsWireContent />
+    </ProtectedRoute>
   );
 };
 

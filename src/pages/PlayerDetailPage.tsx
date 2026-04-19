@@ -12,7 +12,6 @@ import {
   Paper,
   CircularProgress,
   Avatar,
-  Divider,
   List,
   ListItem,
   ListItemText,
@@ -26,9 +25,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  useTheme,
   alpha,
-  Badge
 } from '@mui/material';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -43,16 +40,12 @@ import {
   EmojiEvents as EmojiEventsIcon,
   Star as StarIcon,
   TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Info as InfoIcon,
   Share as ShareIcon,
   Bookmark as BookmarkIcon,
-  BookmarkBorder as BookmarkBorderIcon
+  BookmarkBorder as BookmarkBorderIcon,
 } from '@mui/icons-material';
-import { useQuery } from '@tanstack/react-query';
 
-// ============= CONSTANTS =============
-const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const API_BASE = 'https://prizepicks-production.up.railway.app';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -75,221 +68,183 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
-const PlayerDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
+const PlayerDetailPage: React.FC = () => {
+  const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const theme = useTheme();
-  
-  // Get player data from navigation state if available
-  const { player: initialPlayer, sport: initialSport, isRealData } = location.state || {};
-  
+
+  // 1. Extract prop data from navigation state (if coming from PlayerPropsScreen)
+  const propFromState = location.state?.prop;
+
+  // 2. Determine player name and sport
+  const playerNameFromProp = propFromState?.player || null;
+  const sportFromProp = propFromState?.sport?.toLowerCase() || 'nba';
+  const fallbackPlayerName = id ? decodeURIComponent(id) : null;
+
+  const effectivePlayerName = playerNameFromProp || fallbackPlayerName;
+  const effectiveSport = sportFromProp;
+
+  // 3. State for fetched player stats
+  const [playerStats, setPlayerStats] = useState<any>(null);
+  const [loading, setLoading] = useState<boolean>(!!effectivePlayerName);
+  const [error, setError] = useState<string | null>(null);
+
+  // 4. Fetch full player stats from /api/fantasyhub/players
+  useEffect(() => {
+    if (!effectivePlayerName) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchPlayerStats = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Fetch all players for the sport (no filter by today to get full list)
+        const url = `${API_BASE}/api/fantasyhub/players?sport=${effectiveSport}&filterByToday=false`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+
+        if (data.success && Array.isArray(data.data)) {
+          // Find player by name (case‑insensitive)
+          const found = data.data.find(
+            (p: any) => p.name?.toLowerCase() === effectivePlayerName?.toLowerCase()
+          );
+          if (found) {
+            console.log(`✅ Found stats for ${found.name}`);
+            setPlayerStats(found);
+          } else {
+            console.warn(`⚠️ Player "${effectivePlayerName}" not found in ${effectiveSport} data`);
+            setError(`Player "${effectivePlayerName}" not found.`);
+          }
+        } else {
+          throw new Error('Invalid response format');
+        }
+      } catch (err: any) {
+        console.error('❌ Failed to fetch player stats:', err);
+        setError(err.message || 'Failed to load player data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPlayerStats();
+  }, [effectivePlayerName, effectiveSport]);
+
+  // 5. UI state
   const [tabValue, setTabValue] = useState(0);
   const [isBookmarked, setIsBookmarked] = useState(false);
-  const [sport, setSport] = useState(initialSport || 'nba');
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
-  // Fetch player details from API - using the correct endpoint from logs
-  const {
-    data: playerData,
-    isLoading,
-    error,
-    refetch
-  } = useQuery({
-    queryKey: ['player', id, sport],
-    queryFn: async () => {
-      console.log(`🔍 Fetching player ${id} for sport ${sport}`);
-      
-      // Use the fantasyhub players endpoint which actually returns player data
-      const url = `${NODE_API_BASE}/api/fantasyhub/players?sport=${sport}&limit=500`;
-      
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log(`✅ Received response:`, data);
-        
-        // The API returns an object with success, data properties
-        if (data.success && Array.isArray(data.data)) {
-          console.log(`✅ Received ${data.data.length} players from API`);
-          
-          // Find the specific player by ID
-          const foundPlayer = data.data.find((p: any) => {
-            // Try different ID formats
-            const playerId = p.player_id || p.id;
-            return playerId === id || 
-                   playerId?.toString() === id?.toString() ||
-                   // Handle the static ID format like "nba-static-Nikola-Jokic-DEN"
-                   (typeof id === 'string' && id.includes('static') && 
-                    p.name && id.includes(p.name.replace(/\s+/g, '-')));
-          });
-          
-          if (foundPlayer) {
-            console.log(`✅ Found player: ${foundPlayer.name}`);
-            return foundPlayer;
-          }
-          
-          // If player not found by ID, try to find by name if we have initial player
-          if (initialPlayer?.name) {
-            const playerByName = data.data.find((p: any) => 
-              p.name?.toLowerCase() === initialPlayer.name.toLowerCase()
-            );
-            if (playerByName) {
-              console.log(`✅ Found player by name: ${playerByName.name}`);
-              return playerByName;
-            }
-          }
-          
-          console.log(`❌ Player with ID ${id} not found in response`);
-          return null;
-        } else {
-          console.log(`❌ Unexpected response format:`, data);
-          return null;
-        }
-      } catch (err) {
-        console.error(`❌ Error fetching players:`, err);
-        throw err;
-      }
-    },
-    staleTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: false,
-    retry: 1,
-    enabled: !initialPlayer, // Only fetch if we don't have initial player data
-  });
-
-  // Extract stats from top-level fields if they exist
-  useEffect(() => {
-    if (playerData && !playerData.stats) {
-      // The API returns stats at the top level, so we need to collect them
-      const statFields = [
-        'points', 'assists', 'rebounds', 'steals', 'blocks', 'turnovers',
-        'pts_per_game', 'ast_per_game', 'reb_per_game', 'stl_per_game', 
-        'blk_per_game', 'to_per_game', 'fg_pct', 'three_pct', 'ft_pct',
-        'minutes', 'games_played', 'fantasy_points', 'salary', 'value',
-        'field_goal_pct', 'three_point_pct', 'free_throw_pct'
-      ];
-      
-      const extractedStats: any = {};
-      statFields.forEach(field => {
-        if (playerData[field] !== undefined) {
-          extractedStats[field] = playerData[field];
-        }
-      });
-      
-      // If we found stats, attach them to the player object
-      if (Object.keys(extractedStats).length > 0) {
-        playerData.stats = extractedStats;
-        console.log('✅ Extracted stats:', extractedStats);
-      }
-    }
-  }, [playerData]);
-
-  // Use initial player data if available, otherwise use fetched data
-  const player = initialPlayer || playerData;
-
-  // Log what data we have
-  useEffect(() => {
-    if (player) {
-      console.log('✅ Displaying player data:', {
-        name: player.name,
-        id: player.player_id || player.id,
-        team: player.team,
-        stats: player.stats ? Object.keys(player.stats).length : 'No stats',
-        source: initialPlayer ? 'navigation state' : 'API fetch'
-      });
-    }
-  }, [player, initialPlayer]);
-
-  const calculateAdvancedMetrics = () => {
-    if (!player || !player.stats) {
-      return {
-        per: '0.0',
-        efficiency: '0.0',
-        usageRate: '0%',
-        winShares: '0.0',
-        vorp: '0.0',
-      };
-    }
-
-    const stats = player.stats;
-    
-    let per = 0;
-    let efficiency = 0;
-    let usageRate = 0;
-    let winShares = 0;
-    let vorp = 0;
-
-    if (sport === 'nba') {
-      per = ((stats.points || stats.pts_per_game || 0) * 1.0 +
-             (stats.rebounds || stats.reb_per_game || 0) * 0.8 +
-             (stats.assists || stats.ast_per_game || 0) * 1.2 +
-             (stats.steals || stats.stl_per_game || 0) * 1.5 +
-             (stats.blocks || stats.blk_per_game || 0) * 2.0 -
-             (stats.turnovers || stats.to_per_game || 0) * 1.0) / 10;
-      per = Math.max(0, Math.min(per, 40));
-      
-      efficiency = ((stats.points || stats.pts_per_game || 0) + 
-                    (stats.rebounds || stats.reb_per_game || 0) + 
-                    (stats.assists || stats.ast_per_game || 0) +
-                    (stats.steals || stats.stl_per_game || 0) + 
-                    (stats.blocks || stats.blk_per_game || 0) -
-                    (stats.turnovers || stats.to_per_game || 0));
-      winShares = per * 0.2;
-      vorp = (per - 15) * 0.5;
-      usageRate = 25 + (per - 15) * 2;
-    }
-
-    return {
-      per: per.toFixed(1),
-      efficiency: efficiency.toFixed(1),
-      usageRate: Math.min(usageRate, 100).toFixed(1) + '%',
-      winShares: winShares.toFixed(1),
-      vorp: vorp.toFixed(1),
-    };
-  };
-
-  const metrics = calculateAdvancedMetrics();
-
+  // Helper: get sport icon and color
   const getSportIcon = () => {
-    switch(sport) {
-      case 'nba': return <BasketballIcon sx={{ fontSize: 40 }} />;
-      case 'nfl': return <FootballIcon sx={{ fontSize: 40 }} />;
-      case 'nhl': return <HockeyIcon sx={{ fontSize: 40 }} />;
-      case 'mlb': return <BaseballIcon sx={{ fontSize: 40 }} />;
-      default: return <PersonIcon sx={{ fontSize: 40 }} />;
+    switch (effectiveSport) {
+      case 'nba':
+        return <BasketballIcon sx={{ fontSize: 40 }} />;
+      case 'nfl':
+        return <FootballIcon sx={{ fontSize: 40 }} />;
+      case 'nhl':
+        return <HockeyIcon sx={{ fontSize: 40 }} />;
+      case 'mlb':
+        return <BaseballIcon sx={{ fontSize: 40 }} />;
+      default:
+        return <PersonIcon sx={{ fontSize: 40 }} />;
     }
   };
 
   const getSportColor = () => {
-    switch(sport) {
-      case 'nba': return '#2563eb';
-      case 'nfl': return '#dc2626';
-      case 'nhl': return '#0891b2';
-      case 'mlb': return '#ca8a04';
-      default: return '#6b7280';
+    switch (effectiveSport) {
+      case 'nba':
+        return '#2563eb';
+      case 'nfl':
+        return '#dc2626';
+      case 'nhl':
+        return '#0891b2';
+      case 'mlb':
+        return '#ca8a04';
+      default:
+        return '#6b7280';
     }
   };
 
-  if (isLoading && !player) {
+  // Format stat keys for display
+  const formatStatKey = (key: string): string => {
+    return key
+      .replace(/_/g, ' ')
+      .replace(/pct/g, '%')
+      .replace(/per game/g, '')
+      .trim()
+      .toUpperCase();
+  };
+
+  // Determine which stats to show based on sport
+  const getRelevantStats = () => {
+    if (!playerStats) return {};
+    const stats: Record<string, number> = {};
+    if (effectiveSport === 'nba') {
+      if (playerStats.points !== undefined) stats.Points = playerStats.points;
+      if (playerStats.rebounds !== undefined) stats.Rebounds = playerStats.rebounds;
+      if (playerStats.assists !== undefined) stats.Assists = playerStats.assists;
+      if (playerStats.steals !== undefined) stats.Steals = playerStats.steals;
+      if (playerStats.blocks !== undefined) stats.Blocks = playerStats.blocks;
+      if (playerStats.fantasy_points !== undefined) stats['Fantasy Pts'] = playerStats.fantasy_points;
+    } else if (effectiveSport === 'nhl') {
+      if (playerStats.goals !== undefined) stats.Goals = playerStats.goals;
+      if (playerStats.assists !== undefined) stats.Assists = playerStats.assists;
+      if (playerStats.points !== undefined) stats.Points = playerStats.points;
+      if (playerStats.shots !== undefined) stats.Shots = playerStats.shots;
+      if (playerStats.hits !== undefined) stats.Hits = playerStats.hits;
+      if (playerStats.blockedShots !== undefined) stats['Blocked Shots'] = playerStats.blockedShots;
+      if (playerStats.plusMinus !== undefined) stats['+/-'] = playerStats.plusMinus;
+    } else if (effectiveSport === 'mlb') {
+      if (playerStats.hits !== undefined) stats.Hits = playerStats.hits;
+      if (playerStats.home_runs !== undefined) stats['Home Runs'] = playerStats.home_runs;
+      if (playerStats.rbi !== undefined) stats.RBI = playerStats.rbi;
+      if (playerStats.batting_average !== undefined) stats['AVG'] = playerStats.batting_average;
+      if (playerStats.ops !== undefined) stats.OPS = playerStats.ops;
+    }
+    return stats;
+  };
+
+  const displayStats = getRelevantStats();
+
+  // Simple advanced metrics based on fantasy points
+  const calculateMetrics = () => {
+    if (!playerStats) {
+      return { per: '0.0', efficiency: '0.0', usage: '0%', winShares: '0.0' };
+    }
+    const fp = playerStats.fantasy_points || 0;
+    const per = (fp / 10).toFixed(1);
+    const efficiency = (fp * 1.2).toFixed(1);
+    const usage = `${Math.min(100, Math.floor(fp * 2))}%`;
+    const winShares = (fp / 15).toFixed(1);
+    return { per, efficiency, usage, winShares };
+  };
+
+  const metrics = calculateMetrics();
+
+  // Loading state
+  if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
         <CircularProgress />
-        <Typography variant="h6" ml={2}>Loading Player Details...</Typography>
+        <Typography variant="h6" ml={2}>
+          Loading player details...
+        </Typography>
       </Box>
     );
   }
 
-  if (error && !player) {
+  // Error state
+  if (error || (!playerStats && !propFromState)) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
         <Alert severity="error" sx={{ mb: 3 }}>
-          Failed to load player data. Please try again.
+          {error || 'No player data found.'}
         </Alert>
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)}>
           Go Back
@@ -298,30 +253,32 @@ const PlayerDetailPage = () => {
     );
   }
 
-  if (!player) {
+  // No data but no error (should not happen, but handle gracefully)
+  if (!playerStats && !propFromState) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          No player data found.
-        </Alert>
+        <Alert severity="warning">No player information available.</Alert>
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)}>
           Go Back
         </Button>
       </Container>
     );
   }
+
+  // Player name from either prop or fetched stats
+  const displayName = playerStats?.name || propFromState?.player || 'Unknown Player';
+  const displayTeam = playerStats?.team || propFromState?.team || 'N/A';
+  const displayPosition = playerStats?.position || 'N/A';
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* Header */}
+      {/* Header with back button */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)}>
-          Back to Players
+          Back to Props
         </Button>
         <Box display="flex" alignItems="center" gap={1}>
-          {isRealData && (
-            <Chip label="LIVE DATA" size="small" color="success" />
-          )}
+          {playerStats?.is_real_data && <Chip label="LIVE DATA" size="small" color="success" />}
           <IconButton onClick={() => setIsBookmarked(!isBookmarked)}>
             {isBookmarked ? <BookmarkIcon color="primary" /> : <BookmarkBorderIcon />}
           </IconButton>
@@ -343,62 +300,77 @@ const PlayerDetailPage = () => {
                   bgcolor: 'white',
                   color: getSportColor(),
                   fontSize: 40,
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
                 }}
               >
-                {player.name?.charAt(0) || 'P'}
+                {displayName.charAt(0)}
               </Avatar>
             </Grid>
             <Grid item xs>
               <Typography variant="h3" fontWeight="bold" color="white">
-                {player.name || 'Unknown Player'}
+                {displayName}
               </Typography>
               <Box display="flex" alignItems="center" gap={2} mt={1}>
                 <Chip
                   icon={getSportIcon()}
-                  label={sport.toUpperCase()}
+                  label={effectiveSport.toUpperCase()}
                   sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
                 />
                 <Typography variant="h6" color="white">
-                  {player.team || 'Free Agent'} • #{player.number || player.jersey_number || '--'} • {player.position || 'N/A'}
+                  {displayTeam} • {displayPosition}
                 </Typography>
               </Box>
             </Grid>
           </Grid>
         </Box>
 
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid item xs={6} sm={3}>
-              <Typography variant="body2" color="text.secondary">Age</Typography>
-              <Typography variant="h6">{player.age || player.age_display || 'N/A'}</Typography>
+        {/* Quick Stats Row (from prop, if available) */}
+        {propFromState && (
+          <CardContent>
+            <Grid container spacing={3}>
+              <Grid item xs={6} sm={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Market
+                </Typography>
+                <Typography variant="h6">{propFromState.market || 'N/A'}</Typography>
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Line
+                </Typography>
+                <Typography variant="h6" color="#ff9800">
+                  {propFromState.line?.toFixed(1) || 'N/A'}
+                </Typography>
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Projection
+                </Typography>
+                <Typography variant="h6" color="#8b5cf6">
+                  {propFromState.projection?.toFixed(1) || 'N/A'}
+                </Typography>
+              </Grid>
+              <Grid item xs={6} sm={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Over Multiplier
+                </Typography>
+                <Typography
+                  variant="h6"
+                  color={propFromState.over_odds < 0 ? '#4caf50' : '#f44336'}
+                >
+                  {propFromState.over_odds
+                    ? propFromState.over_odds > 0
+                      ? `+${propFromState.over_odds}`
+                      : propFromState.over_odds
+                    : 'N/A'}
+                </Typography>
+              </Grid>
             </Grid>
-            <Grid item xs={6} sm={3}>
-              <Typography variant="body2" color="text.secondary">Height / Weight</Typography>
-              <Typography variant="h6">{player.height || 'N/A'} • {player.weight || 'N/A'}</Typography>
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <Typography variant="body2" color="text.secondary">Salary</Typography>
-              <Typography variant="h6" color="success.main">{player.salary ? `$${player.salary.toLocaleString()}` : 'N/A'}</Typography>
-            </Grid>
-            <Grid item xs={6} sm={3}>
-              <Typography variant="body2" color="text.secondary">Experience</Typography>
-              <Typography variant="h6">{player.experience || `${player.age || 25} years`}</Typography>
-            </Grid>
-          </Grid>
-        </CardContent>
+          </CardContent>
+        )}
       </Card>
 
-      {/* Data Source Indicator */}
-      {!initialPlayer && playerData && (
-        <Paper sx={{ p: 1, mb: 2, bgcolor: '#dcfce7' }}>
-          <Typography variant="caption" color="success.dark">
-            ✅ Loaded from API • {player.name}
-          </Typography>
-        </Paper>
-      )}
-
-      {/* Tabs - Only showing working tabs */}
+      {/* Tabs */}
       <Paper sx={{ mb: 3 }}>
         <Tabs
           value={tabValue}
@@ -408,7 +380,7 @@ const PlayerDetailPage = () => {
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab label="Overview" />
-          <Tab label="Stats" />
+          <Tab label="Season Stats" />
           <Tab label="Advanced Metrics" />
         </Tabs>
       </Paper>
@@ -420,33 +392,26 @@ const PlayerDetailPage = () => {
             <Card>
               <CardContent>
                 <Typography variant="h5" fontWeight="bold" gutterBottom>
-                  Season Stats
+                  Key Season Averages
                 </Typography>
                 <Grid container spacing={2}>
-                  {player.stats && Object.entries(player.stats).map(([key, value], index) => {
-                    if (index > 7) return null; // Limit to first 8 stats
-                    const numValue = typeof value === 'number' ? value : parseFloat(value as string) || 0;
-                    const formatted = numValue.toFixed(1);
-                    const displayKey = key
-                      .replace(/_/g, ' ')
-                      .replace(/pct/g, '%')
-                      .replace(/per game/g, '')
-                      .trim();
+                  {Object.entries(displayStats).map(([key, value], idx) => {
+                    const numValue = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
                     return (
-                      <Grid item xs={6} sm={4} key={index}>
+                      <Grid item xs={6} sm={4} key={idx}>
                         <Box
                           sx={{
                             p: 2,
                             bgcolor: alpha(getSportColor(), 0.1),
                             borderRadius: 2,
-                            textAlign: 'center'
+                            textAlign: 'center',
                           }}
                         >
                           <Typography variant="h5" fontWeight="bold" color={getSportColor()}>
-                            {formatted}
+                            {numValue.toFixed(1)}
                           </Typography>
                           <Typography variant="body2" color="text.secondary">
-                            {displayKey.toUpperCase()}
+                            {key}
                           </Typography>
                         </Box>
                       </Grid>
@@ -466,7 +431,7 @@ const PlayerDetailPage = () => {
                   <ListItem>
                     <SpeedIcon sx={{ color: '#7c3aed', mr: 2 }} />
                     <ListItemText
-                      primary="PER"
+                      primary="PER (Est.)"
                       secondary={metrics.per}
                       primaryTypographyProps={{ fontWeight: 'medium' }}
                     />
@@ -494,12 +459,12 @@ const PlayerDetailPage = () => {
         </Grid>
       </TabPanel>
 
-      {/* Stats Tab */}
+      {/* Season Stats Tab - Full table */}
       <TabPanel value={tabValue} index={1}>
         <Card>
           <CardContent>
             <Typography variant="h5" fontWeight="bold" gutterBottom>
-              Full Statistics
+              Complete Season Statistics
             </Typography>
             <TableContainer>
               <Table>
@@ -510,25 +475,45 @@ const PlayerDetailPage = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {player.stats && Object.entries(player.stats).map(([key, value], index) => {
-                    const displayKey = key
-                      .replace(/_/g, ' ')
-                      .replace(/pct/g, '%')
-                      .replace(/per game/g, '')
-                      .trim();
-                    return (
-                      <TableRow key={index}>
-                        <TableCell component="th" scope="row">
-                          {displayKey.toUpperCase()}
-                        </TableCell>
+                  {Object.entries(displayStats).map(([key, value], idx) => (
+                    <TableRow key={idx}>
+                      <TableCell component="th" scope="row">
+                        {key}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography fontWeight="medium">
+                          {typeof value === 'number' ? value.toFixed(2) : value}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {/* Additional prop-specific info if available */}
+                  {propFromState && (
+                    <>
+                      <TableRow>
+                        <TableCell>Prop Market</TableCell>
+                        <TableCell align="right">{propFromState.market}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Prop Line</TableCell>
+                        <TableCell align="right">{propFromState.line?.toFixed(1)}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Prop Projection</TableCell>
+                        <TableCell align="right">{propFromState.projection?.toFixed(1)}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Over Multiplier</TableCell>
                         <TableCell align="right">
-                          <Typography fontWeight="medium">
-                            {typeof value === 'number' ? value.toFixed(1) : value}
-                          </Typography>
+                          {propFromState.over_odds
+                            ? propFromState.over_odds > 0
+                              ? `+${propFromState.over_odds}`
+                              : propFromState.over_odds
+                            : 'N/A'}
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
+                    </>
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -579,7 +564,7 @@ const PlayerDetailPage = () => {
                   <Typography variant="h6">Usage Rate (USG%)</Typography>
                 </Box>
                 <Typography variant="h3" fontWeight="bold" color="#f59e0b">
-                  {metrics.usageRate}
+                  {metrics.usage}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" mt={1}>
                   Percentage of team plays used by player.
@@ -592,13 +577,13 @@ const PlayerDetailPage = () => {
               <CardContent>
                 <Box display="flex" alignItems="center" mb={2}>
                   <StarIcon sx={{ color: '#8b5cf6', mr: 1 }} />
-                  <Typography variant="h6">Value Over Replacement (VORP)</Typography>
+                  <Typography variant="h6">Fantasy Points / Game</Typography>
                 </Box>
                 <Typography variant="h3" fontWeight="bold" color="#8b5cf6">
-                  {metrics.vorp}
+                  {playerStats?.fantasy_points?.toFixed(1) || 'N/A'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" mt={1}>
-                  Player's value compared to replacement level.
+                  Average fantasy points per game.
                 </Typography>
               </CardContent>
             </Card>

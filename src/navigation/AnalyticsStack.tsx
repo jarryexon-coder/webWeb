@@ -43,7 +43,7 @@ export const AnalyticsStack = () => {
         component={AdvancedAnalyticsScreen}
         options={({ route, navigation }) => ({
           title: route.params?.sport 
-            ? `${route.params.sport.toUpperCase()} Parlay Analytics` 
+            ? `${route.params.sport.toUpperCase()} Combo Analytics` 
             : 'Advanced Analytics',
           headerLeft: (props) => (
             <HeaderBackButton 
@@ -63,10 +63,10 @@ export const AnalyticsStack = () => {
       />
       
       <Stack.Screen 
-        name="CorrelatedParlayDetails" 
+        name="CorrelatedComboDetails" 
         component={CorrelatedParlayDetailsScreen}
         options={{
-          title: 'Correlated Parlay Analysis',
+          title: 'Correlated Combo Analysis',
         }}
       />
       
@@ -74,7 +74,7 @@ export const AnalyticsStack = () => {
         name="ParlayBuilder" 
         component={ParlayBuilderScreen}
         options={{
-          title: 'Build Parlay',
+          title: 'Build Combo',
           presentation: 'modal',
         }}
       />

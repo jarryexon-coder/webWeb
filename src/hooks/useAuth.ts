@@ -1,93 +1,144 @@
 // src/hooks/useAuth.ts
 import { useState, useEffect } from 'react';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  User as FirebaseUser 
+} from 'firebase/auth';
+import { auth } from '../firebase';
 
-interface User {
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://python-api-fresh-production.up.railway.app';
+
+interface UserProfile {
   id: string;
-  name: string;
   email: string;
-  isPremium: boolean;
+  plan: string;
+  subscription_id?: string;
+  stripe_customer_id?: string;
+  credits?: number;
+  firstName?: string;
+  lastName?: string;
 }
 
+const getPlanFeatures = (plan: string) => {
+  const hierarchy = { free: 0, starter: 1, analytics: 2, generator: 3, influencer: 4 };
+  const hasAccess = (minPlan: string) => (hierarchy[plan as keyof typeof hierarchy] || 0) >= (hierarchy[minPlan as keyof typeof hierarchy] || 0);
+  return {
+    hasPlayerStats: hasAccess('starter'),
+    hasAdvancedAnalytics: hasAccess('analytics'),
+    hasAIRecommendations: hasAccess('analytics'),
+    hasLiveData: hasAccess('starter'),
+    hasBettingInsights: hasAccess('analytics'),
+    hasGeneratorCredits: hasAccess('generator'),
+    unlimitedGenerations: plan === 'influencer',
+  };
+};
+
 export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+
+  const fetchUserProfile = async (idToken: string) => {
+    try {
+      // ✅ Use full backend URL
+      const response = await fetch(`${API_BASE}/api/user/profile`, {
+        headers: { Authorization: `Bearer ${idToken}` }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.id || data.email) {
+        setProfile(data);
+        localStorage.setItem('userPlan', data.plan || 'free');
+      } else {
+        console.error('Invalid profile data:', data);
+        setProfile(null);
+      }
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
+      // Try to use cached plan
+      const cachedPlan = localStorage.getItem('userPlan');
+      if (cachedPlan && !profile) {
+        setProfile({ id: '', email: '', plan: cachedPlan });
+      } else {
+        setProfile(null);
+      }
+    }
+  };
 
   useEffect(() => {
-    // Check if user is logged in (mock)
-    const checkAuth = async () => {
-      setLoading(true);
-      // Simulate API call
-      setTimeout(() => {
-        // Mock user data - replace with actual auth check
-        const mockUser = localStorage.getItem('user');
-        if (mockUser) {
-          setUser(JSON.parse(mockUser));
-          setIsAuthenticated(true);
-        }
-        setLoading(false);
-      }, 500);
-    };
-
-    checkAuth();
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const idToken = await user.getIdToken();
+        setToken(idToken);
+        await fetchUserProfile(idToken);
+      } else {
+        setProfile(null);
+        setToken(null);
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
+  const refreshProfile = async () => {
+    if (token) await fetchUserProfile(token);
+  };
+
   const login = async (email: string, password: string) => {
-    setLoading(true);
     try {
-      // Mock login - replace with actual API
-      const mockUser: User = {
-        id: '1',
-        name: 'Demo User',
-        email,
-        isPremium: true
-      };
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      setUser(mockUser);
-      setIsAuthenticated(true);
-      return { success: true, user: mockUser };
-    } catch (error) {
-      return { success: false, error: 'Login failed' };
-    } finally {
-      setLoading(false);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const idToken = await userCredential.user.getIdToken();
+      setToken(idToken);
+      await fetchUserProfile(idToken);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const register = async (email: string, password: string, firstName?: string, lastName?: string) => {
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const idToken = await userCredential.user.getIdToken();
+      // Optionally call backend to store name
+      await fetch(`${API_BASE}/api/user/profile`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ firstName, lastName })
+      });
+      await fetchUserProfile(idToken);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
     }
   };
 
   const logout = async () => {
-    localStorage.removeItem('user');
-    setUser(null);
-    setIsAuthenticated(false);
+    await signOut(auth);
+    setProfile(null);
+    setToken(null);
+    localStorage.removeItem('userPlan');
   };
 
-  const register = async (name: string, email: string, password: string) => {
-    setLoading(true);
-    try {
-      // Mock registration - replace with actual API
-      const mockUser: User = {
-        id: '1',
-        name,
-        email,
-        isPremium: false
-      };
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      setUser(mockUser);
-      setIsAuthenticated(true);
-      return { success: true, user: mockUser };
-    } catch (error) {
-      return { success: false, error: 'Registration failed' };
-    } finally {
-      setLoading(false);
-    }
-  };
+  const planFeatures = profile ? getPlanFeatures(profile.plan) : getPlanFeatures('free');
 
   return {
-    user,
+    profile,
+    planFeatures,
     loading,
-    isAuthenticated,
+    token,
+    isAuthenticated: !!profile,
     login,
     logout,
     register,
-    isPremium: user?.isPremium || false,
+    refreshProfile,
   };
 };
 

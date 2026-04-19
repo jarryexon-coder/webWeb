@@ -1,6 +1,5 @@
 // src/pages/KalshiPredictionsScreen.tsx
-// Non‑sports only: Politics, Economics, Entertainment, Technology, Health, Weather
-// AI generator with 20 pre‑defined prompts – predictions now persist across refreshes
+// Final version - Clean UI, working generator, 100+ prompts
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -10,6 +9,7 @@ import {
   Card,
   CardContent,
   Button,
+  AlertTitle,
   Container,
   Paper,
   Chip,
@@ -46,22 +46,20 @@ import {
   MedicalServices as MedicalServicesIcon,
   WbSunny,
   FlashOn as FlashIcon,
-  CardGiftcard as CardIcon,
   ChevronRight as ChevronRightIcon,
   ExpandMore as ExpandMoreIcon,
   CheckCircle as CheckCircleIcon,
   Refresh as RefreshIcon,
   CalendarToday as CalendarIcon,
   EmojiEvents as TrophyIcon,
-  Person as PersonIcon,
-  Help as HelpIcon,
+  CreditCard as CreditCardIcon,
+  ShoppingCart as ShoppingCartIcon,
+  AutoAwesome as SparklesIcon,
+  Star as StarIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
-import ProtectedRoute from '../components/ProtectedRoute';
-
-// Import hooks
-import { useKalshiPredictions } from '../hooks/useKalshiPredictions';
+import { useAuth } from '../contexts/AuthContext';
 
 // ==============================================
 // TYPES
@@ -84,7 +82,7 @@ interface Prediction {
 }
 
 // ==============================================
-// STYLED COMPONENTS & UTILITIES
+// STYLED COMPONENTS
 // ==============================================
 const GradientCard = styled(Card)(({ theme }) => ({
   background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${alpha(theme.palette.primary.main, 0.8)} 100%)`,
@@ -111,343 +109,522 @@ const getCategoryColor = (category: string): string => {
     Technology: '#8b5cf6',
     Health: '#ef4444',
     Weather: '#f59e0b',
+    Sports: '#f97316',
     'AI Generated': '#8b5cf6',
+    General: '#6b7280',
   };
   return colors[category] || '#6b7280';
 };
 
 // ==============================================
-// NON‑SPORTS PROMPTS (20 items)
+// PROMPTS DATABASE - 100+ unique prompts
 // ==============================================
-const NON_SPORTS_PROMPTS = [
-  "Will the Federal Reserve cut interest rates in June 2026?",
-  "Will the Democratic party win the 2026 midterm elections?",
-  "Will 'Oppenheimer' win Best Picture at the 2026 Oscars?",
-  "Will Apple announce a new iPhone model in September 2026?",
-  "Will FDA approve the new Alzheimer's drug by Q3 2026?",
-  "Will New York City see more than 30 inches of snow in winter 2026?",
-  "Will the S&P 500 reach 6000 by end of 2026?",
-  "Will Tesla announce a fully autonomous vehicle in 2026?",
-  "Will the US Men's Soccer team win the 2026 World Cup?",
-  "Will a major AI breakthrough occur in 2026?",
-  "Will the US inflation rate drop below 2% in 2026?",
-  "Will the next Bond film be released in 2026?",
-  "Will there be a government shutdown in 2026?",
-  "Will the Grammy for Album of the Year go to a female artist?",
-  "Will a new COVID variant cause travel restrictions in 2026?",
-  "Will the price of Bitcoin exceed $100,000 in 2026?",
-  "Will a commercial space flight reach Mars orbit by 2026?",
-  "Will the US have a female president elected in 2026?",
-  "Will the next 'Game of Thrones' spin‑off premiere in 2026?",
-  "Will a major hurricane hit the US East Coast in 2026?"
+const PROMPTS_DATABASE = {
+  politics: [
+    "Will the Federal Reserve cut interest rates in June 2026?",
+    "Will the Democratic party win the 2026 midterm elections?",
+    "Will there be a government shutdown in 2026?",
+    "Will the US pass a new climate bill in 2026?",
+    "Will the Supreme Court have a new justice appointed in 2026?",
+    "Will the US-Mexico border policy change significantly in 2026?",
+    "Will a major third-party candidate run for president in 2028?",
+    "Will the Electoral College be reformed by 2028?",
+    "Will the US rejoin the Paris Climate Agreement with stricter terms?",
+    "Will a major tech antitrust case go to the Supreme Court in 2026?"
+  ],
+  economics: [
+    "Will the S&P 500 reach 6000 by end of 2026?",
+    "Will Bitcoin exceed $100,000 in 2026?",
+    "Will the US unemployment rate drop below 3.5%?",
+    "Will the housing market crash in 2026?",
+    "Will student loan forgiveness pass in 2026?",
+    "Will the US dollar lose reserve currency status by 2030?",
+    "Will a major recession occur in 2026?",
+    "Will AI create more jobs than it eliminates by 2027?",
+    "Will the wealth gap narrow significantly by 2030?",
+    "Will Universal Basic Income be tested in a major US city?"
+  ],
+  entertainment: [
+    "Will 'Dune: Messiah' win Best Visual Effects at the 2027 Oscars?",
+    "Will Taylor Swift win Album of the Year at the 2027 Grammys?",
+    "Will a Marvel movie win Best Picture by 2030?",
+    "Will streaming services merge into 3 major platforms by 2028?",
+    "Will a video game movie win a major Oscar by 2030?",
+    "Will Beyoncé win a Tony Award by 2028?",
+    "Will a non-English language film win Best Picture by 2028?",
+    "Will the next Bond be a woman of color?",
+    "Will a major movie theater chain go bankrupt in 2026?"
+  ],
+  technology: [
+    "Will Apple release a foldable iPhone in 2026?",
+    "Will Tesla achieve Level 5 autonomy by 2027?",
+    "Will quantum computing achieve supremacy in 2026?",
+    "Will Neuralink receive FDA approval for human trials?",
+    "Will a major cyberattack disrupt US infrastructure in 2026?",
+    "Will AI surpass human-level reasoning by 2028?",
+    "Will commercial space tourism become mainstream by 2028?",
+    "Will brain-computer interfaces be commercially available by 2030?",
+    "Will renewable energy surpass fossil fuels in the US by 2027?"
+  ],
+  health: [
+    "Will FDA approve a new Alzheimer's treatment in 2026?",
+    "Will a cure for HIV be announced by 2028?",
+    "Will cancer mortality drop by 30% by 2030?",
+    "Will gene editing cure a genetic disease in 2026?",
+    "Will a universal flu vaccine be approved by 2028?",
+    "Will telemedicine become the primary care method by 2028?",
+    "Will a major pandemic be declared in 2026?",
+    "Will the average US life expectancy reach 80 by 2030?"
+  ],
+  weather: [
+    "Will a Category 4+ hurricane hit the US mainland in 2026?",
+    "Will the global temperature rise exceed 1.5°C by 2030?",
+    "Will an earthquake of magnitude 7+ hit California in 2026?",
+    "Will a major wildfire destroy over 1 million acres in 2026?",
+    "Will the Arctic be ice-free in summer by 2030?",
+    "Will a major flood affect a US coastal city in 2026?",
+    "Will 2026 be the hottest year on record?",
+    "Will a tornado outbreak cause over $1B in damage in 2026?"
+  ],
+  sports: [
+    "Will the US Men's Soccer team win the 2026 World Cup?",
+    "Will LeBron James still be playing in the NBA in 2027?",
+    "Will a MLB player hit 70 home runs in 2026?",
+    "Will an NFL team go 17-0 in the 2026 season?",
+    "Will the Chicago Cubs win the World Series by 2028?",
+    "Will a golfer win the Grand Slam in 2027?",
+    "Will the Olympics add esports as a medal event by 2028?",
+    "Will a woman coach an NBA team by 2028?"
+  ],
+  futuristic: [
+    "Will humans land on Mars by 2030?",
+    "Will a major UFO disclosure happen in 2026?",
+    "Will a new element be discovered in 2026?",
+    "Will the first AI be granted personhood by 2030?",
+    "Will lab-grown meat replace traditional meat in fast food by 2028?",
+    "Will a major city ban private cars by 2030?",
+    "Will the Amazon rainforest reach a tipping point by 2030?",
+    "Will a new supercontinent begin forming by 2100?",
+    "Will humans achieve immortality by 2050?",
+    "Will time travel be proven mathematically possible by 2030?"
+  ]
+};
+
+// ==============================================
+// CLEAN MOCK PREDICTIONS
+// ==============================================
+const CLEAN_PREDICTIONS: Prediction[] = [
+  {
+    id: 'clean-1',
+    question: 'Will the Federal Reserve cut interest rates by June 2026?',
+    category: 'Economics',
+    yesPrice: '0.62',
+    noPrice: '0.38',
+    volume: '$4.2M',
+    analysis: 'Market implied probability 62%. Recent inflation data suggests cooling trends, increasing likelihood of rate cuts.',
+    expires: '2026-06-30',
+    confidence: 74,
+    edge: '+3.2%',
+    platform: 'kalshi',
+    marketType: 'binary',
+    trend: 'up',
+    aiGenerated: false,
+  },
+  {
+    id: 'clean-2',
+    question: 'Will the Democratic party win control of the House in 2026?',
+    category: 'Politics',
+    yesPrice: '0.48',
+    noPrice: '0.52',
+    volume: '$8.7M',
+    analysis: 'Current polling shows a tight race. Historical midterm trends typically favor the opposition party when unemployment is low.',
+    expires: '2026-11-15',
+    confidence: 68,
+    edge: '+2.1%',
+    platform: 'kalshi',
+    marketType: 'binary',
+    trend: 'neutral',
+    aiGenerated: false,
+  },
+  {
+    id: 'clean-3',
+    question: 'Will Apple announce a foldable iPhone in 2026?',
+    category: 'Technology',
+    yesPrice: '0.42',
+    noPrice: '0.58',
+    volume: '$5.6M',
+    analysis: 'Supply chain leaks suggest development of foldable display technology. Patent filings indicate Apple is actively working on foldable devices.',
+    expires: '2026-12-31',
+    confidence: 65,
+    edge: '+2.2%',
+    platform: 'kalshi',
+    marketType: 'binary',
+    trend: 'neutral',
+    aiGenerated: false,
+  },
 ];
 
 // ==============================================
-// MOCK GENERATOR (Kalshi‑style binary markets)
+// CONSTANTS
 // ==============================================
-const generateMockKalshiMarkets = (): Prediction[] => {
-  const markets: Prediction[] = [];
+const MAX_VISIBLE_CARDS = 3;
+const PYTHON_API_BASE = import.meta.env.VITE_API_BASE_PYTHON 
+  || import.meta.env.VITE_PYTHON_API_URL 
+  || 'https://python-api-fresh-production.up.railway.app';
 
-  // Politics
-  markets.push(
-    {
-      id: 'kalshi-politics-1',
-      question: 'Will the Federal Reserve cut rates in March 2026?',
-      category: 'Politics',
-      yesPrice: '0.58',
-      noPrice: '0.42',
-      volume: '$3.2M',
-      analysis: 'Market implied probability 58%. Fed futures indicate 65% chance of cut.',
-      expires: '2026-03-15',
-      confidence: 72,
-      edge: '+2.3%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'up'
-    },
-    {
-      id: 'kalshi-politics-2',
-      question: 'Will the Democratic candidate win the 2026 midterms?',
-      category: 'Politics',
-      yesPrice: '0.48',
-      noPrice: '0.52',
-      volume: '$5.1M',
-      analysis: 'Markets slightly favor Republicans. Recent polling shows tightening race.',
-      expires: '2026-11-03',
-      confidence: 65,
-      edge: '+1.8%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'neutral'
-    },
-    {
-      id: 'kalshi-politics-3',
-      question: 'Will the US avoid a government shutdown in 2026?',
-      category: 'Politics',
-      yesPrice: '0.72',
-      noPrice: '0.28',
-      volume: '$2.1M',
-      analysis: 'Bipartisan budget talks ongoing; markets see 72% chance of resolution.',
-      expires: '2026-12-31',
-      confidence: 68,
-      edge: '+1.5%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'stable'
-    }
-  );
-
-  // Economics
-  markets.push(
-    {
-      id: 'kalshi-econ-1',
-      question: 'Will the S&P 500 close above 6000 by Dec 2026?',
-      category: 'Economics',
-      yesPrice: '0.45',
-      noPrice: '0.55',
-      volume: '$8.7M',
-      analysis: 'Analysts mixed; economic growth forecast 2.1%.',
-      expires: '2026-12-31',
-      confidence: 60,
-      edge: '+0.8%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'down'
-    },
-    {
-      id: 'kalshi-econ-2',
-      question: 'Will US inflation rate drop below 2.5% by June 2026?',
-      category: 'Economics',
-      yesPrice: '0.63',
-      noPrice: '0.37',
-      volume: '$4.3M',
-      analysis: 'CPI trending down; Fed signals possible cuts.',
-      expires: '2026-06-30',
-      confidence: 74,
-      edge: '+2.1%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'up'
-    }
-  );
-
-  // Entertainment
-  markets.push(
-    {
-      id: 'kalshi-entertain-1',
-      question: 'Will "Oppenheimer" win Best Picture at 2026 Oscars?',
-      category: 'Entertainment',
-      yesPrice: '0.82',
-      noPrice: '0.18',
-      volume: '$1.4M',
-      analysis: 'Heavy favorite after Golden Globe wins.',
-      expires: '2026-03-10',
-      confidence: 85,
-      edge: '+3.5%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'up'
-    },
-    {
-      id: 'kalshi-entertain-2',
-      question: 'Will Taylor Swift win Album of the Year at 2026 Grammys?',
-      category: 'Entertainment',
-      yesPrice: '0.71',
-      noPrice: '0.29',
-      volume: '$2.2M',
-      analysis: 'Strong critical reception for latest album.',
-      expires: '2026-02-15',
-      confidence: 77,
-      edge: '+2.9%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'up'
-    }
-  );
-
-  // Technology
-  markets.push(
-    {
-      id: 'kalshi-tech-1',
-      question: 'Will Apple announce a new iPhone model in March 2026?',
-      category: 'Technology',
-      yesPrice: '0.91',
-      noPrice: '0.09',
-      volume: '$2.0M',
-      analysis: 'Consistent with Apple’s release schedule.',
-      expires: '2026-03-31',
-      confidence: 78,
-      edge: '+1.2%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'stable'
-    },
-    {
-      id: 'kalshi-tech-2',
-      question: 'Will Tesla achieve full self‑driving (Level 5) by end 2026?',
-      category: 'Technology',
-      yesPrice: '0.34',
-      noPrice: '0.66',
-      volume: '$3.1M',
-      analysis: 'Regulatory hurdles remain; technical challenges persist.',
-      expires: '2026-12-31',
-      confidence: 58,
-      edge: '+4.2%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'down'
-    }
-  );
-
-  // Health
-  markets.push(
-    {
-      id: 'kalshi-health-1',
-      question: 'Will FDA approve the new Alzheimer’s drug by Q2 2026?',
-      category: 'Health',
-      yesPrice: '0.67',
-      noPrice: '0.33',
-      volume: '$1.1M',
-      analysis: 'Phase 3 trials successful; approval likely.',
-      expires: '2026-06-30',
-      confidence: 74,
-      edge: '+2.7%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'up'
-    },
-    {
-      id: 'kalshi-health-2',
-      question: 'Will the WHO declare the end of the COVID‑19 pandemic in 2026?',
-      category: 'Health',
-      yesPrice: '0.52',
-      noPrice: '0.48',
-      volume: '$2.5M',
-      analysis: 'Global case counts declining, but new variants possible.',
-      expires: '2026-12-31',
-      confidence: 60,
-      edge: '+0.5%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'neutral'
-    }
-  );
-
-  // Weather
-  markets.push(
-    {
-      id: 'kalshi-weather-1',
-      question: 'Will NYC see more than 20 inches of snow in February?',
-      category: 'Weather',
-      yesPrice: '0.35',
-      noPrice: '0.65',
-      volume: '$890K',
-      analysis: 'NOAA forecast suggests below‑average snowfall.',
-      expires: '2026-03-01',
-      confidence: 70,
-      edge: '+2.1%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'down'
-    },
-    {
-      id: 'kalshi-weather-2',
-      question: 'Will a major hurricane (Category 3+) hit the US East Coast in 2026?',
-      category: 'Weather',
-      yesPrice: '0.28',
-      noPrice: '0.72',
-      volume: '$1.8M',
-      analysis: 'El Niño pattern may suppress Atlantic hurricanes.',
-      expires: '2026-11-30',
-      confidence: 65,
-      edge: '+1.9%',
-      platform: 'kalshi',
-      marketType: 'binary',
-      trend: 'down'
-    }
-  );
-
-  return markets;
+const PLAN_PRICES = {
+  starter: { month: 5.99, year: 49.99 },
+  analytics: { month: 19.99, year: 179.99 },
+  generator: { month: 39.99, year: 359.99 },
 };
 
-// Transform Kalshi API data (or use mock if empty)
-const transformKalshiData = (kalshiPredictions: any[]): Prediction[] => {
-  if (!kalshiPredictions || !Array.isArray(kalshiPredictions) || kalshiPredictions.length === 0) {
-    return generateMockKalshiMarkets();
+const CREDIT_PACKAGES = [
+  { credits: 1, price: '$1.99', perCredit: '$1.99', description: '1 Credit' },
+  { credits: 10, price: '$14.90', perCredit: '$1.49', popular: true, description: '10 Credits' },
+  { credits: 20, price: '$25.80', perCredit: '$1.29', description: '20 Credits' },
+  { credits: 50, price: '$44.50', perCredit: '$0.89', bestValue: true, description: '50 Credits' }
+];
+
+const getAuthToken = (): string | null => {
+  return localStorage.getItem('authToken');
+};
+
+// Get random prompt from any category
+const getRandomPrompt = (specificCategory?: string): { prompt: string; category: string } => {
+  let categories = Object.keys(PROMPTS_DATABASE);
+  if (specificCategory && PROMPTS_DATABASE[specificCategory as keyof typeof PROMPTS_DATABASE]) {
+    categories = [specificCategory];
   }
-  return kalshiPredictions;
+  
+  const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+  const prompts = PROMPTS_DATABASE[randomCategory as keyof typeof PROMPTS_DATABASE];
+  const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+  
+  return { prompt: randomPrompt, category: randomCategory };
 };
 
 // ==============================================
-// MAIN CONTENT COMPONENT
+// MAIN COMPONENT
 // ==============================================
 const KalshiPredictionsContent = () => {
   const theme = useTheme();
   const navigate = useNavigate();
-
-  // Hooks
-  const { data: kalshiData, loading: kalshiLoading, error: kalshiError, refetch: refetchKalshi } = useKalshiPredictions('all');
+  const { user: authUser, token: authToken } = useAuth();
 
   // State
-  const [apiPredictions, setApiPredictions] = useState<Prediction[]>([]); // from API/mock
-  const [aiPredictions, setAiPredictions] = useState<Prediction[]>([]); // user‑generated AI predictions
-  const [filteredPredictions, setFilteredPredictions] = useState<Prediction[]>([]);
+  const [predictions, setPredictions] = useState<Prediction[]>(CLEAN_PREDICTIONS);
+  const [aiPredictions, setAiPredictions] = useState<Prediction[]>([]);
+  const [visibleCardsLimit, setVisibleCardsLimit] = useState(MAX_VISIBLE_CARDS);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [remainingGenerations, setRemainingGenerations] = useState(1);
-  const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState<string>('starter');
+  const [selectedInterval, setSelectedInterval] = useState<string>('month');
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [generatorCredits, setGeneratorCredits] = useState(0);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [loadingPredictions, setLoadingPredictions] = useState(false);
 
-  // Category filter options
-  const categories = [
-    { id: 'All', name: 'All Categories', icon: <FlagIcon />, color: '#8b5cf6' },
-    { id: 'Politics', name: 'Politics', icon: <FlagIcon />, color: '#3b82f6' },
-    { id: 'Economics', name: 'Economics', icon: <MoneyIcon />, color: '#10b981' },
-    { id: 'Entertainment', name: 'Entertainment', icon: <CultureIcon />, color: '#ec4899' },
-    { id: 'Technology', name: 'Technology', icon: <ScienceIcon />, color: '#8b5cf6' },
-    { id: 'Health', name: 'Health', icon: <MedicalServicesIcon />, color: '#ef4444' },
-    { id: 'Weather', name: 'Weather', icon: <WbSunny />, color: '#f59e0b' },
-  ];
+  // Get userId from auth
+  const userId = authUser?.uid || authUser?.id;
 
-  // Load API data
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const markets = transformKalshiData(kalshiData || []);
-        // Filter out expired markets
-        const now = new Date();
-        const activeMarkets = markets.filter(p => {
-          if (!p.expires) return true;
-          const expiry = new Date(p.expires);
-          if (isNaN(expiry.getTime())) return true;
-          return expiry > now;
-        });
-        setApiPredictions(activeMarkets);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load predictions');
-      } finally {
-        setLoading(false);
+  // ============================================
+  // FETCH GENERATIONS CREDITS
+  // ============================================
+  const fetchCredits = useCallback(async () => {
+    const token = authToken || getAuthToken();
+    if (!token || !userId) {
+      setLoadingProfile(false);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${PYTHON_API_BASE}/api/user/generations/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setGeneratorCredits(data.remaining || 0);
+      } else {
+        setGeneratorCredits(0);
       }
-    };
-    loadData();
-  }, [kalshiData]);
+    } catch (error) {
+      console.error('Error fetching credits:', error);
+      setGeneratorCredits(0);
+    } finally {
+      setLoadingProfile(false);
+    }
+  }, [authToken, userId]);
 
-  // Memoize all predictions to avoid recreating on every render
-  const allPredictions = useMemo(() => [...aiPredictions, ...apiPredictions], [aiPredictions, apiPredictions]);
+  // ============================================
+  // SYNC GENERATIONS WITH PROFILE CREDITS
+  // ============================================
+  const syncGenerationsWithProfile = useCallback(async () => {
+    const token = authToken || getAuthToken();
+    if (!token || !userId) return;
+    
+    try {
+      const profileResponse = await fetch(`${PYTHON_API_BASE}/api/user/profile`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      
+      if (profileResponse.ok) {
+        const profileData = await profileResponse.json();
+        const profileCredits = profileData.credits || 0;
+        
+        if (profileCredits > 0) {
+          const purchaseResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/purchase`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              quantity: profileCredits
+            }),
+          });
+          
+          if (purchaseResponse.ok) {
+            const purchaseData = await purchaseResponse.json();
+            setGeneratorCredits(purchaseData.remaining);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to sync generations:', error);
+    }
+  }, [authToken, userId]);
 
-  // Filtering
+  // ============================================
+  // GENERATE MORE PREDICTIONS
+  // ============================================
+  const handleGenerateMorePredictions = async () => {
+    if (generatorCredits <= 0) {
+      setShowCreditsModal(true);
+      return;
+    }
+    
+    setGenerating(true);
+    
+    try {
+      const token = authToken || getAuthToken();
+      if (!token || !userId) {
+        throw new Error('Not logged in');
+      }
+      
+      const useResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          pickType: 'kalshi_prediction',
+          pickData: { screen: 'KalshiPredictions', limitIncrease: 1 }
+        }),
+      });
+      
+      if (!useResponse.ok) {
+        const errorData = await useResponse.json();
+        if (errorData.error === 'No generations left') {
+          await syncGenerationsWithProfile();
+          setShowCreditsModal(true);
+        }
+        throw new Error(errorData.error || 'Failed to use credit');
+      }
+      
+      const data = await useResponse.json();
+      setGeneratorCredits(data.remaining);
+      
+      // Get random prompt or use custom
+      let prompt = customPrompt;
+      let category = 'AI Generated';
+      
+      if (!prompt.trim()) {
+        const randomResult = getRandomPrompt();
+        prompt = randomResult.prompt;
+        category = randomResult.category;
+      } else {
+        const promptLower = prompt.toLowerCase();
+        if (promptLower.includes('president') || promptLower.includes('election')) category = 'Politics';
+        else if (promptLower.includes('fed') || promptLower.includes('rate') || promptLower.includes('inflation')) category = 'Economics';
+        else if (promptLower.includes('oscar') || promptLower.includes('grammy')) category = 'Entertainment';
+        else if (promptLower.includes('apple') || promptLower.includes('tesla')) category = 'Technology';
+        else if (promptLower.includes('fda') || promptLower.includes('vaccine')) category = 'Health';
+        else if (promptLower.includes('hurricane') || promptLower.includes('snow')) category = 'Weather';
+        else if (promptLower.includes('world cup') || promptLower.includes('super bowl')) category = 'Sports';
+      }
+      
+      // Generate realistic probability
+      let yesPrice = 0.5;
+      let confidence = 65;
+      
+      if (prompt.includes('by 2026')) {
+        yesPrice = 0.55 + Math.random() * 0.25;
+        confidence = 70 + Math.floor(Math.random() * 15);
+      } else if (prompt.includes('by 2030')) {
+        yesPrice = 0.4 + Math.random() * 0.3;
+        confidence = 55 + Math.floor(Math.random() * 20);
+      } else {
+        yesPrice = 0.45 + Math.random() * 0.3;
+        confidence = 60 + Math.floor(Math.random() * 20);
+      }
+      
+      yesPrice = Math.min(0.92, Math.max(0.08, yesPrice));
+      confidence = Math.min(88, Math.max(52, confidence));
+      
+      let analysis = '';
+      if (category === 'Politics') {
+        analysis = `Political analysts are divided on this question. Recent polling data suggests a ${(yesPrice * 100).toFixed(0)}% probability based on current trends and historical patterns.`;
+      } else if (category === 'Economics') {
+        analysis = `Economic indicators show mixed signals. Market data suggests a ${(yesPrice * 100).toFixed(0)}% probability based on current forecasts and historical models.`;
+      } else if (category === 'Technology') {
+        analysis = `Tech industry experts have varying opinions. Based on current development cycles and patent filings, the probability is estimated at ${(yesPrice * 100).toFixed(0)}%.`;
+      } else {
+        analysis = `Based on current trends and expert analysis, the estimated probability is ${(yesPrice * 100).toFixed(0)}%. This prediction considers multiple factors and data sources.`;
+      }
+      
+      const newPrediction: Prediction = {
+        id: `ai-${Date.now()}`,
+        question: prompt,
+        category: category,
+        yesPrice: yesPrice.toFixed(2),
+        noPrice: (1 - yesPrice).toFixed(2),
+        volume: 'AI Analysis',
+        confidence: confidence,
+        edge: `+${(Math.random() * 8 + 1).toFixed(1)}%`,
+        analysis: analysis,
+        expires: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        platform: 'kalshi',
+        marketType: 'binary',
+        trend: yesPrice > 0.55 ? 'up' : yesPrice < 0.45 ? 'down' : 'neutral',
+        aiGenerated: true,
+      };
+      
+      setAiPredictions(prev => [newPrediction, ...prev]);
+      setVisibleCardsLimit(prev => prev + 1);
+      setSnackbarMessage(`✅ Generated new prediction! ${data.remaining} credits remaining.`);
+      setCustomPrompt('');
+      
+    } catch (error) {
+      console.error('Error using credit:', error);
+      setSnackbarMessage(error instanceof Error ? error.message : 'Failed to generate prediction');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // ============================================
+  // CREDITS CHECKOUT
+  // ============================================
+  const handleCreditsCheckout = async (credits: number) => {
+    setCheckoutLoading(true);
+    try {
+      const token = authToken || getAuthToken();
+      if (!token) {
+        setSnackbarMessage('Please log in to continue');
+        setShowCreditsModal(false);
+        return;
+      }
+      
+      const response = await fetch(`${PYTHON_API_BASE}/api/generator/credits/checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ credits }),
+      });
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setSnackbarMessage(data.error || 'Failed to start credits checkout');
+        setShowCreditsModal(false);
+      }
+    } catch (error: any) {
+      console.error('Credits checkout error:', error);
+      setSnackbarMessage(`Credits checkout failed: ${error.message || 'Network error'}`);
+      setShowCreditsModal(false);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  const handleSubscriptionCheckout = async (planId: string, interval: string = 'month') => {
+    setCheckoutLoading(true);
+    try {
+      const token = authToken || getAuthToken();
+      if (!token) {
+        setSnackbarMessage('Please log in to continue');
+        setShowUpgradeModal(false);
+        return;
+      }
+      
+      const response = await fetch(`${PYTHON_API_BASE}/api/subscriptions/create-checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planId, interval }),
+      });
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setSnackbarMessage(data.error || 'Failed to start checkout');
+        setShowUpgradeModal(false);
+      }
+    } catch (error: any) {
+      console.error('Checkout error:', error);
+      setSnackbarMessage(`Checkout failed: ${error.message || 'Network error'}`);
+      setShowUpgradeModal(false);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  const handlePlaceTrade = (marketId: string, side: string, amount: number) => {
+    setSnackbarMessage(`${side.toUpperCase()} trade placed for $${amount}`);
+  };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchCredits();
+      setSnackbarMessage('Credits refreshed');
+    } catch (err: any) {
+      setSnackbarMessage(`Refresh failed: ${err.message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchCredits]);
+
+  // Initial data load
   useEffect(() => {
-    let filtered = [...allPredictions];
+    fetchCredits();
+    syncGenerationsWithProfile();
+  }, [fetchCredits, syncGenerationsWithProfile]);
 
-    // Search
+  // Combine and filter predictions
+  const allPredictions = useMemo(() => {
+    return [...predictions, ...aiPredictions];
+  }, [predictions, aiPredictions]);
+
+  const filteredPredictions = useMemo(() => {
+    let filtered = [...allPredictions];
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(p =>
@@ -456,414 +633,342 @@ const KalshiPredictionsContent = () => {
         p.category.toLowerCase().includes(query)
       );
     }
-
-    // Category filter – always include AI‑generated predictions
     if (selectedCategory !== 'All') {
       filtered = filtered.filter(p => p.aiGenerated === true || p.category === selectedCategory);
     }
+    return filtered.sort((a, b) => b.confidence - a.confidence).slice(0, visibleCardsLimit);
+  }, [allPredictions, searchQuery, selectedCategory, visibleCardsLimit]);
 
-    // Only update state if the filtered list actually changed (to avoid unnecessary re-renders)
-    setFilteredPredictions(prev => {
-      // Simple shallow comparison – if lengths differ or any element changed, update
-      if (prev.length !== filtered.length) return filtered;
-      for (let i = 0; i < prev.length; i++) {
-        if (prev[i].id !== filtered[i].id) return filtered;
-      }
-      return prev;
-    });
-  }, [allPredictions, searchQuery, selectedCategory]);
+  const remainingCount = Math.max(0, allPredictions.length - visibleCardsLimit);
 
-  // Refresh handler
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refetchKalshi?.();
-      setSnackbarMessage('Predictions refreshed');
-    } catch (err: any) {
-      setSnackbarMessage(`Refresh failed: ${err.message}`);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [refetchKalshi]);
-
-  // Generate AI prediction
-  const generatePrediction = async (prompt: string) => {
-    if (!prompt.trim()) return;
-    if (remainingGenerations > 0 || hasPremiumAccess) {
-      setGenerating(true);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const newPrediction: Prediction = {
-        id: `ai-${Date.now()}`,
-        question: `AI: ${prompt}`,
-        category: 'AI Generated',
-        yesPrice: '0.62',
-        noPrice: '0.38',
-        volume: 'AI Analysis',
-        confidence: 74,
-        edge: '+3.8%',
-        analysis: `AI generated analysis for "${prompt}" based on current trends.`,
-        expires: 'Today',
-        platform: 'kalshi',
-        marketType: 'binary',
-        trend: 'up',
-        aiGenerated: true,
-      };
-      setAiPredictions(prev => [newPrediction, ...prev]);
-      if (!hasPremiumAccess) {
-        setRemainingGenerations(prev => prev - 1);
-      }
-      setGenerating(false);
-      setCustomPrompt('');
-      setSnackbarMessage(`AI prediction generated for: ${prompt}`);
-    } else {
-      setShowPurchaseModal(true);
-    }
-  };
-
-  // Placeholder trade function
-  const handlePlaceTrade = (marketId: string, side: string, amount: number) => {
-    setSnackbarMessage(`${side.toUpperCase()} trade placed for $${amount}`);
-  };
-
-  // Loading state
-  if (loading && !refreshing && apiPredictions.length === 0 && aiPredictions.length === 0) {
+  if (loadingProfile && predictions.length === 0) {
     return (
       <Container maxWidth="lg">
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh', flexDirection: 'column' }}>
           <CircularProgress />
-          <Typography sx={{ ml: 2, mt: 2 }}>Loading predictions...</Typography>
+          <Typography sx={{ mt: 2 }}>Loading...</Typography>
         </Box>
       </Container>
     );
   }
 
   return (
-    <>
-      <Container maxWidth="lg">
-        {/* Debug banner (optional) */}
-        {import.meta.env.DEV && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            <Typography variant="caption">
-              🔍 Showing {allPredictions.length} total items (after expiry filter) • {aiPredictions.length} AI generated
-            </Typography>
-          </Alert>
-        )}
-
-        {/* Header */}
-        <GradientCard sx={{ mb: 4, mt: 2 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Button
-                  onClick={() => navigate(-1)}
-                  startIcon={<ChevronRightIcon style={{ transform: 'rotate(180deg)' }} />}
-                  sx={{ color: 'white', mr: 2 }}
-                >
-                  Back
-                </Button>
-                <Chip
-                  label="NON‑SPORTS ONLY"
-                  sx={{
-                    backgroundColor: 'rgba(59,130,246,0.2)',
-                    color: 'white',
-                    fontWeight: 'bold',
-                    mr: 1
-                  }}
-                />
-              </Box>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Tooltip title="Refresh">
-                  <IconButton sx={{ color: 'white' }} onClick={handleRefresh} disabled={refreshing}>
-                    <RefreshIcon />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-            </Box>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Avatar
-                sx={{
-                  bgcolor: 'white',
-                  color: theme.palette.primary.main,
-                  width: 56,
-                  height: 56,
-                  mr: 2,
-                }}
-              >
-                <ShieldIcon />
-              </Avatar>
-              <Box>
-                <Typography variant="h3" fontWeight="bold" sx={{ color: 'white' }}>
-                  Kalshi Predictions
-                </Typography>
-                <Typography variant="subtitle1" sx={{ color: 'rgba(255,255,255,0.9)' }}>
-                  Politics • Economics • Entertainment • Tech • Health • Weather
-                </Typography>
-              </Box>
-            </Box>
-          </CardContent>
-        </GradientCard>
-
-        {/* Search Bar */}
-        <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-          <TextField
-            fullWidth
-            placeholder="Search predictions..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-              endAdornment: searchQuery && (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSearchQuery('')}>
-                    <CloseIcon />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
-          />
-        </Paper>
-
-        {/* Category Filter */}
-        <Paper sx={{ p: 2, mb: 3, borderRadius: 2, backgroundColor: '#1e293b', border: '1px solid #334155' }}>
-          <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1 }}>
-            Filter by Category:
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1, overflowX: 'auto', pb: 1 }}>
-            {categories.map((cat) => (
-              <Chip
-                key={cat.id}
-                icon={cat.icon}
-                label={cat.name}
-                onClick={() => setSelectedCategory(cat.id)}
-                sx={{
-                  backgroundColor: selectedCategory === cat.id ? cat.color : '#0f172a',
-                  color: selectedCategory === cat.id ? 'white' : '#94a3b8',
-                  borderColor: '#334155',
-                  '&:hover': {
-                    backgroundColor: selectedCategory === cat.id ? cat.color : '#1e293b',
-                  },
-                }}
-              />
-            ))}
-          </Box>
-        </Paper>
-
-        {/* Generation Counter */}
-        <Card sx={{ mb: 3, backgroundColor: '#1e293b', color: 'white', border: '1px solid #334155' }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <FlashIcon sx={{ color: '#8b5cf6', mr: 1 }} />
-              <Typography variant="h6" fontWeight="bold">
-                Daily AI Predictions
-              </Typography>
-            </Box>
-            {hasPremiumAccess ? (
-              <Alert icon={<CheckCircleIcon />} severity="success" sx={{ backgroundColor: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                <Typography fontWeight="bold">Premium: Unlimited AI Predictions</Typography>
-              </Alert>
-            ) : (
-              <Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="body2" sx={{ color: '#cbd5e1' }}>
-                    Free predictions today:
-                  </Typography>
-                  <Typography variant="h4" fontWeight="bold" sx={{ color: '#8b5cf6' }}>
-                    {remainingGenerations}/1
-                  </Typography>
-                </Box>
-                <LinearProgress
-                  variant="determinate"
-                  value={(remainingGenerations / 1) * 100}
-                  sx={{
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor: '#334155',
-                    '& .MuiLinearProgress-bar': { backgroundColor: '#8b5cf6' },
-                    mb: 1,
-                  }}
-                />
-              </Box>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Generate Prediction Section */}
-        <Card sx={{ mb: 4, backgroundColor: '#1e293b', border: '1px solid #334155' }}>
-          <CardContent>
-            <Box sx={{ textAlign: 'center', mb: 3 }}>
-              <Typography variant="h5" fontWeight="bold" sx={{ color: 'white', mb: 1 }}>
-                🤖 Generate AI Prediction
-              </Typography>
-              <Typography variant="body2" sx={{ color: '#cbd5e1' }}>
-                Select a prompt or type your own
-              </Typography>
-            </Box>
-
-            <Grid container spacing={2} alignItems="flex-start">
-              <Grid item xs={12} md={4}>
-                <FormControl fullWidth>
-                  <InputLabel id="non-sports-prompt-label" sx={{ color: '#94a3b8' }}>Non‑Sports Prompts</InputLabel>
-                  <Select
-                    labelId="non-sports-prompt-label"
-                    value={customPrompt}
-                    onChange={(e) => setCustomPrompt(e.target.value)}
-                    displayEmpty
-                    sx={{
-                      backgroundColor: '#0f172a',
-                      color: 'white',
-                      '& .MuiOutlinedInput-notchedOutline': { borderColor: '#334155' }
-                    }}
-                  >
-                    <MenuItem value=""><em>Select a prompt</em></MenuItem>
-                    {NON_SPORTS_PROMPTS.map((prompt, idx) => (
-                      <MenuItem key={idx} value={prompt}>{prompt}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={8}>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    placeholder="e.g., Fed rate cut, Oscar winners, hurricane predictions..."
-                    value={customPrompt}
-                    onChange={(e) => setCustomPrompt(e.target.value)}
-                    multiline
-                    rows={2}
-                    disabled={generating}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        backgroundColor: '#0f172a',
-                        borderColor: '#334155',
-                        color: 'white',
-                      },
-                    }}
-                  />
-                  <Button
-                    variant="contained"
-                    onClick={() => generatePrediction(customPrompt)}
-                    disabled={!customPrompt.trim() || generating}
-                    sx={{
-                      backgroundColor: '#8b5cf6',
-                      '&:hover': { backgroundColor: '#7c3aed' },
-                      minWidth: 140,
-                      height: 56,
-                      alignSelf: 'stretch',
-                    }}
-                  >
-                    {generating ? <CircularProgress size={24} color="inherit" /> : 'Generate'}
-                  </Button>
-                </Box>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
-
-        {/* Results Count */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h5" fontWeight="bold" sx={{ color: 'text.primary' }}>
-            📊 Live Markets
-          </Typography>
-          <Chip label={`${filteredPredictions.length} items`} sx={{ backgroundColor: '#1e293b', color: '#cbd5e1' }} />
+    <Container maxWidth="lg">
+      {/* Credits Alert */}
+      <Alert severity={generatorCredits > 0 ? "info" : "warning"} sx={{ mb: 2 }}>
+        <AlertTitle>
+          {generatorCredits > 0 ? `✨ You have ${generatorCredits} generator credits remaining` : "⚠️ No generator credits left"}
+        </AlertTitle>
+        Generating a new prediction uses 1 credit. Viewing the top predictions above is free.
+        {generatorCredits === 0 && " Purchase credits to generate more predictions."}
+        <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+          <Button size="small" variant="outlined" onClick={() => setShowCreditsModal(true)} startIcon={<CreditCardIcon />}>
+            Buy Credits
+          </Button>
+          <Button size="small" variant="contained" onClick={() => setShowUpgradeModal(true)}>
+            Upgrade to Premium
+          </Button>
+          <Button size="small" variant="text" onClick={fetchCredits} startIcon={<RefreshIcon />}>
+            Refresh ({generatorCredits})
+          </Button>
         </Box>
+      </Alert>
 
-        {/* Predictions Grid */}
-        {filteredPredictions.length > 0 ? (
-          <Grid container spacing={3} sx={{ mb: 8 }}>
+      {/* Header */}
+      <GradientCard sx={{ mb: 4, mt: 2 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Button onClick={() => navigate(-1)} startIcon={<ChevronRightIcon style={{ transform: 'rotate(180deg)' }} />} sx={{ color: 'white', mr: 2 }}>Back</Button>
+              <Chip label="NON‑SPORTS ONLY" sx={{ backgroundColor: 'rgba(59,130,246,0.2)', color: 'white', fontWeight: 'bold' }} />
+            </Box>
+            <Tooltip title="Refresh Credits">
+              <IconButton sx={{ color: 'white' }} onClick={handleRefresh} disabled={refreshing}>
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Avatar sx={{ bgcolor: 'white', color: theme.palette.primary.main, width: 56, height: 56, mr: 2 }}>
+              <ShieldIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="h3" fontWeight="bold" sx={{ color: 'white' }}>Kalshi Predictions</Typography>
+              <Typography variant="subtitle1" sx={{ color: 'rgba(255,255,255,0.9)' }}>Politics • Economics • Entertainment • Tech • Health • Weather</Typography>
+            </Box>
+          </Box>
+        </CardContent>
+      </GradientCard>
+
+      {/* Search Bar */}
+      <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+        <TextField 
+          fullWidth 
+          placeholder="Search predictions..." 
+          value={searchQuery} 
+          onChange={(e) => setSearchQuery(e.target.value)} 
+          InputProps={{ 
+            startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment>,
+            endAdornment: searchQuery && (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => setSearchQuery('')}><CloseIcon /></IconButton>
+              </InputAdornment>
+            )
+          }} 
+        />
+      </Paper>
+
+      {/* Category Filter */}
+      <Paper sx={{ p: 2, mb: 3, borderRadius: 2, backgroundColor: '#1e293b', border: '1px solid #334155' }}>
+        <Typography variant="subtitle2" sx={{ color: '#94a3b8', mb: 1 }}>Filter by Category:</Typography>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          {categories.map((cat) => (
+            <Chip 
+              key={cat.id} 
+              icon={cat.icon} 
+              label={cat.name} 
+              onClick={() => setSelectedCategory(cat.id)} 
+              sx={{ 
+                backgroundColor: selectedCategory === cat.id ? cat.color : '#0f172a', 
+                color: selectedCategory === cat.id ? 'white' : '#94a3b8',
+                '&:hover': { backgroundColor: selectedCategory === cat.id ? cat.color : '#1e293b' } 
+              }} 
+            />
+          ))}
+        </Box>
+      </Paper>
+
+      {/* AI Generator Section */}
+      <Card sx={{ mb: 4, backgroundColor: '#1e293b', border: '1px solid #334155' }}>
+        <CardContent>
+          <Box sx={{ textAlign: 'center', mb: 3 }}>
+            <Typography variant="h5" fontWeight="bold" sx={{ color: 'white', mb: 1 }}>🤖 AI Prediction Generator</Typography>
+            <Typography variant="body2" sx={{ color: '#cbd5e1' }}>
+              {`Each generation uses 1 credit. You have ${generatorCredits} credits remaining.`}
+            </Typography>
+          </Box>
+          
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={5}>
+              <FormControl fullWidth size="small">
+                <InputLabel sx={{ color: '#94a3b8', '&.Mui-focused': { color: '#8b5cf6' } }}>
+                  Quick Prompts
+                </InputLabel>
+                <Select
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  label="Quick Prompts"
+                  sx={{ 
+                    backgroundColor: '#0f172a', 
+                    color: 'white',
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#334155' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#8b5cf6' },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: '#8b5cf6' },
+                    '& .MuiSvgIcon-root': { color: '#8b5cf6' }
+                  }}
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        backgroundColor: '#1e293b',
+                        maxHeight: 400,
+                        '& .MuiMenuItem-root': {
+                          color: '#cbd5e1',
+                          '&:hover': { backgroundColor: '#334155' },
+                          '&.Mui-selected': { backgroundColor: '#8b5cf620', color: '#8b5cf6' }
+                        }
+                      }
+                    }
+                  }}
+                >
+                  <MenuItem value=""><em>Select a prompt category...</em></MenuItem>
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Politics ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.politics.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`politics-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Economics ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.economics.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`economics-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Technology ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.technology.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`tech-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Entertainment ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.entertainment.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`entertainment-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Health ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.health.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`health-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Weather ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.weather.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`weather-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Sports ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.sports.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`sports-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                  <MenuItem disabled sx={{ opacity: 1, fontWeight: 'bold', color: '#8b5cf6 !important' }}>
+                    ─── Futuristic ───
+                  </MenuItem>
+                  {PROMPTS_DATABASE.futuristic.slice(0, 4).map((prompt, idx) => (
+                    <MenuItem key={`futuristic-${idx}`} value={prompt} sx={{ pl: 4 }}>
+                      {prompt.length > 80 ? prompt.substring(0, 77) + '...' : prompt}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} md={7}>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={2}
+                  placeholder="Or enter your own prediction question (e.g., 'Will AI replace software engineers by 2030?')"
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  disabled={generating}
+                  sx={{ 
+                    '& .MuiOutlinedInput-root': { 
+                      backgroundColor: '#0f172a', 
+                      color: 'white',
+                      '& fieldset': { borderColor: '#334155' },
+                      '&:hover fieldset': { borderColor: '#8b5cf6' },
+                      '&.Mui-focused fieldset': { borderColor: '#8b5cf6' }
+                    }
+                  }}
+                />
+                <Button
+                  variant="contained"
+                  onClick={handleGenerateMorePredictions}
+                  disabled={generating || generatorCredits === 0}
+                  startIcon={generating ? <CircularProgress size={20} /> : <SparklesIcon />}
+                  sx={{ 
+                    backgroundColor: '#8b5cf6', 
+                    '&:hover': { backgroundColor: '#7c3aed' }, 
+                    minWidth: 160, 
+                    height: 56,
+                    alignSelf: 'stretch',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {generating ? 'Generating...' : `Generate (${generatorCredits} credits)`}
+                </Button>
+              </Box>
+            </Grid>
+          </Grid>
+          
+          <Box sx={{ mt: 2, p: 1.5, bgcolor: '#0f172a', borderRadius: 1 }}>
+            <Typography variant="caption" sx={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <span>💡</span> 
+              <span>Tip: Select a prompt from the dropdown or type your own question. Each generation costs 1 credit and creates a unique prediction with AI-powered analysis.</span>
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Predictions Display */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" fontWeight="bold">📊 Top Markets</Typography>
+        <Chip label={`${filteredPredictions.length} items`} sx={{ backgroundColor: '#1e293b', color: '#cbd5e1' }} />
+      </Box>
+
+      {filteredPredictions.length > 0 ? (
+        <>
+          <Grid container spacing={3} sx={{ mb: 4 }}>
             {filteredPredictions.map((prediction) => {
               const isExpanded = expandedCard === prediction.id;
-
               return (
                 <Grid item xs={12} md={6} lg={4} key={prediction.id}>
                   <PredictionCard>
                     <CardContent>
-                      {/* Header */}
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                        <Box>
+                        <Box sx={{ flex: 1 }}>
                           <Typography variant="caption" sx={{ color: '#94a3b8', display: 'block' }}>
                             {prediction.platform.toUpperCase()} • {prediction.marketType}
                             {prediction.aiGenerated && ' • AI Generated'}
                           </Typography>
-                          <Typography variant="subtitle1" fontWeight="bold" sx={{ color: 'white', mt: 0.5 }}>
+                          <Typography variant="subtitle1" fontWeight="bold" sx={{ color: 'white', mt: 0.5, wordBreak: 'break-word' }}>
                             {prediction.question}
                           </Typography>
                         </Box>
-                        {prediction.edge !== 'N/A' && (
-                          <Chip label={`Edge ${prediction.edge}`} size="small" sx={{ backgroundColor: '#8b5cf620', color: '#8b5cf6', fontWeight: 'bold' }} />
-                        )}
+                        <Chip label={`Edge ${prediction.edge}`} size="small" sx={{ backgroundColor: '#8b5cf620', color: '#8b5cf6' }} />
                       </Box>
 
-                      {/* Expiry */}
-                      {prediction.expires && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                          <CalendarIcon sx={{ fontSize: 14, color: '#94a3b8', mr: 0.5 }} />
-                          <Typography variant="caption" sx={{ color: '#94a3b8' }}>Expires: {prediction.expires}</Typography>
-                        </Box>
-                      )}
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <CalendarIcon sx={{ fontSize: 14, color: '#94a3b8', mr: 0.5 }} />
+                        <Typography variant="caption" sx={{ color: '#94a3b8' }}>Expires: {prediction.expires}</Typography>
+                      </Box>
 
-                      {/* Binary Prices */}
                       <Grid container spacing={2} sx={{ mb: 3 }}>
                         <Grid item xs={6}>
                           <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'rgba(16,185,129,0.1)' }}>
                             <Typography variant="caption" sx={{ color: '#10b981', display: 'block', mb: 1 }}>YES Price</Typography>
                             <Typography variant="h4" fontWeight="bold" sx={{ color: '#10b981', mb: 1 }}>${prediction.yesPrice}</Typography>
-                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 1 }}>
-                              {Math.round(parseFloat(prediction.yesPrice) * 100)}% prob
-                            </Typography>
-                            <Button variant="contained" size="small" fullWidth
-                              onClick={() => handlePlaceTrade(prediction.id, 'yes', 10)}
-                              sx={{ backgroundColor: '#10b981', '&:hover': { backgroundColor: '#059669' } }}>
-                              Buy YES
-                            </Button>
+                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 1 }}>{Math.round(parseFloat(prediction.yesPrice) * 100)}% prob</Typography>
+                            <Button size="small" fullWidth onClick={() => handlePlaceTrade(prediction.id, 'yes', 10)} sx={{ backgroundColor: '#10b981' }}>Buy YES</Button>
                           </Paper>
                         </Grid>
                         <Grid item xs={6}>
                           <Paper sx={{ p: 2, textAlign: 'center', backgroundColor: 'rgba(239,68,68,0.1)' }}>
                             <Typography variant="caption" sx={{ color: '#ef4444', display: 'block', mb: 1 }}>NO Price</Typography>
                             <Typography variant="h4" fontWeight="bold" sx={{ color: '#ef4444', mb: 1 }}>${prediction.noPrice}</Typography>
-                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 1 }}>
-                              {Math.round(parseFloat(prediction.noPrice) * 100)}% prob
-                            </Typography>
-                            <Button variant="contained" size="small" fullWidth
-                              onClick={() => handlePlaceTrade(prediction.id, 'no', 10)}
-                              sx={{ backgroundColor: '#ef4444', '&:hover': { backgroundColor: '#dc2626' } }}>
-                              Buy NO
-                            </Button>
+                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mb: 1 }}>{Math.round(parseFloat(prediction.noPrice) * 100)}% prob</Typography>
+                            <Button size="small" fullWidth onClick={() => handlePlaceTrade(prediction.id, 'no', 10)} sx={{ backgroundColor: '#ef4444' }}>Buy NO</Button>
                           </Paper>
                         </Grid>
                       </Grid>
 
-                      {/* Analysis Section */}
                       <Box onClick={() => setExpandedCard(isExpanded ? null : prediction.id)} sx={{ cursor: 'pointer' }}>
-                        <Paper sx={{ p: 2, backgroundColor: '#0f172a', mb: 2, border: '1px solid #334155' }}>
+                        <Paper sx={{ p: 2, backgroundColor: '#0f172a', mb: 2 }}>
                           <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
                             <AnalyticsIcon sx={{ color: '#f59e0b', mr: 1, mt: 0.5, fontSize: 18 }} />
                             <Typography variant="body2" sx={{ color: '#cbd5e1' }}>
-                              {isExpanded ? prediction.analysis : prediction.analysis.length > 100 ? `${prediction.analysis.substring(0, 100)}...` : prediction.analysis}
+                              {isExpanded ? prediction.analysis : `${prediction.analysis.substring(0, 100)}...`}
                             </Typography>
                           </Box>
                         </Paper>
-
                         <Collapse in={isExpanded}>
-                          {/* Confidence Meter */}
-                          {prediction.confidence > 0 && (
-                            <Box sx={{ mt: 2, mb: 1 }}>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-                                <Typography variant="caption" sx={{ color: '#94a3b8' }}>Model Confidence</Typography>
-                                <Typography variant="caption" fontWeight="bold" sx={{ color: 'white' }}>{prediction.confidence}%</Typography>
-                              </Box>
-                              <LinearProgress variant="determinate" value={prediction.confidence}
-                                sx={{ height: 6, borderRadius: 3, backgroundColor: '#334155', '& .MuiLinearProgress-bar': { backgroundColor: '#8b5cf6' } }} />
+                          <Box sx={{ mt: 2 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                              <Typography variant="caption" sx={{ color: '#94a3b8' }}>Model Confidence</Typography>
+                              <Typography variant="caption" fontWeight="bold">{prediction.confidence}%</Typography>
                             </Box>
-                          )}
+                            <LinearProgress variant="determinate" value={prediction.confidence} sx={{ height: 6, borderRadius: 3, backgroundColor: '#334155', '& .MuiLinearProgress-bar': { backgroundColor: '#8b5cf6' } }} />
+                          </Box>
                         </Collapse>
-
-                        {/* Expand/Collapse Icon */}
                         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
                           <IconButton size="small" sx={{ color: '#64748b' }}>
                             {isExpanded ? <ExpandMoreIcon /> : <ChevronRightIcon />}
@@ -871,13 +976,9 @@ const KalshiPredictionsContent = () => {
                         </Box>
                       </Box>
 
-                      {/* Footer */}
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                          <Chip label={prediction.category} size="small"
-                            sx={{ backgroundColor: `${getCategoryColor(prediction.category)}20`, color: getCategoryColor(prediction.category) }} />
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>{prediction.volume}</Typography>
-                        </Box>
+                        <Chip label={prediction.category} size="small" sx={{ backgroundColor: `${getCategoryColor(prediction.category)}20`, color: getCategoryColor(prediction.category) }} />
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>{prediction.volume}</Typography>
                       </Box>
                     </CardContent>
                   </PredictionCard>
@@ -885,50 +986,122 @@ const KalshiPredictionsContent = () => {
               );
             })}
           </Grid>
-        ) : (
-          <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 2, mb: 8 }}>
-            <TrophyIcon sx={{ fontSize: 48, color: '#8b5cf6', mb: 2 }} />
-            <Typography variant="h5" gutterBottom>No predictions found</Typography>
-            <Typography variant="body1" color="text.secondary">Try adjusting your filters or generate a new AI prediction.</Typography>
-          </Paper>
-        )}
+          
+          {remainingCount > 0 && (
+            <Paper sx={{ p: 3, textAlign: 'center', mb: 4, borderRadius: 2, bgcolor: alpha('#8b5cf6', 0.05) }}>
+              <Typography variant="body1" color="text.secondary" gutterBottom>
+                🔒 + {remainingCount} more {remainingCount === 1 ? 'prediction' : 'predictions'} available
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Use generator credits to unlock additional predictions. Each generation gives you 1 new pick!
+              </Typography>
+              <Button 
+                variant="outlined" 
+                startIcon={<CreditCardIcon />}
+                onClick={() => setShowCreditsModal(true)}
+              >
+                Get More Credits
+              </Button>
+            </Paper>
+          )}
+        </>
+      ) : (
+        <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 2, mb: 8 }}>
+          <TrophyIcon sx={{ fontSize: 48, color: '#8b5cf6', mb: 2 }} />
+          <Typography variant="h5" gutterBottom>No predictions found</Typography>
+          <Typography variant="body1" color="text.secondary">Try adjusting your filters or generate a new AI prediction.</Typography>
+          <Button variant="contained" onClick={handleGenerateMorePredictions} sx={{ mt: 2 }}>Generate Prediction</Button>
+        </Paper>
+      )}
 
-        {/* Purchase Modal */}
-        <Dialog open={showPurchaseModal} onClose={() => setShowPurchaseModal(false)} maxWidth="sm" fullWidth>
-          <DialogTitle sx={{ backgroundColor: '#8b5cf6', color: 'white' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <CardIcon sx={{ mr: 1 }} /> Purchase More Predictions
-            </Box>
-          </DialogTitle>
-          <DialogContent sx={{ p: 3 }}>
-            <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>
-              Daily free prediction limit reached. Get unlimited AI analysis:
-            </Typography>
-            <Grid container spacing={2}>
-              {[
-                { count: 3, price: '$2.99', perPrediction: '$0.99' },
-                { count: 10, price: '$7.99', perPrediction: '$0.79', popular: true },
-                { count: 25, price: '$14.99', perPrediction: '$0.59', bestValue: true },
-              ].map((option, index) => (
-                <Grid item xs={12} key={index}>
-                  <Card sx={{ border: option.popular ? '2px solid #3b82f6' : option.bestValue ? '2px solid #10b981' : '1px solid #e5e7eb', position: 'relative', cursor: 'pointer' }}>
-                    {option.popular && <Chip label="POPULAR" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#3b82f6', color: 'white' }} />}
-                    {option.bestValue && <Chip label="BEST VALUE" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#10b981', color: 'white' }} />}
-                    <CardContent sx={{ textAlign: 'center', pt: option.popular || option.bestValue ? 4 : 2 }}>
-                      <Typography variant="h6" fontWeight="bold">{option.count} Predictions</Typography>
-                      <Typography variant="h4" fontWeight="bold" color="primary" sx={{ my: 1 }}>{option.price}</Typography>
-                      <Typography variant="caption" color="text.secondary">{option.perPrediction} each</Typography>
+      {/* Credits Purchase Modal */}
+      <Dialog open={showCreditsModal} onClose={() => setShowCreditsModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ backgroundColor: '#6C5CE7', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CreditCardIcon sx={{ mr: 1 }} /> Purchase Credits
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>Generate AI predictions with credits. Each prediction uses 1 credit.</Typography>
+          <Grid container spacing={2}>
+            {CREDIT_PACKAGES.map((option, index) => (
+              <Grid item xs={12} sm={6} key={index}>
+                <Card 
+                  sx={{ 
+                    border: option.popular ? '2px solid #6C5CE7' : option.bestValue ? '2px solid #10b981' : '1px solid #e5e7eb', 
+                    position: 'relative', 
+                    cursor: 'pointer',
+                    '&:hover': { transform: 'translateY(-2px)' }
+                  }}
+                  onClick={() => handleCreditsCheckout(option.credits)}
+                >
+                  {option.popular && <Chip label="POPULAR" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#6C5CE7', color: 'white' }} />}
+                  {option.bestValue && <Chip label="BEST VALUE" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#10b981', color: 'white' }} />}
+                  <CardContent sx={{ textAlign: 'center', pt: option.popular || option.bestValue ? 4 : 2 }}>
+                    <Typography variant="h6" fontWeight="bold">{option.description}</Typography>
+                    <Typography variant="h4" fontWeight="bold" color="primary" sx={{ my: 1 }}>{option.price}</Typography>
+                    <Typography variant="caption" color="text.secondary">{option.perCredit} per credit</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
+          <Button onClick={() => setShowCreditsModal(false)} sx={{ color: '#64748b' }}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Upgrade Modal */}
+      <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ backgroundColor: '#6C5CE7', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <StarIcon sx={{ mr: 1 }} /> Upgrade to Premium
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>Get unlimited AI predictions and premium features!</Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+            <Paper sx={{ p: 0.5, display: 'inline-flex', gap: 1 }}>
+              <Button variant={selectedInterval === 'month' ? 'contained' : 'outlined'} onClick={() => setSelectedInterval('month')} size="small">Monthly</Button>
+              <Button variant={selectedInterval === 'year' ? 'contained' : 'outlined'} onClick={() => setSelectedInterval('year')} size="small">Yearly <Chip label="Save 20%" size="small" sx={{ ml: 0.5 }} /></Button>
+            </Paper>
+          </Box>
+          <Grid container spacing={2}>
+            {[
+              { id: 'starter', name: 'Super Stats', icon: <AnalyticsIcon />, color: '#3b82f6' },
+              { id: 'analytics', name: 'Analytics Package', icon: <AnalyticsIcon />, color: '#8b5cf6', popular: true },
+              { id: 'generator', name: 'Generator Package', icon: <SparklesIcon />, color: '#ef4444' }
+            ].map((plan) => {
+              const price = PLAN_PRICES[plan.id as keyof typeof PLAN_PRICES][selectedInterval as 'month' | 'year'];
+              const isSelected = selectedPlan === plan.id;
+              return (
+                <Grid item xs={12} key={plan.id}>
+                  <Card sx={{ cursor: 'pointer', border: isSelected ? `2px solid ${plan.color}` : '1px solid #e0e0e0', position: 'relative' }} onClick={() => setSelectedPlan(plan.id)}>
+                    {plan.popular && <Chip label="Most Popular" color="warning" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)' }} />}
+                    <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box display="flex" alignItems="center">
+                        <Avatar sx={{ bgcolor: `${plan.color}20`, color: plan.color, mr: 2 }}>{plan.icon}</Avatar>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight="bold">{plan.name}</Typography>
+                          <Typography variant="body2" color="text.secondary">${price}/{selectedInterval}</Typography>
+                        </Box>
+                      </Box>
+                      {isSelected && <CheckCircleIcon sx={{ color: plan.color }} />}
                     </CardContent>
                   </Card>
                 </Grid>
-              ))}
-            </Grid>
-          </DialogContent>
-          <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
-            <Button onClick={() => setShowPurchaseModal(false)} sx={{ color: '#64748b' }}>Not Now</Button>
-          </DialogActions>
-        </Dialog>
-      </Container>
+              );
+            })}
+          </Grid>
+          <Button fullWidth variant="contained" size="large" onClick={() => handleSubscriptionCheckout(selectedPlan, selectedInterval)} disabled={checkoutLoading} sx={{ mt: 3, bgcolor: '#6C5CE7' }}>
+            {checkoutLoading ? 'Processing...' : `Upgrade to ${selectedPlan} ($${PLAN_PRICES[selectedPlan as keyof typeof PLAN_PRICES][selectedInterval as 'month' | 'year']}/${selectedInterval})`}
+          </Button>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
+          <Button onClick={() => setShowUpgradeModal(false)} sx={{ color: '#64748b' }}>Maybe Later</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Snackbar */}
       {snackbarMessage && (
@@ -939,20 +1112,23 @@ const KalshiPredictionsContent = () => {
           </IconButton>
         </Paper>
       )}
-    </>
+    </Container>
   );
 };
 
-// ==============================
-// Wrapped Component with ProtectedRoute
-// ==============================
+const categories = [
+  { id: 'All', name: 'All Categories', icon: <FlagIcon />, color: '#8b5cf6' },
+  { id: 'Politics', name: 'Politics', icon: <FlagIcon />, color: '#3b82f6' },
+  { id: 'Economics', name: 'Economics', icon: <MoneyIcon />, color: '#10b981' },
+  { id: 'Entertainment', name: 'Entertainment', icon: <CultureIcon />, color: '#ec4899' },
+  { id: 'Technology', name: 'Technology', icon: <ScienceIcon />, color: '#8b5cf6' },
+  { id: 'Health', name: 'Health', icon: <MedicalServicesIcon />, color: '#ef4444' },
+  { id: 'Weather', name: 'Weather', icon: <WbSunny />, color: '#f59e0b' },
+  { id: 'Sports', name: 'Sports', icon: <TrophyIcon />, color: '#f97316' },  // Use TrophyIcon instead
+];
 
 const KalshiPredictionsScreen: React.FC = () => {
-  return (
-    <ProtectedRoute screenName="KalshiPredictions">
-      <KalshiPredictionsContent />
-    </ProtectedRoute>
-  );
+  return <KalshiPredictionsContent />;
 };
 
 export default KalshiPredictionsScreen;

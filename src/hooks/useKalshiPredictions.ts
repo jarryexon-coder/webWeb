@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useEffect, useRef } from 'react';
+import axios, { CancelTokenSource } from 'axios';
 
 interface KalshiPrediction {
   id: string;
-  market: string;  // This is actually the question
+  market: string;
   category: string;
   yesPrice: number;
   noPrice: number;
@@ -11,34 +11,53 @@ interface KalshiPrediction {
   closeDate?: string;
   confidence?: number;
   trend?: string;
-  // Additional fields we might want
   analysis?: string;
   expires?: string;
   edge?: string;
 }
 
-interface UseKalshiPredictionsReturn {
+export const useKalshiPredictions = (): {
   data: KalshiPrediction[];
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
-}
-
-export const useKalshiPredictions = (): UseKalshiPredictionsReturn => {
+} => {
   const [data, setData] = useState<KalshiPrediction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const cancelTokenSourceRef = useRef<CancelTokenSource | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout>();
 
   const fetchKalshiPredictions = async () => {
+    if (cancelTokenSourceRef.current) {
+      cancelTokenSourceRef.current.cancel('Request replaced by new fetch');
+    }
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    const source = axios.CancelToken.source();
+    cancelTokenSourceRef.current = source;
+
     try {
       setLoading(true);
       setError(null);
-      
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'https://pleasing-determination-production.up.railway.app';
-      const response = await axios.get(`${apiUrl}/api/kalshi/predictions`);
-      
+
+      const apiUrl = import.meta.env.VITE_API_BASE_PYTHON || import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
+      const url = `${apiUrl}/api/kalshi/predictions`;
+      console.log('📡 Fetching Kalshi predictions from:', url);
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutRef.current = setTimeout(() => {
+          reject(new Error('Request timed out after 10 seconds'));
+        }, 10000);
+      });
+
+      const responsePromise = axios.get(url, { cancelToken: source.token });
+      const response = await Promise.race([responsePromise, timeoutPromise]) as any;
+
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
       console.log('🔍 Kalshi API Response:', response.data);
-      
+
       if (response.data.success) {
         if (response.data.predictions && Array.isArray(response.data.predictions)) {
           setData(response.data.predictions);
@@ -53,20 +72,26 @@ export const useKalshiPredictions = (): UseKalshiPredictionsReturn => {
         setData([]);
       }
     } catch (err: any) {
-      console.error('❌ Kalshi API Error:', err);
-      setError(err.message || 'Failed to fetch Kalshi predictions');
-      setData([]);
+      if (axios.isCancel(err)) {
+        console.log('✅ Kalshi request cancelled');
+      } else {
+        console.error('❌ Kalshi API Error:', err);
+        setError(err.message || 'Failed to fetch Kalshi predictions');
+        setData([]);
+      }
     } finally {
       setLoading(false);
+      cancelTokenSourceRef.current = null;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     }
   };
 
   useEffect(() => {
     fetchKalshiPredictions();
-    
-    // Optional: Auto-refresh every 30 seconds
-    const interval = setInterval(fetchKalshiPredictions, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      if (cancelTokenSourceRef.current) cancelTokenSourceRef.current.cancel('Component unmounted');
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, []);
 
   const refetch = async () => {

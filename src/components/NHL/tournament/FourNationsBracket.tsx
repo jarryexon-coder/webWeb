@@ -7,9 +7,9 @@ export const FourNationsBracket = ({ games }) => {
     <View className="p-4 bg-white dark:bg-gray-900 rounded-xl">
       <Text className="text-lg font-bold mb-4">🏆 4 Nations Face-Off Bracket</Text>
       
-      {/* Round Robin */}
+      {/* Multi‑Leg Combos */}
       <View className="mb-6">
-        <Text className="font-bold text-blue-600 mb-2">Round Robin</Text>
+        <Text className="font-bold text-blue-600 mb-2">Multi‑Leg Combos</Text>
         {games.filter(g => !g.note?.includes('Championship')).map((game, i) => (
           <View key={i} className="flex-row py-2 border-b border-gray-100">
             <Text className="flex-1">{game.away_team} vs {game.home_team}</Text>

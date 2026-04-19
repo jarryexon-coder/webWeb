@@ -1,4 +1,4 @@
-// src/pages/LiveGamesScreen.tsx - COMPLETE UPDATED VERSION
+// src/pages/LiveGamesScreen.tsx - FIXED WITH PROPER SPORT-SPECIFIC MOCK DATA
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
@@ -108,8 +108,43 @@ const TEAM_NAME_MAPPING: Record<string, string> = {
   'UTA': 'Utah Jazz',
   'WAS': 'Washington Wizards',
   
+  // NFL
+  'ARI': 'Arizona Cardinals',
+  'ATL': 'Atlanta Falcons',
+  'BAL': 'Baltimore Ravens',
+  'BUF': 'Buffalo Bills',
+  'CAR': 'Carolina Panthers',
+  'CHI': 'Chicago Bears',
+  'CIN': 'Cincinnati Bengals',
+  'CLE': 'Cleveland Browns',
+  'DAL': 'Dallas Cowboys',
+  'DEN': 'Denver Broncos',
+  'DET': 'Detroit Lions',
+  'GB': 'Green Bay Packers',
+  'HOU': 'Houston Texans',
+  'IND': 'Indianapolis Colts',
+  'JAX': 'Jacksonville Jaguars',
+  'KC': 'Kansas City Chiefs',
+  'LAC': 'Los Angeles Chargers',
+  'LAR': 'Los Angeles Rams',
+  'LV': 'Las Vegas Raiders',
+  'MIA': 'Miami Dolphins',
+  'MIN': 'Minnesota Vikings',
+  'NE': 'New England Patriots',
+  'NO': 'New Orleans Saints',
+  'NYG': 'New York Giants',
+  'NYJ': 'New York Jets',
+  'PHI': 'Philadelphia Eagles',
+  'PIT': 'Pittsburgh Steelers',
+  'SEA': 'Seattle Seahawks',
+  'SF': 'San Francisco 49ers',
+  'TB': 'Tampa Bay Buccaneers',
+  'TEN': 'Tennessee Titans',
+  'WAS': 'Washington Commanders',
+  
   // NHL
   'ANA': 'Anaheim Ducks',
+  'ARI': 'Arizona Coyotes',
   'BOS': 'Boston Bruins',
   'BUF': 'Buffalo Sabres',
   'CGY': 'Calgary Flames',
@@ -305,7 +340,7 @@ const getOrdinalSuffix = (n: number): string => {
   return 'th';
 };
 
-// ========== MOCK GAME GENERATORS ==========
+// ========== SPORT-SPECIFIC MOCK GAME GENERATORS ==========
 const generateMockNBAGames = (): Game[] => {
   const nbaTeams = [
     { abbr: 'LAL', name: 'Los Angeles Lakers' },
@@ -318,16 +353,14 @@ const generateMockNBAGames = (): Game[] => {
     { abbr: 'PHI', name: 'Philadelphia 76ers' },
     { abbr: 'NYK', name: 'New York Knicks' },
     { abbr: 'DAL', name: 'Dallas Mavericks' },
-    { abbr: 'MEM', name: 'Memphis Grizzlies' },
-    { abbr: 'SAC', name: 'Sacramento Kings' }
   ];
   
   const mockGames: Game[] = [];
   const currentDate = new Date();
   
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 4; i++) {
     const homeIndex = i % nbaTeams.length;
-    const awayIndex = (i + 4) % nbaTeams.length;
+    const awayIndex = (i + 2) % nbaTeams.length;
     
     if (homeIndex !== awayIndex) {
       const homeTeam = nbaTeams[homeIndex];
@@ -340,12 +373,12 @@ const generateMockNBAGames = (): Game[] => {
       let period = '1st';
       let timeRemaining = '12:00';
       
-      if (i < 3) {
+      if (i < 2) {
         status = 'live';
         const quarterNum = Math.floor(Math.random() * 4) + 1;
         period = `${quarterNum}${getOrdinalSuffix(quarterNum)}`;
         timeRemaining = `${Math.floor(Math.random() * 12)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
-      } else if (i >= 5) {
+      } else if (i >= 3) {
         status = 'final';
         period = 'Final';
         timeRemaining = '00:00';
@@ -371,7 +404,7 @@ const generateMockNBAGames = (): Game[] => {
         timeRemaining,
         status,
         quarter: period,
-        channel: i < 3 ? 'ESPN' : i < 6 ? 'TNT' : 'NBA League Pass',
+        channel: i < 2 ? 'ESPN' : i < 3 ? 'TNT' : 'NBA League Pass',
         lastPlay: status === 'live' ? `Last play: ${awayTeam.name} turnover` : '',
         awayColor: '#ef4444',
         homeColor: '#ef4444',
@@ -381,7 +414,7 @@ const generateMockNBAGames = (): Game[] => {
         attendance: `${Math.floor(Math.random() * 20000 + 15000)}`,
         gameClock: timeRemaining,
         broadcast: { 
-          network: i < 3 ? 'ESPN' : i < 6 ? 'TNT' : 'NBA League Pass', 
+          network: i < 2 ? 'ESPN' : i < 3 ? 'TNT' : 'NBA League Pass', 
           stream: 'NBA App' 
         },
         bettingLine: { 
@@ -393,6 +426,258 @@ const generateMockNBAGames = (): Game[] => {
   }
   
   console.log(`🎲 Generated ${mockGames.length} mock NBA games`);
+  return mockGames;
+};
+
+const generateMockNFLGames = (): Game[] => {
+  const nflTeams = [
+    { abbr: 'KC', name: 'Kansas City Chiefs' },
+    { abbr: 'SF', name: 'San Francisco 49ers' },
+    { abbr: 'BAL', name: 'Baltimore Ravens' },
+    { abbr: 'BUF', name: 'Buffalo Bills' },
+    { abbr: 'DAL', name: 'Dallas Cowboys' },
+    { abbr: 'PHI', name: 'Philadelphia Eagles' },
+    { abbr: 'GB', name: 'Green Bay Packers' },
+    { abbr: 'CIN', name: 'Cincinnati Bengals' },
+    { abbr: 'MIA', name: 'Miami Dolphins' },
+    { abbr: 'DET', name: 'Detroit Lions' },
+  ];
+  
+  const mockGames: Game[] = [];
+  const currentDate = new Date();
+  
+  for (let i = 0; i < 3; i++) {
+    const homeIndex = i % nflTeams.length;
+    const awayIndex = (i + 3) % nflTeams.length;
+    
+    if (homeIndex !== awayIndex) {
+      const homeTeam = nflTeams[homeIndex];
+      const awayTeam = nflTeams[awayIndex];
+      
+      const homeScore = Math.floor(Math.random() * (35 - 17) + 17);
+      const awayScore = Math.floor(Math.random() * (35 - 17) + 17);
+      
+      let status: 'live' | 'final' | 'scheduled' = 'scheduled';
+      let period = '1st';
+      let timeRemaining = '15:00';
+      
+      if (i < 1) {
+        status = 'live';
+        const quarterNum = Math.floor(Math.random() * 4) + 1;
+        period = `${quarterNum}${getOrdinalSuffix(quarterNum)}`;
+        timeRemaining = `${Math.floor(Math.random() * 15)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
+      } else if (i >= 2) {
+        status = 'final';
+        period = 'Final';
+        timeRemaining = '00:00';
+      }
+      
+      const gameTime = new Date(currentDate);
+      if (status === 'live') {
+        gameTime.setHours(16, 0 + i, 0);
+      } else if (status === 'final') {
+        gameTime.setHours(19, 0, 0);
+      } else {
+        gameTime.setHours(13, 0, 0);
+      }
+      
+      mockGames.push({
+        id: `mock-nfl-${i}`,
+        sport: 'NFL',
+        awayTeam: awayTeam.name,
+        homeTeam: homeTeam.name,
+        awayScore: status === 'scheduled' ? 0 : awayScore,
+        homeScore: status === 'scheduled' ? 0 : homeScore,
+        period,
+        timeRemaining,
+        status,
+        quarter: period,
+        channel: i < 1 ? 'FOX' : i < 2 ? 'CBS' : 'NBC',
+        lastPlay: status === 'live' ? `${awayTeam.name} incomplete pass` : '',
+        awayColor: '#3b82f6',
+        homeColor: '#3b82f6',
+        awayRecord: `${Math.floor(Math.random() * 10 + 5)}-${Math.floor(Math.random() * 8 + 2)}`,
+        homeRecord: `${Math.floor(Math.random() * 10 + 5)}-${Math.floor(Math.random() * 8 + 2)}`,
+        arena: getProperArena(homeTeam.name, 'NFL'),
+        attendance: `${Math.floor(Math.random() * 70000 + 60000)}`,
+        gameClock: timeRemaining,
+        broadcast: { network: i < 1 ? 'FOX' : i < 2 ? 'CBS' : 'NBC', stream: 'NFL+ App' },
+        bettingLine: { 
+          spread: `${homeTeam.name.split(' ').pop()} ${(Math.random() * 7 + 1).toFixed(1)}`, 
+          total: (Math.random() * 10 + 40).toFixed(1) 
+        }
+      });
+    }
+  }
+  
+  console.log(`🏈 Generated ${mockGames.length} mock NFL games`);
+  return mockGames;
+};
+
+const generateMockNHLGames = (): Game[] => {
+  const nhlTeams = [
+    { abbr: 'COL', name: 'Colorado Avalanche' },
+    { abbr: 'EDM', name: 'Edmonton Oilers' },
+    { abbr: 'BOS', name: 'Boston Bruins' },
+    { abbr: 'TOR', name: 'Toronto Maple Leafs' },
+    { abbr: 'VGK', name: 'Vegas Golden Knights' },
+    { abbr: 'NYR', name: 'New York Rangers' },
+    { abbr: 'DAL', name: 'Dallas Stars' },
+    { abbr: 'FLA', name: 'Florida Panthers' },
+  ];
+  
+  const mockGames: Game[] = [];
+  const currentDate = new Date();
+  
+  for (let i = 0; i < 3; i++) {
+    const homeIndex = i % nhlTeams.length;
+    const awayIndex = (i + 4) % nhlTeams.length;
+    
+    if (homeIndex !== awayIndex) {
+      const homeTeam = nhlTeams[homeIndex];
+      const awayTeam = nhlTeams[awayIndex];
+      
+      const homeScore = Math.floor(Math.random() * (7 - 2) + 2);
+      const awayScore = Math.floor(Math.random() * (7 - 2) + 2);
+      
+      let status: 'live' | 'final' | 'scheduled' = 'scheduled';
+      let period = '1st';
+      let timeRemaining = '20:00';
+      
+      if (i < 1) {
+        status = 'live';
+        const periodNum = Math.floor(Math.random() * 3) + 1;
+        period = `${periodNum}${getOrdinalSuffix(periodNum)}`;
+        timeRemaining = `${Math.floor(Math.random() * 20)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
+      } else if (i >= 2) {
+        status = 'final';
+        period = 'Final';
+        timeRemaining = '00:00';
+      }
+      
+      const gameTime = new Date(currentDate);
+      if (status === 'live') {
+        gameTime.setHours(19, 30 + i, 0);
+      } else if (status === 'final') {
+        gameTime.setHours(22, 0, 0);
+      } else {
+        gameTime.setHours(20, 0, 0);
+      }
+      
+      mockGames.push({
+        id: `mock-nhl-${i}`,
+        sport: 'NHL',
+        awayTeam: awayTeam.name,
+        homeTeam: homeTeam.name,
+        awayScore: status === 'scheduled' ? 0 : awayScore,
+        homeScore: status === 'scheduled' ? 0 : homeScore,
+        period,
+        timeRemaining,
+        status,
+        quarter: period,
+        channel: i < 1 ? 'ESPN' : i < 2 ? 'TNT' : 'NHL Network',
+        lastPlay: status === 'live' ? `${awayTeam.name} shot saved` : '',
+        awayColor: '#1e40af',
+        homeColor: '#1e40af',
+        awayRecord: `${Math.floor(Math.random() * 40 + 20)}-${Math.floor(Math.random() * 30 + 10)}`,
+        homeRecord: `${Math.floor(Math.random() * 40 + 20)}-${Math.floor(Math.random() * 30 + 10)}`,
+        arena: getProperArena(homeTeam.name, 'NHL'),
+        attendance: `${Math.floor(Math.random() * 18000 + 15000)}`,
+        gameClock: timeRemaining,
+        broadcast: { network: i < 1 ? 'ESPN' : i < 2 ? 'TNT' : 'NHL Network', stream: 'NHL App' },
+        bettingLine: { 
+          spread: `${homeTeam.name.split(' ').pop()} ${(Math.random() * 1.5 + 0.5).toFixed(1)}`, 
+          total: (Math.random() * 2 + 5).toFixed(1) 
+        }
+      });
+    }
+  }
+  
+  console.log(`🏒 Generated ${mockGames.length} mock NHL games`);
+  return mockGames;
+};
+
+const generateMockMLBGames = (): Game[] => {
+  const mlbTeams = [
+    { abbr: 'NYY', name: 'New York Yankees' },
+    { abbr: 'LAD', name: 'Los Angeles Dodgers' },
+    { abbr: 'BOS', name: 'Boston Red Sox' },
+    { abbr: 'ATL', name: 'Atlanta Braves' },
+    { abbr: 'HOU', name: 'Houston Astros' },
+    { abbr: 'PHI', name: 'Philadelphia Phillies' },
+    { abbr: 'CHC', name: 'Chicago Cubs' },
+    { abbr: 'SF', name: 'San Francisco Giants' },
+  ];
+  
+  const mockGames: Game[] = [];
+  const currentDate = new Date();
+  
+  for (let i = 0; i < 3; i++) {
+    const homeIndex = i % mlbTeams.length;
+    const awayIndex = (i + 4) % mlbTeams.length;
+    
+    if (homeIndex !== awayIndex) {
+      const homeTeam = mlbTeams[homeIndex];
+      const awayTeam = mlbTeams[awayIndex];
+      
+      const homeScore = Math.floor(Math.random() * (9 - 3) + 3);
+      const awayScore = Math.floor(Math.random() * (9 - 3) + 3);
+      
+      let status: 'live' | 'final' | 'scheduled' = 'scheduled';
+      let period = 'Top 1st';
+      let timeRemaining = '0 outs';
+      
+      if (i < 1) {
+        status = 'live';
+        const inning = Math.floor(Math.random() * 9) + 1;
+        const isTop = Math.random() > 0.5;
+        period = `${isTop ? 'Top' : 'Bottom'} ${inning}${getOrdinalSuffix(inning)}`;
+        timeRemaining = `${Math.floor(Math.random() * 3)} out${Math.floor(Math.random() * 3) !== 1 ? 's' : ''}`;
+      } else if (i >= 2) {
+        status = 'final';
+        period = 'Final';
+        timeRemaining = '00:00';
+      }
+      
+      const gameTime = new Date(currentDate);
+      if (status === 'live') {
+        gameTime.setHours(19, 30 + i, 0);
+      } else if (status === 'final') {
+        gameTime.setHours(22, 0, 0);
+      } else {
+        gameTime.setHours(19, 0, 0);
+      }
+      
+      mockGames.push({
+        id: `mock-mlb-${i}`,
+        sport: 'MLB',
+        awayTeam: awayTeam.name,
+        homeTeam: homeTeam.name,
+        awayScore: status === 'scheduled' ? 0 : awayScore,
+        homeScore: status === 'scheduled' ? 0 : homeScore,
+        period,
+        timeRemaining,
+        status,
+        quarter: period,
+        channel: i < 1 ? 'ESPN' : i < 2 ? 'FOX' : 'MLB Network',
+        lastPlay: status === 'live' ? `${awayTeam.name} strikes out` : '',
+        awayColor: '#10b981',
+        homeColor: '#10b981',
+        awayRecord: `${Math.floor(Math.random() * 70 + 50)}-${Math.floor(Math.random() * 50 + 30)}`,
+        homeRecord: `${Math.floor(Math.random() * 70 + 50)}-${Math.floor(Math.random() * 50 + 30)}`,
+        arena: getProperArena(homeTeam.name, 'MLB'),
+        attendance: `${Math.floor(Math.random() * 40000 + 30000)}`,
+        gameClock: timeRemaining,
+        broadcast: { network: i < 1 ? 'ESPN' : i < 2 ? 'FOX' : 'MLB Network', stream: 'MLB.TV' },
+        bettingLine: { 
+          spread: `${homeTeam.name.split(' ').pop()} ${(Math.random() * 1.5 + 0.5).toFixed(1)}`, 
+          total: (Math.random() * 3 + 7).toFixed(1) 
+        }
+      });
+    }
+  }
+  
+  console.log(`⚾ Generated ${mockGames.length} mock MLB games`);
   return mockGames;
 };
 
@@ -673,6 +958,18 @@ const LiveGamesScreen = () => {
       console.log(`⚠️ No NBA data from API, generating mock NBA games`);
       return generateMockNBAGames();
     }
+    if (games.length === 0 && sportName === 'NFL') {
+      console.log(`⚠️ No NFL data from API, generating mock NFL games`);
+      return generateMockNFLGames();
+    }
+    if (games.length === 0 && sportName === 'NHL') {
+      console.log(`⚠️ No NHL data from API, generating mock NHL games`);
+      return generateMockNHLGames();
+    }
+    if (games.length === 0 && sportName === 'MLB') {
+      console.log(`⚠️ No MLB data from API, generating mock MLB games`);
+      return generateMockMLBGames();
+    }
 
     if (games.length === 0) {
       console.log(`No ${sportName} games found`);
@@ -743,8 +1040,10 @@ const LiveGamesScreen = () => {
     if (nflData) {
       const transformed = transformApiData(nflData, 'NFL');
       setNflGames(transformed);
-    } else if (nflError && nflGames.length === 0) {
-      console.log('NFL API failed, using fallback');
+    } else if (nflError) {
+      console.log('NFL API failed, using mock data');
+      const mockGames = generateMockNFLGames();
+      setNflGames(mockGames);
     }
   }, [nflData, nflError, transformApiData]);
 
@@ -752,8 +1051,10 @@ const LiveGamesScreen = () => {
     if (nhlData) {
       const transformed = transformApiData(nhlData, 'NHL');
       setNhlGames(transformed);
-    } else if (nhlError && nhlGames.length === 0) {
-      console.log('NHL API failed, using fallback');
+    } else if (nhlError) {
+      console.log('NHL API failed, using mock data');
+      const mockGames = generateMockNHLGames();
+      setNhlGames(mockGames);
     }
   }, [nhlData, nhlError, transformApiData]);
 
@@ -761,8 +1062,10 @@ const LiveGamesScreen = () => {
     if (mlbData) {
       const transformed = transformApiData(mlbData, 'MLB');
       setMlbGames(transformed);
-    } else if (mlbError && mlbGames.length === 0) {
-      console.log('MLB API failed, using fallback');
+    } else if (mlbError) {
+      console.log('MLB API failed, using mock data');
+      const mockGames = generateMockMLBGames();
+      setMlbGames(mockGames);
     }
   }, [mlbData, mlbError, transformApiData]);
 
@@ -941,7 +1244,7 @@ const LiveGamesScreen = () => {
           
           {game.bettingLine && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              📊 Spread: {game.bettingLine.spread} • O/U: {game.bettingLine.total}
+              📊 Point Adjustment: {game.bettingLine.spread} • Total Range: {game.bettingLine.total}
             </Typography>
           )}
           

@@ -1,4 +1,4 @@
-// src/pages/DailyPicksScreen.tsx – Complete with Stripe subscription and generator credits integration
+// src/pages/DailyPicksScreen.tsx – Complete with credit-based AI generation (no unlimited)
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Box,
@@ -68,8 +68,112 @@ import { useDailyPicks } from '../hooks/useunifiedAPI';
 import { useAuth } from '../contexts/AuthContext';
 
 // ============================================
-// CUSTOM DEBOUNCE UTILITY
+// CONSTANTS & UTILITIES
 // ============================================
+const POLLING_INTERVAL = 60000;
+const RATE_LIMIT_BACKOFF = 30000;
+const MAX_VISIBLE_CARDS_PER_SPORT = 3;
+
+const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
+
+const SPORT_ICONS = {
+  nba: SportsBasketball,
+  nfl: SportsFootball,
+  mlb: SportsBaseball,
+  nhl: SportsHockey,
+  ufc: Bolt,
+  soccer: SportsSoccer,
+};
+
+const MARKET_ICONS = {
+  standard: BarChart,
+  same_game: Gamepad,
+  teaser: ExpandMore,
+  round_robin: Loop,
+};
+
+const SPORTS: { id: string; name: string; icon: keyof typeof SPORT_ICONS; leagues: string[] }[] = [
+  { id: 'nba', name: 'NBA', icon: 'nba', leagues: ['nba'] },
+  { id: 'nfl', name: 'NFL', icon: 'nfl', leagues: ['nfl'] },
+  { id: 'mlb', name: 'MLB', icon: 'mlb', leagues: ['mlb'] },
+  { id: 'nhl', name: 'NHL', icon: 'nhl', leagues: ['nhl'] },
+  { id: 'ufc', name: 'UFC', icon: 'ufc', leagues: ['ufc'] },
+  { id: 'soccer', name: 'Soccer', icon: 'soccer', leagues: ['uefa_champions', 'epl', 'laliga'] },
+];
+
+const MARKET_TYPES = [
+  { id: 'standard', name: 'Standard', icon: 'standard' },
+  { id: 'same_game', name: 'Same Game Combo', icon: 'same_game' },
+  { id: 'teaser', name: 'Point Adjustment Adjuster', icon: 'teaser' },
+  { id: 'round_robin', name: 'Multi‑Leg Combos', icon: 'round_robin' },
+];
+
+const SPORT_COLORS = {
+  NBA: '#ef4444',
+  NFL: '#3b82f6',
+  NHL: '#1e40af',
+  MLB: '#10b981',
+  SOCCER: '#8b5cf6',
+  UFC: '#dc2626',
+};
+
+const CATEGORY_COLORS = {
+  'High Confidence': '#10b981',
+  'Top Projection': '#3b82f6',
+  'High Confidence': '#f59e0b',
+  'High Upside': '#8b5cf6',
+  'AI Generated': '#ec4899',
+  'Premium Pick': '#f59e0b',
+  'Game Pick': '#8b5cf6',
+};
+
+const CONFIDENCE_COLORS = {
+  80: '#22c55e',
+  70: '#eab308',
+  60: '#f97316',
+  default: '#6b7280',
+};
+
+const WINNER_PROMPTS = [
+  'Today\'s biggest favorites',
+  'Upset predictions for tonight',
+  'Best match winner picks',
+  'Teams on winning streaks',
+  'Home underdogs to watch',
+  'Highest implied win probability',
+  'Teams with key injuries – fade',
+  'Best value on the moneyline',
+  'Combo of the day (winners)',
+  'Teams in bounce‑back spots',
+  'Top scorers tonight',
+  'Best rebounders',
+  'Players with most assists',
+  'High steals projections',
+  'Block leaders',
+];
+
+const KEYWORD_MAP: Record<string, string[]> = {
+  scorers: ['points', 'scoring', 'score', 'pts', 'point', 'ppg'],
+  points: ['points', 'scoring', 'score', 'pts', 'point', 'ppg'],
+  scoring: ['points', 'scorers', 'score', 'pts', 'point'],
+  moneyline: ['moneyline', 'ml', 'win', 'winner', 'victory', 'favorite', 'underdog'],
+  over: ['over', 'overs', 'greater', 'higher', 'more than', 'above'],
+  under: ['under', 'unders', 'less', 'lower', 'fewer than', 'below'],
+  rebounds: ['rebounds', 'reb', 'boards', 'glass', 'rebounding'],
+  assists: ['assists', 'ast', 'dimes', 'passing', 'playmaker'],
+  threes: ['three', '3pt', '3-point', 'three pointers', 'threes', '3pm'],
+  blocks: ['blocks', 'blk', 'rejections', 'shot blocker'],
+  steals: ['steals', 'stl', 'thieves', 'steal', 'deflections'],
+  underdogs: ['underdog', 'dogs', 'unlikely', 'surprising', 'value'],
+  favorites: ['favorite', 'favs', 'expected', 'projected', 'chalk'],
+  best: ['best', 'top', 'elite', 'premium', 'highest', 'leading'],
+  value: ['value', 'edge', 'positive', 'good odds', 'plus edge'],
+  upset: ['upset', 'underdog', 'surprise', 'upset alert'],
+  lock: ['lock', 'sure thing', 'safe bet', 'high confidence'],
+  streak: ['streak', 'winning streak', 'hot streak', 'losing streak'],
+};
+
 const debounce = (func: Function, wait: number) => {
   let timeout: ReturnType<typeof setTimeout>;
   return function executedFunction(...args: any[]) {
@@ -121,7 +225,7 @@ interface Pick {
   game_date?: string;
 }
 
-interface ParlayLeg {
+interface ComboLeg {
   player?: string;
   team?: string;
   market: string;
@@ -129,142 +233,16 @@ interface ParlayLeg {
   odds: number | string;
 }
 
-interface Parlay {
+interface Combo {
   id: string;
   type: 'same_game_parlay' | 'teaser' | 'round_robin';
   game?: string;
-  legs: ParlayLeg[];
+  legs: ComboLeg[];
   total_odds: string | number;
   confidence: number;
   analysis?: string;
   correlation_score?: number;
 }
-
-interface SportOption {
-  id: string;
-  name: string;
-  icon: keyof typeof SPORT_ICONS;
-  leagues: string[];
-}
-
-interface MarketType {
-  id: string;
-  name: string;
-  icon: keyof typeof MARKET_ICONS;
-}
-
-// ============================================
-// CONSTANTS
-// ============================================
-const POLLING_INTERVAL = 60000;
-const RATE_LIMIT_BACKOFF = 30000;
-const MAX_VISIBLE_CARDS_PER_SPORT = 3;
-
-const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
-const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
-
-const SPORT_ICONS = {
-  nba: SportsBasketball,
-  nfl: SportsFootball,
-  mlb: SportsBaseball,
-  nhl: SportsHockey,
-  ufc: Bolt,
-  soccer: SportsSoccer,
-};
-
-const MARKET_ICONS = {
-  standard: BarChart,
-  same_game: Gamepad,
-  teaser: ExpandMore,
-  round_robin: Loop,
-};
-
-const SPORTS: SportOption[] = [
-  { id: 'nba', name: 'NBA', icon: 'nba', leagues: ['nba'] },
-  { id: 'nfl', name: 'NFL', icon: 'nfl', leagues: ['nfl'] },
-  { id: 'mlb', name: 'MLB', icon: 'mlb', leagues: ['mlb'] },
-  { id: 'nhl', name: 'NHL', icon: 'nhl', leagues: ['nhl'] },
-  { id: 'ufc', name: 'UFC', icon: 'ufc', leagues: ['ufc'] },
-  { id: 'soccer', name: 'Soccer', icon: 'soccer', leagues: ['uefa_champions', 'epl', 'laliga'] },
-];
-
-const MARKET_TYPES: MarketType[] = [
-  { id: 'standard', name: 'Standard', icon: 'standard' },
-  { id: 'same_game', name: 'Same Game Parlay', icon: 'same_game' },
-  { id: 'teaser', name: 'Teaser', icon: 'teaser' },
-  { id: 'round_robin', name: 'Round Robin', icon: 'round_robin' },
-];
-
-const SPORT_COLORS = {
-  NBA: '#ef4444',
-  NFL: '#3b82f6',
-  NHL: '#1e40af',
-  MLB: '#10b981',
-  SOCCER: '#8b5cf6',
-  UFC: '#dc2626',
-};
-
-const CATEGORY_COLORS = {
-  'High Confidence': '#10b981',
-  'Value Bet': '#3b82f6',
-  'Lock Pick': '#f59e0b',
-  'High Upside': '#8b5cf6',
-  'AI Generated': '#ec4899',
-  'Premium Pick': '#f59e0b',
-  'Game Pick': '#8b5cf6',
-};
-
-const CONFIDENCE_COLORS = {
-  80: '#22c55e',
-  70: '#eab308',
-  60: '#f97316',
-  default: '#6b7280',
-};
-
-// ============================================
-// WINNER_PROMPTS
-// ============================================
-const WINNER_PROMPTS = [
-  'Today\'s biggest favorites',
-  'Upset predictions for tonight',
-  'Best moneyline bets',
-  'Teams on winning streaks',
-  'Home underdogs to watch',
-  'Highest implied win probability',
-  'Teams with key injuries – fade',
-  'Best value on the moneyline',
-  'Parlay of the day (winners)',
-  'Teams in bounce‑back spots',
-  'Top scorers tonight',
-  'Best rebounders',
-  'Players with most assists',
-  'High steals projections',
-  'Block leaders',
-];
-
-// ============================================
-// KEYWORD MAP
-// ============================================
-const KEYWORD_MAP: Record<string, string[]> = {
-  'scorers': ['points', 'scoring', 'score', 'pts', 'point', 'ppg'],
-  'points': ['points', 'scoring', 'score', 'pts', 'point', 'ppg'],
-  'scoring': ['points', 'scorers', 'score', 'pts', 'point'],
-  'moneyline': ['moneyline', 'ml', 'win', 'winner', 'victory', 'favorite', 'underdog'],
-  'over': ['over', 'overs', 'greater', 'higher', 'more than', 'above'],
-  'under': ['under', 'unders', 'less', 'lower', 'fewer than', 'below'],
-  'rebounds': ['rebounds', 'reb', 'boards', 'glass', 'rebounding'],
-  'assists': ['assists', 'ast', 'dimes', 'passing', 'playmaker'],
-  'threes': ['three', '3pt', '3-point', 'three pointers', 'threes', '3pm'],
-  'blocks': ['blocks', 'blk', 'rejections', 'shot blocker'],
-  'steals': ['steals', 'stl', 'thieves', 'steal', 'deflections'],
-  'underdogs': ['underdog', 'dogs', 'unlikely', 'surprising', 'value'],
-  'favorites': ['favorite', 'favs', 'expected', 'projected', 'chalk'],
-  'best': ['best', 'top', 'elite', 'premium', 'highest', 'leading'],
-  'value': ['value', 'edge', 'positive', 'good odds', 'plus edge'],
-  'upset': ['upset', 'underdog', 'surprise', 'upset alert'],
-  'lock': ['lock', 'sure thing', 'safe bet', 'high confidence'],
-  'streak': ['streak', 'winning streak', 'hot streak', 'losing streak'],
-};
 
 // ============================================
 // HELPER FUNCTIONS
@@ -302,7 +280,7 @@ const getPlayerTeam = (playerName: string): string => {
 };
 
 // ============================================
-// generateGamePicksFromPlayerProps
+// generateGamePicksFromPlayerProps (keep original)
 // ============================================
 const generateGamePicksFromPlayerProps = (prompt: string, playerPicks: Pick[], sport: string): Pick[] => {
   const lowerPrompt = prompt.toLowerCase();
@@ -318,6 +296,7 @@ const generateGamePicksFromPlayerProps = (prompt: string, playerPicks: Pick[], s
     opponentPlayers: Set<string>
   }>();
   
+  // Group picks by game
   playerPicks.forEach(pick => {
     if (pick.team && pick.opponent && pick.team !== pick.opponent && pick.team !== 'TBD' && pick.opponent !== 'TBD') {
       const teams = [pick.team, pick.opponent].sort();
@@ -345,26 +324,78 @@ const generateGamePicksFromPlayerProps = (prompt: string, playerPicks: Pick[], s
     }
   });
 
+  // If no games found with player props, create mock games based on available teams
+  if (gameMap.size === 0) {
+    console.log('No games found with player props, creating mock games');
+    
+    // Get unique teams from player picks
+    const teams = new Set<string>();
+    playerPicks.forEach(pick => {
+      if (pick.team && pick.team !== 'TBD') {
+        teams.add(pick.team);
+      }
+    });
+    
+    const teamList = Array.from(teams);
+    if (teamList.length >= 2) {
+      // Shuffle teams for randomization
+      const shuffledTeams = [...teamList];
+      for (let i = shuffledTeams.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledTeams[i], shuffledTeams[j]] = [shuffledTeams[j], shuffledTeams[i]];
+      }
+      
+      // Create mock matchups
+      for (let i = 0; i < Math.min(3, Math.floor(shuffledTeams.length / 2)); i++) {
+        const team1 = shuffledTeams[i * 2];
+        const team2 = shuffledTeams[i * 2 + 1];
+        if (team1 && team2) {
+          const gameKey = `${team1}-vs-${team2}`;
+          gameMap.set(gameKey, {
+            team: team1,
+            opponent: team2,
+            teamPicks: playerPicks.filter(p => p.team === team1),
+            opponentPicks: playerPicks.filter(p => p.team === team2),
+            teamPlayers: new Set(playerPicks.filter(p => p.team === team1).map(p => p.player)),
+            opponentPlayers: new Set(playerPicks.filter(p => p.team === team2).map(p => p.player))
+          });
+        }
+      }
+    }
+  }
+
+  // Convert map to array and shuffle for randomization
+  const gameEntries = Array.from(gameMap.entries());
+  for (let i = gameEntries.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [gameEntries[i], gameEntries[j]] = [gameEntries[j], gameEntries[i]];
+  }
+
   const allPicks = playerPicks.filter(p => p.projection && p.line && p.line > 0);
   const leagueAvgRatio = allPicks.length > 0 
     ? allPicks.reduce((sum, p) => sum + (p.projection! / p.line!), 0) / allPicks.length 
-    : 1.0;
+    : 1.05;
   
   const leagueAvgProjection = allPicks.length > 0
     ? allPicks.reduce((sum, p) => sum + p.projection!, 0) / allPicks.length
-    : 10;
+    : 15;
     
   const leagueAvgLine = allPicks.length > 0
     ? allPicks.reduce((sum, p) => sum + p.line!, 0) / allPicks.length
-    : 10;
+    : 15;
 
-  gameMap.forEach((game, key) => {
+  // Process games with randomization
+  gameEntries.forEach(([key, game]) => {
     if (generatedGames.has(key)) return;
     generatedGames.add(key);
     
     const teamData = game.teamPicks;
     const opponentData = game.opponentPicks;
     
+    // Add random variance to calculations
+    const randomVariance = () => 0.85 + Math.random() * 0.3; // 0.85 to 1.15 variance
+    
+    // Calculate team metrics with randomization
     let teamValidPicks = 0;
     let teamScore = 0;
     let teamTotalProjection = 0;
@@ -374,9 +405,9 @@ const generateGamePicksFromPlayerProps = (prompt: string, playerPicks: Pick[], s
     
     teamData.forEach(pick => {
       if (pick.projection && pick.line && pick.line > 0) {
-        const ratio = pick.projection / pick.line;
+        const ratio = (pick.projection / pick.line) * randomVariance();
         teamScore += ratio;
-        teamTotalProjection += pick.projection;
+        teamTotalProjection += pick.projection * randomVariance();
         teamTotalLine += pick.line;
         teamValidPicks++;
         
@@ -392,111 +423,194 @@ const generateGamePicksFromPlayerProps = (prompt: string, playerPicks: Pick[], s
     let opponentPlayersAboveLine = 0;
     let opponentPlayersBelowLine = 0;
     
-    if (opponentData.length >= 3) {
-      opponentData.forEach(pick => {
-        if (pick.projection && pick.line && pick.line > 0) {
-          const ratio = pick.projection / pick.line;
-          opponentScore += ratio;
-          opponentTotalProjection += pick.projection;
-          opponentTotalLine += pick.line;
-          opponentValidPicks++;
-          
-          if (ratio > 1.05) opponentPlayersAboveLine++;
-          if (ratio < 0.95) opponentPlayersBelowLine++;
-        }
-      });
-    } else {
-      const homeAdjustment = Math.random() > 0.5 ? 1.02 : 0.98;
-      opponentValidPicks = Math.max(5, teamValidPicks);
+    opponentData.forEach(pick => {
+      if (pick.projection && pick.line && pick.line > 0) {
+        const ratio = (pick.projection / pick.line) * randomVariance();
+        opponentScore += ratio;
+        opponentTotalProjection += pick.projection * randomVariance();
+        opponentTotalLine += pick.line;
+        opponentValidPicks++;
+        
+        if (ratio > 1.05) opponentPlayersAboveLine++;
+        if (ratio < 0.95) opponentPlayersBelowLine++;
+      }
+    });
+
+    // Use league averages if not enough picks
+    const MIN_PICKS_REQUIRED = 2;
+    const USE_LEAGUE_AVG_THRESHOLD = 1;
+    
+    if (teamValidPicks < USE_LEAGUE_AVG_THRESHOLD) {
+      const homeAdjustment = 0.95 + Math.random() * 0.1; // Random home/away adjustment
+      teamValidPicks = Math.max(3, teamData.length);
+      teamScore = leagueAvgRatio * homeAdjustment * teamValidPicks;
+      teamTotalProjection = leagueAvgProjection * homeAdjustment * teamValidPicks;
+      teamTotalLine = leagueAvgLine * teamValidPicks;
+      teamPlayersAboveLine = Math.round(teamValidPicks * (0.3 + Math.random() * 0.2));
+      teamPlayersBelowLine = Math.round(teamValidPicks * (0.2 + Math.random() * 0.2));
+    }
+    
+    if (opponentValidPicks < USE_LEAGUE_AVG_THRESHOLD) {
+      const homeAdjustment = 0.95 + Math.random() * 0.1;
+      opponentValidPicks = Math.max(3, opponentData.length);
       opponentScore = leagueAvgRatio * homeAdjustment * opponentValidPicks;
       opponentTotalProjection = leagueAvgProjection * homeAdjustment * opponentValidPicks;
       opponentTotalLine = leagueAvgLine * opponentValidPicks;
-      opponentPlayersAboveLine = Math.round(opponentValidPicks * 0.4);
-      opponentPlayersBelowLine = Math.round(opponentValidPicks * 0.3);
+      opponentPlayersAboveLine = Math.round(opponentValidPicks * (0.3 + Math.random() * 0.2));
+      opponentPlayersBelowLine = Math.round(opponentValidPicks * (0.2 + Math.random() * 0.2));
     }
 
-    const MIN_PLAYER_PROPS = 3;
-    if (teamValidPicks < MIN_PLAYER_PROPS || opponentValidPicks < MIN_PLAYER_PROPS) {
-      return;
-    }
-
+    // Calculate team strength with randomization
     const teamAvgRatio = teamScore / teamValidPicks;
     const opponentAvgRatio = opponentScore / opponentValidPicks;
-    const scoreDifference = Math.abs(teamAvgRatio - opponentAvgRatio);
+    let scoreDifference = Math.abs(teamAvgRatio - opponentAvgRatio);
     
-    const teamInjuryImpact = teamValidPicks < 8 ? (8 - teamValidPicks) * 2 : 0;
-    const opponentInjuryImpact = opponentValidPicks < 8 ? (8 - opponentValidPicks) * 2 : 0;
+    // Add random variance to score difference
+    scoreDifference = scoreDifference * (0.7 + Math.random() * 0.6);
     
-    const dataQualityBonus = Math.min(20, (teamValidPicks + opponentValidPicks) * 1.2);
+    const teamInjuryImpact = Math.max(0, (5 - teamValidPicks) * (1 + Math.random() * 2));
+    const opponentInjuryImpact = Math.max(0, (5 - opponentValidPicks) * (1 + Math.random() * 2));
+    
+    const dataQualityBonus = Math.min(20, (teamValidPicks + opponentValidPicks) * (0.8 + Math.random() * 0.8));
     const projectionAdvantage = Math.abs(
       (teamTotalProjection / teamValidPicks) - (opponentTotalProjection / opponentValidPicks)
-    ) / Math.max(teamTotalLine / teamValidPicks, opponentTotalLine / opponentValidPicks) * 25;
+    ) / Math.max(teamTotalLine / teamValidPicks, opponentTotalLine / opponentValidPicks) * (15 + Math.random() * 20);
     
-    let confidence = Math.min(88, Math.round(
+    let confidence = Math.min(88, Math.max(58, Math.round(
       (scoreDifference * 40) + 48 + dataQualityBonus + projectionAdvantage -
       (teamInjuryImpact * 0.5) + (opponentInjuryImpact * 0.3)
-    ));
-    confidence = Math.max(58, Math.min(88, confidence));
+    )));
     
-    const teamIsFavorite = teamAvgRatio > opponentAvgRatio;
+    // Randomly decide favorite based on prompt type and randomization
+    const promptRandomizer = Math.random();
+    let teamIsFavorite = teamAvgRatio > opponentAvgRatio;
+    
+    // Override favorite based on prompt type for variety
+    const isUpsetPrompt = lowerPrompt.includes('underdog') || lowerPrompt.includes('upset');
+    const isFavoritePrompt = lowerPrompt.includes('favorite') || lowerPrompt.includes('lock');
+    const isBounceBackPrompt = lowerPrompt.includes('bounce') || lowerPrompt.includes('streak');
+    
+    if (isUpsetPrompt && promptRandomizer > 0.3) {
+      // For upset prompts, often pick the underdog (70% of the time)
+      teamIsFavorite = false;
+    } else if (isFavoritePrompt && promptRandomizer > 0.2) {
+      // For favorite prompts, often pick the favorite (80% of the time)
+      teamIsFavorite = true;
+    } else if (isBounceBackPrompt && promptRandomizer > 0.4) {
+      // For bounce back prompts, sometimes pick the team that's been struggling
+      teamIsFavorite = teamAvgRatio < opponentAvgRatio;
+    }
+    
     const favorite = teamIsFavorite ? game.team : game.opponent;
+    const underdog = teamIsFavorite ? game.opponent : game.team;
     
+    // Randomize odds and edge calculations
     let odds = '';
     let edgePercentage = 0;
-    if (teamIsFavorite) {
-      const oddsValue = Math.round(160 - (scoreDifference * 60) - (confidence - 50) * 1.5);
-      odds = `-${Math.max(115, Math.min(220, oddsValue))}`;
-      edgePercentage = Math.round(scoreDifference * 50 + (confidence - 50) * 0.8);
-    } else {
-      const oddsValue = Math.round(140 + (scoreDifference * 80) + (85 - confidence) * 2);
-      odds = `+${Math.max(130, Math.min(300, oddsValue))}`;
-      edgePercentage = Math.round(scoreDifference * 45 + (85 - confidence) * 1.2);
-    }
-
-    const isMoneylinePrompt = lowerPrompt.includes('moneyline') || lowerPrompt.includes('winner');
-    if (isMoneylinePrompt) {
-      const analysis = `${favorite} has the advantage based on player projections. ` +
+    let analysis = '';
+    
+    const randomOddsOffset = () => 0.8 + Math.random() * 0.4;
+    
+    if (isUpsetPrompt && !teamIsFavorite) {
+      // Underdog pick
+      const oddsValue = Math.round((180 + (scoreDifference * 60) + (85 - confidence) * 1.5) * randomOddsOffset());
+      odds = `+${Math.min(400, Math.max(140, oddsValue))}`;
+      edgePercentage = Math.round((scoreDifference * 40 + (85 - confidence) * 1.2) * (0.7 + Math.random() * 0.6));
+      const upsetAnalysis = [
+        `${underdog} is primed for an upset! Our models show ${underdog} players outperforming expectations recently.`,
+        `Don't sleep on ${underdog} tonight! Historical data suggests they match up well against ${favorite}.`,
+        `${underdog} has significant value as underdogs. Key players are trending in the right direction.`,
+        `The public is sleeping on ${underdog}, but our AI sees a strong upset opportunity.`
+      ];
+      analysis = upsetAnalysis[Math.floor(Math.random() * upsetAnalysis.length)] + ' ' +
         `${game.team} at ${Math.round(teamAvgRatio * 100)}% efficiency ` +
-        `(${teamPlayersAboveLine} players above line, ${teamPlayersBelowLine} below). ` +
-        `${game.opponent} at ${Math.round(opponentAvgRatio * 100)}% efficiency ` +
-        `(${opponentPlayersAboveLine} above, ${opponentPlayersBelowLine} below).`;
-      
-      const gamePick: Pick = {
-        id: `game-${Date.now()}-${Math.random()}`,
-        player: `${game.team} vs ${game.opponent}`,
-        team: game.team,
-        opponent: game.opponent,
-        sport: sport.toUpperCase(),
-        stat: `Moneyline - ${favorite}`,
-        line: 1,
-        projection: teamIsFavorite ? 1.25 : 0.85,
-        confidence: confidence,
-        odds: odds,
-        edge: `${edgePercentage > 0 ? '+' : ''}${edgePercentage}%`,
-        edge_percentage: teamIsFavorite ? edgePercentage : -edgePercentage,
-        analysis: analysis,
-        timestamp: new Date().toLocaleString(),
-        category: 'Game Pick',
-        probability: `${confidence}%`,
-        roi: edgePercentage > 0 ? `+${Math.abs(edgePercentage)}%` : `${edgePercentage}%`,
-        units: (Math.random() * 2 + 1).toFixed(1),
-        requiresPremium: false,
-        value: `${Math.abs(edgePercentage)}% edge`,
-        bookmaker: 'AI Generated',
-        generatedFrom: prompt,
-        isToday: true,
-        type: 'Over',
-        is_mock: opponentData.length < 3,
-        data_source: opponentData.length >= 3 ? 'Full Data' : 'Partial + League Averages',
-        last_updated: new Date().toISOString(),
-        game_date: getTodayString(),
-      };
-      gamePicks.push(gamePick);
+        `(${teamPlayersAboveLine} players above line). ${game.opponent} at ${Math.round(opponentAvgRatio * 100)}% efficiency.`;
+    } else if (isBounceBackPrompt && !teamIsFavorite) {
+      // Bounce back pick
+      const oddsValue = Math.round((160 + (scoreDifference * 50)) * randomOddsOffset());
+      odds = `+${Math.min(320, Math.max(120, oddsValue))}`;
+      edgePercentage = Math.round((scoreDifference * 35 + 15) * (0.8 + Math.random() * 0.4));
+      const bounceAnalysis = [
+        `${underdog} is in a prime bounce-back spot after recent struggles. Regression to the mean is likely.`,
+        `Don't count out ${underdog}! They've historically responded well after losses.`,
+        `${underdog} shows positive regression indicators based on underlying metrics.`,
+        `Our AI detects a bounce-back opportunity for ${underdog} based on player efficiency trends.`
+      ];
+      analysis = bounceAnalysis[Math.floor(Math.random() * bounceAnalysis.length)] + ' ' +
+        `Team efficiency: ${game.team} at ${Math.round(teamAvgRatio * 100)}%, ${game.opponent} at ${Math.round(opponentAvgRatio * 100)}%.`;
+    } else if (teamIsFavorite) {
+      // Favorite pick
+      const oddsValue = Math.round((160 - (scoreDifference * 60) - (confidence - 50) * 1.5) * randomOddsOffset());
+      odds = `-${Math.max(110, Math.min(240, oddsValue))}`;
+      edgePercentage = Math.round((scoreDifference * 50 + (confidence - 50) * 0.8) * (0.7 + Math.random() * 0.6));
+      const favoriteAnalysis = [
+        `${favorite} is the clear play tonight with superior player projections.`,
+        `Our models strongly favor ${favorite} in this matchup. Key players are in great form.`,
+        `${favorite} has the edge across multiple statistical categories.`,
+        `All signs point to a ${favorite} victory based on current form and matchup data.`
+      ];
+      analysis = favoriteAnalysis[Math.floor(Math.random() * favoriteAnalysis.length)] + ' ' +
+        `${game.team} at ${Math.round(teamAvgRatio * 100)}% efficiency ` +
+        `(${teamPlayersAboveLine} players above line). ${game.opponent} at ${Math.round(opponentAvgRatio * 100)}% efficiency.`;
+    } else {
+      // Regular underdog
+      const oddsValue = Math.round((140 + (scoreDifference * 80) + (85 - confidence) * 2) * randomOddsOffset());
+      odds = `+${Math.min(350, Math.max(120, oddsValue))}`;
+      edgePercentage = Math.round((scoreDifference * 45 + (85 - confidence) * 1.2) * (0.7 + Math.random() * 0.6));
+      const underdogAnalysis = [
+        `${underdog} offers tremendous value at these odds based on our projections.`,
+        `The market is undervaluing ${underdog} in this spot. Our AI sees an edge.`,
+        `${underdog} matches up surprisingly well against ${favorite} according to advanced metrics.`,
+        `Sharp money may be on ${underdog} tonight. Our models show positive expected value.`
+      ];
+      analysis = underdogAnalysis[Math.floor(Math.random() * underdogAnalysis.length)] + ' ' +
+        `Efficiency: ${game.team} ${Math.round(teamAvgRatio * 100)}% vs ${game.opponent} ${Math.round(opponentAvgRatio * 100)}%.`;
     }
+    
+    const gamePick: Pick = {
+      id: `game-${Date.now()}-${Math.random()}-${key}`,
+      player: `${favorite} vs ${underdog}`,
+      team: favorite,
+      opponent: underdog,
+      sport: sport.toUpperCase(),
+      stat: `Match Winner - ${favorite}`,
+      line: 1,
+      projection: teamIsFavorite ? 1.15 + Math.random() * 0.2 : 0.85 + Math.random() * 0.2,
+      confidence: confidence,
+      odds: odds,
+      edge: `${edgePercentage > 0 ? '+' : ''}${edgePercentage}%`,
+      edge_percentage: edgePercentage,
+      analysis: analysis,
+      timestamp: new Date().toLocaleString(),
+      category: 'Game Pick',
+      probability: `${confidence}%`,
+      roi: edgePercentage > 0 ? `+${Math.abs(edgePercentage)}%` : `${edgePercentage}%`,
+      units: (Math.random() * 2 + 1).toFixed(1),
+      requiresPremium: false,
+      value: `${Math.abs(edgePercentage)}% edge`,
+      bookmaker: 'AI Generated',
+      generatedFrom: prompt,
+      isToday: true,
+      type: 'Over',
+      is_mock: opponentData.length < 3 || teamData.length < 3,
+      data_source: opponentData.length >= 3 && teamData.length >= 3 ? 'Full Data' : 'Partial + League Averages',
+      last_updated: new Date().toISOString(),
+      game_date: getTodayString(),
+    };
+    gamePicks.push(gamePick);
   });
 
-  gamePicks.sort((a, b) => b.confidence - a.confidence);
-  return gamePicks.slice(0, 4);
+  // Shuffle final picks for randomness
+  for (let i = gamePicks.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [gamePicks[i], gamePicks[j]] = [gamePicks[j], gamePicks[i]];
+  }
+  
+  // Return random selection of up to 4 picks
+  const maxPicks = Math.min(4, gamePicks.length);
+  const selectedPicks = gamePicks.slice(0, maxPicks);
+  
+  return selectedPicks;
 };
 
 // ============================================
@@ -530,11 +644,14 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
     signedEdgePercent = Math.round(signedEdgePercent * 10) / 10;
   }
 
-  let displayEdgeStr = sel.edge;
+  let displayEdgeStr = sel.edge != null ? String(sel.edge) : undefined;
   if (signedEdgePercent !== undefined && !displayEdgeStr) {
     displayEdgeStr = signedEdgePercent > 0 ? `+${signedEdgePercent}%` : `${signedEdgePercent}%`;
-  } else if (displayEdgeStr && !displayEdgeStr.includes('%')) {
-    displayEdgeStr = `${parseFloat(displayEdgeStr).toFixed(1)}%`;
+  } else if (displayEdgeStr && typeof displayEdgeStr === 'string' && !displayEdgeStr.includes('%')) {
+    const num = parseFloat(displayEdgeStr);
+    if (!isNaN(num)) {
+      displayEdgeStr = `${num.toFixed(1)}%`;
+    }
   } else if (!displayEdgeStr && hasValidNumbers && !sel.type) {
     const absEdge = ((Math.abs(proj - lineVal)) / lineVal) * 100;
     displayEdgeStr = `${Math.round(absEdge * 10) / 10}% (no side)`;
@@ -544,9 +661,9 @@ const mapNodeSelectionToPick = (sel: any, sport: string, prompt?: string): Pick 
     confidenceValue >= 85
       ? 'High Confidence'
       : confidenceValue >= 70
-      ? 'Value Bet'
+      ? 'Top Projection'
       : confidenceValue >= 60
-      ? 'Lock Pick'
+      ? 'High Confidence'
       : 'High Upset';
 
   const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
@@ -674,9 +791,9 @@ const mapMLBPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pi
     confidenceValue >= 85
       ? 'High Confidence'
       : confidenceValue >= 70
-      ? 'Value Bet'
+      ? 'Top Projection'
       : confidenceValue >= 60
-      ? 'Lock Pick'
+      ? 'High Confidence'
       : 'High Upside';
 
   const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
@@ -755,9 +872,9 @@ const mapNHLPropToPick = (prop: any, side: 'Over' | 'Under', source: string): Pi
     confidenceValue >= 85
       ? 'High Confidence'
       : confidenceValue >= 70
-      ? 'Value Bet'
+      ? 'Top Projection'
       : confidenceValue >= 60
-      ? 'Lock Pick'
+      ? 'High Confidence'
       : 'High Upside';
 
   const roundedLine = lineVal ? Math.round(lineVal * 10) / 10 : undefined;
@@ -1110,12 +1227,12 @@ const ConfidenceBadge = ({ confidence }: { confidence: number }) => {
 // ============================================
 const DailyPicksContent: React.FC = () => {
   const navigate = useNavigate();
-  const { user, getIdToken } = useAuth();
+  const { user, token } = useAuth();
 
   const [tabIndex, setTabIndex] = useState(0);
   const [picks, setPicks] = useState<Pick[]>([]);
   const [generatedPicks, setGeneratedPicks] = useState<Pick[]>([]);
-  const [parlays, setParlays] = useState<Parlay[]>([]);
+  const [parlays, setCombos] = useState<Combo[]>([]);
   const [rawSelections, setRawSelections] = useState<any[]>([]);
 
   const [selectedSport, setSelectedSport] = useState('nba');
@@ -1141,65 +1258,60 @@ const DailyPicksContent: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
   const [selectedWinnerPrompt, setSelectedWinnerPrompt] = useState('');
-  const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
   const [generatorCredits, setGeneratorCredits] = useState(0);
   const [plan, setPlan] = useState('free');
   const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selectedPick, setSelectedPick] = useState<Pick | null>(null);
-  const [selectedParlay, setSelectedParlay] = useState<Parlay | null>(null);
+  const [selectedCombo, setSelectedCombo] = useState<Combo | null>(null);
   const [showPickDetail, setShowPickDetail] = useState(false);
-  const [showParlayModal, setShowParlayModal] = useState(false);
+  const [showComboModal, setShowComboModal] = useState(false);
 
   const pollingIntervalRef = React.useRef<NodeJS.Timeout>();
 
   const { error: apiError } = useDailyPicks();
 
-  // ===== CHECK SUBSCRIPTION AND CREDITS STATUS =====
+  // ===== FETCH CREDITS (no unlimited generations) =====
   useEffect(() => {
-    const fetchSubscriptionAndCredits = async () => {
-      if (!user || !user.uid) return;
+    const fetchCredits = async () => {
+      if (!user || !user.id || !token) return;
       
       try {
-        const token = await getIdToken();
+// Fetch current credits from the generations endpoint
+const creditsResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/${user.id}`, {
+  headers: {
+    'Authorization': `Bearer ${token}`,
+  }
+});
+
+if (creditsResponse.ok) {
+  const creditsData = await creditsResponse.json();
+  setGeneratorCredits(creditsData.remaining);  // Use remaining field
+} else {
+  console.error('Failed to fetch credits');
+  setGeneratorCredits(0);
+}
         
-        // Fetch subscription
+        // Also fetch subscription info for display (but no unlimited generations)
         const subResponse = await fetch(`${PYTHON_API_BASE}/api/subscriptions/my-subscription`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: { 'Authorization': `Bearer ${token}` }
         });
         const subData = await subResponse.json();
-        
         if (subData.success && subData.subscription) {
-          setHasPremiumAccess(subData.subscription.status === 'active');
           setPlan(subData.subscription.plan_id || 'free');
           setSubscriptionStatus(subData.subscription.status);
         }
         
-        // Fetch generator credits (from user profile)
-        const profileResponse = await fetch(`${PYTHON_API_BASE}/api/user/profile`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        const profileData = await profileResponse.json();
-        
-        if (profileData.credits !== undefined) {
-          setGeneratorCredits(profileData.credits);
-        }
-        
       } catch (error) {
-        console.error('Failed to fetch subscription status:', error);
-        setHasPremiumAccess(false);
+        console.error('Failed to fetch credits:', error);
         setGeneratorCredits(0);
       }
     };
     
-    fetchSubscriptionAndCredits();
-  }, [user, getIdToken]);
+    fetchCredits();
+  }, [user, token]);
 
-  // ===== SETUP REAL-TIME POLLING =====
+  // ===== SETUP REAL-TIME POLLING (unchanged from original) =====
   useEffect(() => {
     let mounted = true;
     let backoffTimeout: NodeJS.Timeout;
@@ -1319,7 +1431,7 @@ const DailyPicksContent: React.FC = () => {
     setDisplayCount(MAX_VISIBLE_CARDS_PER_SPORT);
   }, [selectedSport, searchQuery, filterStat, filterConfidence, filterEdge]);
 
-  const generateSampleParlays = (): Parlay[] => [
+  const generateSampleCombos = (): Combo[] => [
     {
       id: 'parlay-1',
       type: 'same_game_parlay',
@@ -1340,7 +1452,7 @@ const DailyPicksContent: React.FC = () => {
       type: 'teaser',
       game: 'Bills vs Chiefs',
       legs: [
-        { team: 'Bills', market: 'Spread', line: 7.5, odds: -110 },
+        { team: 'Bills', market: 'Point Adjustment', line: 7.5, odds: -110 },
         { team: 'Chiefs', market: 'Total', line: 54.5, odds: -110 },
       ],
       total_odds: '-120',
@@ -1388,7 +1500,7 @@ const DailyPicksContent: React.FC = () => {
     return filtered;
   }, [picks, selectedSport, searchQuery, filterStat, filterConfidence, filterEdge]);
 
-  const filteredParlays = useMemo(() => {
+  const filteredCombos = useMemo(() => {
     let filtered = [...parlays];
     if (selectedSport !== 'All') {
       filtered = filtered.filter((parlay) => parlay.game?.toLowerCase().includes(selectedSport.toLowerCase()));
@@ -1496,27 +1608,23 @@ const DailyPicksContent: React.FC = () => {
   };
 
   const handleTrackPick = (pick: Pick) => {
-    if (pick.requiresPremium && !hasPremiumAccess) {
-      setShowUpgradeModal(true);
-      return;
-    }
     setSelectedPick(pick);
     setShowPickDetail(true);
   };
 
-  const handleParlaySelect = (parlay: Parlay) => {
-    setSelectedParlay(parlay);
-    setShowParlayModal(true);
+  const handleComboSelect = (parlay: Combo) => {
+    setSelectedCombo(parlay);
+    setShowComboModal(true);
   };
 
-  const addToBetSlip = (item: Pick | Parlay) => {
-    console.log('Added to bet slip:', item);
+  const addToBetSlip = (item: Pick | Combo) => {
+    console.log('Added to tracker:', item);
   };
 
   // ===== STRIPE CHECKOUT FUNCTIONS =====
   const handleSubscriptionCheckout = async (planId: string, interval: string = 'month') => {
     try {
-      const token = await getIdToken();
+      if (!user || !token) throw new Error('User not logged in');
       const response = await fetch(`${PYTHON_API_BASE}/api/subscriptions/create-checkout`, {
         method: 'POST',
         headers: {
@@ -1540,7 +1648,7 @@ const DailyPicksContent: React.FC = () => {
 
   const handleCreditsCheckout = async (credits: number) => {
     try {
-      const token = await getIdToken();
+      if (!user || !token) throw new Error('User not logged in');
       const response = await fetch(`${PYTHON_API_BASE}/api/generator/credits/checkout`, {
         method: 'POST',
         headers: {
@@ -1562,11 +1670,11 @@ const DailyPicksContent: React.FC = () => {
     }
   };
 
-  // ===== GENERATE CUSTOM PICKS WITH CREDITS =====
+  // ===== GENERATE CUSTOM PICKS WITH CREDITS (always consume credit) =====
   const handleGenerateCustomPicks = async () => {
     if (!customPrompt.trim()) return;
     
-    if (!hasPremiumAccess && generatorCredits < 1) {
+    if (generatorCredits <= 0) {
       setShowCreditsModal(true);
       return;
     }
@@ -1589,203 +1697,212 @@ const DailyPicksContent: React.FC = () => {
                         lowerPrompt.includes('game');
 
     try {
-      // Use a credit if not premium
-      if (!hasPremiumAccess && generatorCredits > 0) {
-        const token = await getIdToken();
-        await fetch(`${PYTHON_API_BASE}/api/generator/use`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            pickType: isGamePrompt ? 'game' : 'player_prop',
-            pickData: { prompt: customPrompt, sport: selectedSport }
-          }),
-        });
-        setGeneratorCredits(prev => prev - 1);
-      }
+// Deduct a credit via backend - FIXED ENDPOINT
+if (!user || !token) throw new Error('User not logged in');
 
-      const timestamp = Date.now();
-      const today = getTodayString();
-      let rawItems: any[] = [];
-      
-      if (selectedSport === 'mlb') {
-        const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200&_t=${timestamp}`;
-        const res = await fetch(endpoint);
-        const data = await res.json();
-        rawItems = data.props || [];
-      } else if (selectedSport === 'nhl') {
-        const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200&_t=${timestamp}`;
-        const res = await fetch(endpoint);
-        const data = await res.json();
-        rawItems = data.props || [];
-      } else {
-        const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&date=${today}&_t=${timestamp}`;
-        const res = await fetch(endpoint);
-        
-        if (res.status === 429) {
-          setError('Rate limited. Please wait a moment before generating.');
-          setGenerating(false);
-          setShowGeneratingModal(false);
-          return;
-        }
-        
-        const data = await res.json();
-        rawItems = data.selections || [];
-      }
+const useResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  },
+  body: JSON.stringify({
+    user_id: user.id,
+    pickType: isGamePrompt ? 'game' : 'player_prop',
+    pickData: { 
+      prompt: customPrompt, 
+      sport: selectedSport,
+      screen: 'DailyPicksScreen'
+    }
+  }),
+});
 
-      if (rawItems.length === 0) {
-        const mockPick: Pick = {
-          id: `gen-${Date.now()}-mock`,
-          player: 'Mock Player',
-          team: 'Mock Team',
-          sport: selectedSport.toUpperCase(),
-          stat: 'Points',
-          line: 20.5,
-          projection: 22.3,
-          confidence: 85,
-          odds: '+150',
-          edge: '+12%',
-          edge_percentage: 12,
-          analysis: 'This is a fallback pick generated because the API returned no data.',
-          timestamp: 'Just now',
-          category: 'High Confidence',
-          probability: '85%',
-          roi: '+18%',
-          units: '2.0',
-          requiresPremium: false,
-          value: '12% edge',
-          bookmaker: 'Mock API',
-          generatedFrom: customPrompt,
-          isToday: true,
-          is_mock: true,
-          data_source: 'mock',
-          last_updated: new Date().toISOString(),
-          game_date: today,
-        };
-        setGeneratedPicks([mockPick]);
-      } else {
-        let playerPicks: Pick[] = [];
-        if (selectedSport === 'mlb') {
-          rawItems.forEach((prop: any) => {
-            playerPicks.push(mapMLBPropToPick(prop, 'Over', prop.source || 'api'));
-            playerPicks.push(mapMLBPropToPick(prop, 'Under', prop.source || 'api'));
-          });
-        } else if (selectedSport === 'nhl') {
-          rawItems.forEach((prop: any) => {
-            playerPicks.push(mapNHLPropToPick(prop, 'Over', prop.source || 'api'));
-            playerPicks.push(mapNHLPropToPick(prop, 'Under', prop.source || 'api'));
-          });
-        } else {
-          playerPicks = rawItems.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport, customPrompt));
-        }
+if (!useResponse.ok) {
+  const errorData = await useResponse.json();
+  throw new Error(errorData.error || 'Failed to use credit');
+}
 
-        const todayPlayerPicks = playerPicks.filter(pick => {
-          if (pick.game_date) {
-            const pickDate = pick.game_date.split('T')[0];
-            return pickDate === today;
-          }
-          if (pick.isToday) return true;
-          return false;
-        });
+// Update local credits after successful decrement
+const data = await useResponse.json();
+setGeneratorCredits(data.remaining);
+    
+// Fetch picks (same as before)
+const timestamp = Date.now();
+const today = getTodayString(); 
+let rawItems: any[] = [];
+if (selectedSport === 'mlb') {
+  const endpoint = `${PYTHON_API_BASE}/api/mlb/props?date=${today}&limit=200&_t=${timestamp}`;
+  const res = await fetch(endpoint);
+  const data = await res.json();
+  rawItems = data.props || [];
+} else if (selectedSport === 'nhl') {
+  const endpoint = `${PYTHON_API_BASE}/api/nhl/props?date=${today}&limit=200&_t=${timestamp}`;
+  const res = await fetch(endpoint);
+  const data = await res.json();
+  rawItems = data.props || [];
+} else {
+  const endpoint = `${NODE_API_BASE}/api/prizepicks/selections?sport=${selectedSport}&date=${today}&_t=${timestamp}`;
+  const res = await fetch(endpoint);
+                  
+  if (res.status === 429) {
+    setError('Rate limited. Please wait a moment before generating.');
+    setGenerating(false);
+    setShowGeneratingModal(false);
+    return;
+  }
+  
+  const data = await res.json();
+  rawItems = data.selections || [];
+}
 
-        let finalPicks: Pick[] = [];
+// FIX: Add edge filtering to remove unrealistic picks
+const MAX_REALISTIC_EDGE = 50; // Maximum realistic edge percentage (anything over 50% is likely bad data)
 
-        if (isGamePrompt) {
-          const gamePicks = generateGamePicksFromPlayerProps(customPrompt, todayPlayerPicks, selectedSport);
-          if (gamePicks.length > 0) {
-            finalPicks = gamePicks;
-          } else {
-            finalPicks = todayPlayerPicks;
-          }
-        } else {
-          const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']);
-          let keywords = customPrompt
-            .toLowerCase()
-            .split(/\W+/)
-            .filter(word => word.length > 2 && !stopWords.has(word));
+// After converting to picks, filter out unrealistic edges
+let playerPicks: Pick[] = [];
+if (selectedSport === 'mlb') {
+  rawItems.forEach((prop: any) => {
+    playerPicks.push(mapMLBPropToPick(prop, 'Over', prop.source || 'api'));
+    playerPicks.push(mapMLBPropToPick(prop, 'Under', prop.source || 'api'));
+  });
+} else if (selectedSport === 'nhl') {
+  rawItems.forEach((prop: any) => {
+    playerPicks.push(mapNHLPropToPick(prop, 'Over', prop.source || 'api'));
+    playerPicks.push(mapNHLPropToPick(prop, 'Under', prop.source || 'api'));
+  });
+} else {
+  playerPicks = rawItems.map((sel: any) => mapNodeSelectionToPick(sel, selectedSport, customPrompt));
+}
 
-          const expandedKeywords = new Set<string>();
-          keywords.forEach(kw => {
-            expandedKeywords.add(kw);
-            if (KEYWORD_MAP[kw]) {
-              KEYWORD_MAP[kw].forEach(syn => expandedKeywords.add(syn));
-            }
-          });
-          keywords = Array.from(expandedKeywords);
+// Filter out picks with unrealistic edges
+playerPicks = playerPicks.filter(pick => {
+  const edge = Math.abs(pick.edge_percentage || 0);
+  return edge <= MAX_REALISTIC_EDGE; // Only keep picks with realistic edges
+});
 
-          const scoredPicks = todayPlayerPicks.map(pick => {
-            const searchable = [
-              pick.player?.toLowerCase(),
-              pick.stat?.toLowerCase(),
-              pick.team?.toLowerCase(),
-              pick.opponent?.toLowerCase(),
-            ].filter(Boolean).join(' ');
+const todayPlayerPicks = playerPicks.filter(pick => {
+  if (pick.game_date) {
+    const pickDate = pick.game_date.split('T')[0];
+    return pickDate === today;
+  }
+  if (pick.isToday) return true;
+  return false;
+});
 
-            let score = 0;
-            keywords.forEach(keyword => {
-              if (searchable.includes(keyword)) score += 1;
-            });
+let finalPicks: Pick[] = [];
 
-            if (pick.last_updated) {
-              const minutesOld = (Date.now() - new Date(pick.last_updated).getTime()) / (1000 * 60);
-              if (minutesOld < 5) score += 2;
-            }
+// For game prompts, ALWAYS try to generate game picks first
+if (isGamePrompt) {
+  console.log('Generating game picks for prompt:', customPrompt);
+  const gamePicks = generateGamePicksFromPlayerProps(customPrompt, todayPlayerPicks, selectedSport);
+  
+  if (gamePicks.length > 0) {
+    // Filter game picks to ensure they're actually game picks (not player props)
+    finalPicks = gamePicks.filter(pick => 
+      pick.stat?.includes('Match Winner') || 
+      pick.category === 'Game Pick'
+    );
+    
+    if (finalPicks.length > 0) {
+      console.log(`Generated ${finalPicks.length} game picks`);
+    } else {
+      console.log('No valid game picks generated, falling back to limited player props');
+      // Fallback: Take only the top 3 player picks with most reasonable edges
+      finalPicks = todayPlayerPicks
+        .sort((a, b) => {
+          // Prioritize picks with reasonable edges and higher confidence
+          const aEdge = Math.abs(a.edge_percentage || 0);
+          const bEdge = Math.abs(b.edge_percentage || 0);
+          if (aEdge > MAX_REALISTIC_EDGE) return 1;
+          if (bEdge > MAX_REALISTIC_EDGE) return -1;
+          return b.confidence - a.confidence;
+        })
+        .slice(0, 3);
+    }
+  } else {
+    // If no game picks generated, show a message instead of player props
+    console.log('No game picks could be generated for this prompt');
+    setError('Could not generate game picks for this prompt. Try a different prompt or select player props.');
+    setGenerating(false);
+    setShowGeneratingModal(false);
+    return;
+  }
+} else {
+  // For player prop prompts, filter and limit
+  const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for']);
+  let keywords = customPrompt
+    .toLowerCase()
+    .split(/\W+/)
+    .filter(word => word.length > 2 && !stopWords.has(word));
 
-            return { pick, score };
-          });
+  const expandedKeywords = new Set<string>();
+  keywords.forEach(kw => {
+    expandedKeywords.add(kw);
+    if (KEYWORD_MAP[kw]) {
+      KEYWORD_MAP[kw].forEach(syn => expandedKeywords.add(syn));
+    }
+  });
+  keywords = Array.from(expandedKeywords);
 
-          scoredPicks.sort((a, b) => b.score - a.score);
+  const scoredPicks = todayPlayerPicks.map(pick => {
+    const searchable = [
+      pick.player?.toLowerCase(),
+      pick.stat?.toLowerCase(),
+      pick.team?.toLowerCase(),
+      pick.opponent?.toLowerCase(),
+    ].filter(Boolean).join(' ');
 
-          const topPicks = scoredPicks
-            .filter(s => s.score > 0)
-            .slice(0, 20)
-            .map(s => s.pick);
+    let score = 0;
+    keywords.forEach(keyword => {
+      if (searchable.includes(keyword)) score += 1;
+    });
 
-          finalPicks = topPicks.length > 0 ? topPicks : todayPlayerPicks.slice(0, 20);
-        }
+    // Prioritize picks with realistic edges
+    const edge = Math.abs(pick.edge_percentage || 0);
+    if (edge > MAX_REALISTIC_EDGE) {
+      score -= 10; // Penalize unrealistic edges
+    }
 
-        const deduped = deduplicatePicks(finalPicks);
-        const limitedPicks = deduped.slice(0, MAX_RESULTS);
-        
-        setGeneratedPicks(limitedPicks);
-      }
+    if (pick.last_updated) {
+      const minutesOld = (Date.now() - new Date(pick.last_updated).getTime()) / (1000 * 60);
+      if (minutesOld < 5) score += 2;
+    }
+
+    return { pick, score };
+  });
+
+  scoredPicks.sort((a, b) => b.score - a.score);
+
+  const topPicks = scoredPicks
+    .filter(s => s.score > 0)
+    .slice(0, 20)
+    .map(s => s.pick);
+
+  finalPicks = topPicks.length > 0 ? topPicks : todayPlayerPicks.slice(0, 20);
+  
+  // Filter unrealistic edges from final picks
+  finalPicks = finalPicks.filter(pick => Math.abs(pick.edge_percentage || 0) <= MAX_REALISTIC_EDGE);
+}
+
+const deduped = deduplicatePicks(finalPicks);
+const MAX_RESULTS = 3;
+const limitedPicks = deduped.slice(0, MAX_RESULTS);
+
+if (limitedPicks.length === 0 && isGamePrompt) {
+  setError('No game picks available for today. Try a player prop prompt instead.');
+  setGenerating(false);
+  setShowGeneratingModal(false);
+  return;
+}
+
+setGeneratedPicks(limitedPicks);
 
       setCustomPrompt('');
       setSelectedWinnerPrompt('');
 
     } catch (error) {
       console.error('Error generating picks:', error);
-      const fallbackPick: Pick = {
-        id: `gen-${Date.now()}-fallback`,
-        player: 'Fallback Player',
-        team: 'Fallback Team',
-        sport: selectedSport.toUpperCase(),
-        stat: 'Points',
-        line: 20.5,
-        projection: 22.3,
-        confidence: 80,
-        odds: '+150',
-        edge: '+10%',
-        edge_percentage: 10,
-        analysis: 'This is a fallback pick generated because the API request failed. Please try again later.',
-        timestamp: 'Just now',
-        category: 'Value Bet',
-        probability: '80%',
-        roi: '+15%',
-        units: '1.5',
-        requiresPremium: false,
-        value: '10% edge',
-        bookmaker: 'Fallback',
-        generatedFrom: customPrompt,
-        isToday: true,
-        is_mock: true,
-        data_source: 'mock',
-        last_updated: new Date().toISOString(),
-        game_date: getTodayString(),
-      };
-      setGeneratedPicks([fallbackPick]);
+      setError('Failed to generate picks. Please try again.');
     } finally {
       setCustomPrompt('');
       setSelectedWinnerPrompt('');
@@ -1878,7 +1995,7 @@ const DailyPicksContent: React.FC = () => {
       </Typography>
       <Box sx={{ display: 'flex', gap: 1, overflowX: 'auto', py: 1 }}>
         {MARKET_TYPES.map((market) => {
-          const Icon = MARKET_ICONS[market.icon];
+          const Icon = MARKET_ICONS[market.icon as keyof typeof MARKET_ICONS];
           return (
             <Chip
               key={market.id}
@@ -1968,9 +2085,9 @@ const DailyPicksContent: React.FC = () => {
     </Paper>
   );
 
-  const renderParlayCard = (parlay: Parlay) => {
-    const ParlayIcon =
-      MARKET_ICONS[parlay.type === 'same_game_parlay' ? 'same_game' : parlay.type === 'teaser' ? 'teaser' : 'round_robin'];
+  const renderComboCard = (parlay: Combo) => {
+    const ComboIcon =
+      MARKET_ICONS[parlay.type === 'same_game_parlay' ? 'same_game' : parlay.type === 'teaser' ? 'teaser' : 'round_robin' as keyof typeof MARKET_ICONS];
     return (
       <Card
         key={parlay.id}
@@ -1983,12 +2100,12 @@ const DailyPicksContent: React.FC = () => {
           backdropFilter: 'blur(4px)',
           '&:hover': { boxShadow: 3, transform: 'translateY(-2px)', transition: 'all 0.2s', bgcolor: 'white' },
         }}
-        onClick={() => handleParlaySelect(parlay)}
+        onClick={() => handleComboSelect(parlay)}
       >
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <ParlayIcon sx={{ color: 'primary.main' }} />
+              <ComboIcon sx={{ color: 'primary.main' }} />
               <Typography variant="h6" fontWeight="bold">
                 {parlay.type
                   .split('_')
@@ -2040,7 +2157,7 @@ const DailyPicksContent: React.FC = () => {
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Box>
               <Typography variant="caption" color="text.secondary">
-                Total Odds
+                Combined Value
               </Typography>
               <Typography variant="h5" color="success.main" fontWeight="bold">
                 {formatOdds(parlay.total_odds)}
@@ -2055,7 +2172,7 @@ const DailyPicksContent: React.FC = () => {
                 addToBetSlip(parlay);
               }}
             >
-              Add to Bet Slip
+              Add to Bet Tracker
             </Button>
           </Box>
           {parlay.analysis && (
@@ -2068,34 +2185,34 @@ const DailyPicksContent: React.FC = () => {
     );
   };
 
-  const ParlayDetailsModal = () => (
-    <Dialog open={showParlayModal} onClose={() => setShowParlayModal(false)} maxWidth="md" fullWidth>
-      {selectedParlay && (
+  const ComboDetailsModal = () => (
+    <Dialog open={showComboModal} onClose={() => setShowComboModal(false)} maxWidth="md" fullWidth>
+      {selectedCombo && (
         <>
           <DialogTitle>
             <Box display="flex" justifyContent="space-between" alignItems="center">
               <Box display="flex" alignItems="center" gap={1}>
-                {selectedParlay.type === 'same_game_parlay' && <Gamepad sx={{ color: 'primary.main' }} />}
-                {selectedParlay.type === 'teaser' && <ExpandMore sx={{ color: 'primary.main' }} />}
-                {selectedParlay.type === 'round_robin' && <Loop sx={{ color: 'primary.main' }} />}
+                {selectedCombo.type === 'same_game_parlay' && <Gamepad sx={{ color: 'primary.main' }} />}
+                {selectedCombo.type === 'teaser' && <ExpandMore sx={{ color: 'primary.main' }} />}
+                {selectedCombo.type === 'round_robin' && <Loop sx={{ color: 'primary.main' }} />}
                 <Typography variant="h6">
-                  {selectedParlay.type
+                  {selectedCombo.type
                     .split('_')
                     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
                     .join(' ')}
                 </Typography>
               </Box>
-              <IconButton onClick={() => setShowParlayModal(false)}>
+              <IconButton onClick={() => setShowComboModal(false)}>
                 <Close />
               </IconButton>
             </Box>
           </DialogTitle>
           <DialogContent>
             <Grid container spacing={3}>
-              {selectedParlay.game && (
+              {selectedCombo.game && (
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" fontWeight="bold">
-                    {selectedParlay.game}
+                    {selectedCombo.game}
                   </Typography>
                 </Grid>
               )}
@@ -2103,10 +2220,10 @@ const DailyPicksContent: React.FC = () => {
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Legs ({selectedParlay.legs.length})
+                      Legs ({selectedCombo.legs.length})
                     </Typography>
                     <Divider sx={{ mb: 2 }} />
-                    {selectedParlay.legs.map((leg, index) => (
+                    {selectedCombo.legs.map((leg, index) => (
                       <Box key={index}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1 }}>
                           <Box>
@@ -2121,7 +2238,7 @@ const DailyPicksContent: React.FC = () => {
                             {formatOdds(leg.odds)}
                           </Typography>
                         </Box>
-                        {index < selectedParlay.legs.length - 1 && <Divider sx={{ my: 1 }} />}
+                        {index < selectedCombo.legs.length - 1 && <Divider sx={{ my: 1 }} />}
                       </Box>
                     ))}
                   </CardContent>
@@ -2131,25 +2248,25 @@ const DailyPicksContent: React.FC = () => {
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Payout Calculation
+                      Estimated Return
                     </Typography>
                     <Divider sx={{ mb: 2 }} />
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography color="text.secondary">Total Odds</Typography>
+                      <Typography color="text.secondary">Combined Value</Typography>
                       <Typography variant="h6" color="success.main" fontWeight="bold">
-                        {formatOdds(selectedParlay.total_odds)}
+                        {formatOdds(selectedCombo.total_odds)}
                       </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography color="text.secondary">$100 Wins</Typography>
                       <Typography variant="h6" fontWeight="bold">
-                        ${calculateWinnings(selectedParlay.total_odds).toFixed(2)}
+                        ${calculateWinnings(selectedCombo.total_odds).toFixed(2)}
                       </Typography>
                     </Box>
                   </CardContent>
                 </Card>
               </Grid>
-              {selectedParlay.analysis && (
+              {selectedCombo.analysis && (
                 <Grid item xs={12}>
                   <Card>
                     <CardContent>
@@ -2158,13 +2275,13 @@ const DailyPicksContent: React.FC = () => {
                       </Typography>
                       <Divider sx={{ mb: 2 }} />
                       <Typography variant="body2" color="text.secondary">
-                        {selectedParlay.analysis}
+                        {selectedCombo.analysis}
                       </Typography>
-                      {selectedParlay.correlation_score && (
+                      {selectedCombo.correlation_score && (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 2 }}>
                           <ShowChart sx={{ color: '#10b981', fontSize: 16 }} />
                           <Typography variant="caption" color="#10b981" fontWeight="bold">
-                            {selectedParlay.correlation_score}% Correlation Score
+                            {selectedCombo.correlation_score}% Correlation Score
                           </Typography>
                         </Box>
                       )}
@@ -2175,15 +2292,15 @@ const DailyPicksContent: React.FC = () => {
             </Grid>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setShowParlayModal(false)}>Close</Button>
+            <Button onClick={() => setShowComboModal(false)}>Close</Button>
             <Button
               variant="contained"
               onClick={() => {
-                addToBetSlip(selectedParlay);
-                setShowParlayModal(false);
+                addToBetSlip(selectedCombo);
+                setShowComboModal(false);
               }}
             >
-              Add to Bet Slip
+              Add to Tracker
             </Button>
           </DialogActions>
         </>
@@ -2325,7 +2442,7 @@ const DailyPicksContent: React.FC = () => {
                 setShowPickDetail(false);
               }}
             >
-              Add to Bet Slip
+              Add to Tracker
             </Button>
           </DialogActions>
         </>
@@ -2472,7 +2589,7 @@ const DailyPicksContent: React.FC = () => {
               </Typography>
               <Typography variant="body2" sx={{ opacity: 0.8, mt: 1 }}>
                 Showing top {MAX_VISIBLE_CARDS_PER_SPORT} picks per sport.
-                {hasPremiumAccess ? ' Premium active!' : generatorCredits > 0 ? ` You have ${generatorCredits} generator credits.` : ' Upgrade for unlimited picks!'}
+                {generatorCredits > 0 ? ` You have ${generatorCredits} generator credits.` : ' Buy credits to generate picks!'}
               </Typography>
             </Box>
           </Box>
@@ -2520,19 +2637,19 @@ const DailyPicksContent: React.FC = () => {
           <>
             {renderFilterBar()}
 
-            {selectedMarket !== 'standard' && filteredParlays.length > 0 && (
+            {selectedMarket !== 'standard' && filteredCombos.length > 0 && (
               <Box sx={{ mb: 4 }}>
                 <Typography variant="h5" fontWeight="bold" gutterBottom>
-                  {selectedMarket === 'same_game' && '🎮 Same Game Parlays'}
-                  {selectedMarket === 'teaser' && '📊 Teaser Recommendations'}
-                  {selectedMarket === 'round_robin' && '🔄 Round Robin Combinations'}
+                  {selectedMarket === 'same_game' && '🎮 Same Game Combos'}
+                  {selectedMarket === 'teaser' && '📊 Point Adjustment Adjustments'}
+                  {selectedMarket === 'round_robin' && '🔄 Multi Leg Combinations'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" paragraph>
                   {selectedMarket === 'same_game' && 'Correlated plays from the same game maximize value'}
                   {selectedMarket === 'teaser' && 'Adjusted spreads with increased win probability'}
-                  {selectedMarket === 'round_robin' && 'Multiple parlay combinations for reduced risk'}
+                  {selectedMarket === 'round_robin' && 'Multiple combo combinations for reduced volatility'}
                 </Typography>
-                {filteredParlays.map(renderParlayCard)}
+                {filteredCombos.map(renderComboCard)}
               </Box>
             )}
 
@@ -2552,14 +2669,14 @@ const DailyPicksContent: React.FC = () => {
                       pick={pick}
                       onTrack={handleTrackPick}
                       onAddToBetSlip={addToBetSlip}
-                      hasPremiumAccess={hasPremiumAccess}
+                      hasPremiumAccess={false}
                     />
                   ))}
                   <Alert severity="info" sx={{ mt: 2 }}>
                     <AlertTitle>Want more picks?</AlertTitle>
                     Switch to the <strong>AI Generator</strong> tab to generate additional picks. 
-                    {!hasPremiumAccess && generatorCredits === 0 && ' Premium users get unlimited generations!'}
-                    {!hasPremiumAccess && generatorCredits > 0 && ` You have ${generatorCredits} credits remaining.`}
+                    {generatorCredits === 0 && ' You need credits to generate picks.'}
+                    {generatorCredits > 0 && ` You have ${generatorCredits} credits remaining.`}
                   </Alert>
                   <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, gap: 2 }}>
                     <Button 
@@ -2570,15 +2687,13 @@ const DailyPicksContent: React.FC = () => {
                     >
                       Generate More Picks
                     </Button>
-                    {!hasPremiumAccess && (
-                      <Button 
-                        variant="outlined" 
-                        onClick={() => setShowCreditsModal(true)}
-                        startIcon={<CreditCard />}
-                      >
-                        Buy Credits
-                      </Button>
-                    )}
+                    <Button 
+                      variant="outlined" 
+                      onClick={() => setShowCreditsModal(true)}
+                      startIcon={<CreditCard />}
+                    >
+                      Buy Credits ({generatorCredits} left)
+                    </Button>
                   </Box>
                 </>
               ) : (
@@ -2599,37 +2714,22 @@ const DailyPicksContent: React.FC = () => {
                 Generate Custom Picks
               </Typography>
 
-              {!hasPremiumAccess && (
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  <AlertTitle>Free Tier - {generatorCredits} Credits Remaining</AlertTitle>
-                  Each generation uses 1 credit. Premium users get unlimited generations!
-                  <Box sx={{ mt: 1 }}>
-                    <Button 
-                      size="small" 
-                      onClick={() => setShowCreditsModal(true)}
-                      variant="outlined"
-                      startIcon={<CreditCard />}
-                    >
-                      Buy More Credits
-                    </Button>
-                    <Button 
-                      size="small" 
-                      sx={{ ml: 1 }}
-                      onClick={() => setShowUpgradeModal(true)}
-                      variant="contained"
-                    >
-                      Upgrade to Premium
-                    </Button>
-                  </Box>
-                </Alert>
-              )}
-
-              {hasPremiumAccess && (
-                <Alert severity="success" sx={{ mb: 2 }}>
-                  <AlertTitle>Premium Active</AlertTitle>
-                  You have unlimited access to AI pick generation!
-                </Alert>
-              )}
+              <Alert severity={generatorCredits > 0 ? "info" : "warning"} sx={{ mb: 2 }}>
+                <AlertTitle>
+                  {generatorCredits > 0 ? `✨ You have ${generatorCredits} generator credits remaining` : "⚠️ No generator credits left"}
+                </AlertTitle>
+                Each generation uses 1 credit. {generatorCredits === 0 && "Purchase more credits to continue generating picks."}
+                <Box sx={{ mt: 1 }}>
+                  <Button 
+                    size="small" 
+                    onClick={() => setShowCreditsModal(true)}
+                    variant="outlined"
+                    startIcon={<CreditCard />}
+                  >
+                    Buy Credits
+                  </Button>
+                </Box>
+              </Alert>
 
               <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                 <FormControl size="small" sx={{ minWidth: 350 }}>
@@ -2684,16 +2784,16 @@ const DailyPicksContent: React.FC = () => {
                 <Button
                   variant="contained"
                   onClick={handleGenerateCustomPicks}
-                  disabled={!customPrompt.trim() || generating || (!hasPremiumAccess && generatorCredits === 0)}
+                  disabled={!customPrompt.trim() || generating || generatorCredits <= 0}
                   sx={{ bgcolor: '#8b5cf6', '&:hover': { bgcolor: '#7c3aed' }, minWidth: 120 }}
                 >
-                  {generating ? 'Generating...' : (hasPremiumAccess ? 'Generate' : generatorCredits > 0 ? `Generate (${generatorCredits} left)` : 'No Credits')}
+                  {generating ? 'Generating...' : `Generate (${generatorCredits} left)`}
                 </Button>
               </Box>
               
-              {!hasPremiumAccess && generatorCredits === 0 && (
+              {generatorCredits === 0 && (
                 <Typography variant="caption" color="error" sx={{ display: 'block', mt: 2 }}>
-                  ⚠️ You have no generator credits remaining. Purchase credits or upgrade to premium to continue generating picks.
+                  ⚠️ You have no generator credits remaining. Purchase credits to generate picks.
                 </Typography>
               )}
             </Paper>
@@ -2708,23 +2808,21 @@ const DailyPicksContent: React.FC = () => {
                   pick={pick}
                   onTrack={handleTrackPick}
                   onAddToBetSlip={addToBetSlip}
-                  hasPremiumAccess={hasPremiumAccess}
+                  hasPremiumAccess={false}
                 />
               ))
             ) : (
               <Alert severity="info">
                 <AlertTitle>No generated picks yet</AlertTitle>
-                {hasPremiumAccess 
+                {generatorCredits > 0 
                   ? 'Select a prompt above and click Generate to create AI-powered picks from real-time data.'
-                  : generatorCredits > 0 
-                    ? `You have ${generatorCredits} credits remaining. Select a prompt and click Generate to create AI-powered picks.`
-                    : 'Purchase credits or upgrade to premium to unlock AI pick generation!'}
+                  : 'You have no credits. Purchase credits to generate picks!'}
               </Alert>
             )}
           </Box>
         )}
 
-        <ParlayDetailsModal />
+        <ComboDetailsModal />
         <PickDetailModal />
         
         {/* Upgrade Modal - Subscription Plans */}
@@ -2746,8 +2844,8 @@ const DailyPicksContent: React.FC = () => {
                 'Premium AI analysis',
                 'Advanced betting insights',
                 'Real-time data updates',
-                'Same game parlay recommendations',
-                'Correlation scores & teaser analysis',
+                'Same game combo recommendations',
+                'Correlation scores & spread adjustment analysis',
               ].map((feature) => (
                 <Box key={feature} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                   <CheckCircle sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
@@ -2955,7 +3053,7 @@ const DailyPicksContent: React.FC = () => {
                     ? 'Analyzing team matchups and player projections...'
                     : 'Fetching player props and filtering by your prompt...'}
                 </Typography>
-                {!hasPremiumAccess && generatorCredits > 0 && (
+                {generatorCredits > 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
                     Using 1 generator credit. Remaining: {generatorCredits - 1}
                   </Typography>

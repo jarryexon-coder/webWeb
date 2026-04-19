@@ -12,6 +12,24 @@ const PYTHON_BACKEND_URL = import.meta.env.VITE_API_BASE_PYTHON ||
 const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '30000');
 const ENABLE_CACHE = import.meta.env.VITE_ENABLE_CACHE !== 'false';
 
+// ========== KNOWN WORKING ENDPOINTS ==========
+const KNOWN_WORKING_ENDPOINTS = [
+  '/api/prizepicks/selections',      // ✅ Working
+  '/api/players/trends',              // ✅ Working  
+  '/api/advanced-analytics',          // ✅ Working
+  '/api/parlay/suggestions',          // ✅ Working
+  '/api/health',                      // ✅ Working
+  '/api/user/profile',                // ✅ Working
+  '/api/subscriptions/my-subscription', // ✅ Working
+  '/api/generator/use'                // ✅ Working
+];
+
+const BROKEN_ENDPOINTS = [
+  '/api/odds/games',                   // ❌ 404 - not implemented
+  '/api/nba/games',                    // ❌ 404 - not implemented
+  '/api/nba/stats'                     // ❌ 404 - not implemented
+];
+
 // ========== CACHE ==========
 const apiCache = new Map<string, { data: any; expires: number }>();
 const getCacheKey = (endpoint: string, params: any) => 
@@ -69,11 +87,19 @@ const getBackendForEndpoint = (endpoint: string): string => {
   const pythonBackendEndpoints = [
     '/api/players', '/api/fantasy/teams', '/api/fantasy/players',
     '/api/health', '/api/info', '/api/news', '/api/analytics',
-    '/api/debug', '/api/odds/games', '/api/prizepicks/selections',
-    '/api/daily-picks', '/api/players/trends',  // ✅ Added with 's'
+    '/api/debug', '/api/prizepicks/selections',
+    '/api/daily-picks', '/api/players/trends',
     '/api/advanced-analytics', '/api/parlay-suggestions', 
-    '/api/sports-wire', '/api/parlay/suggestions'
+    '/api/sports-wire', '/api/parlay/suggestions',
+    '/api/user/profile', '/api/subscriptions/my-subscription',
+    '/api/generator/use'
   ];
+  
+  // ✅ Odds/games is not implemented, use mock data
+  if (endpoint.includes('/api/odds/games')) {
+    console.log(`📦 [OddsGames] Using mock data for ${endpoint} (endpoint not implemented)`);
+    return PYTHON_BACKEND_URL; // Will be caught and return mock data
+  }
   
   const nbaBackendEndpoints = ['/api/nba/games', '/api/nba/stats'];
   
@@ -191,7 +217,7 @@ const getMockParlaySuggestions = () => ({
   ]
 });
 
-// ========== ODDS GAMES HOOK - UPDATED WITH FORCE REFRESH ==========
+// ========== ODDS GAMES HOOK - FIXED WITH MOCK DATA FOR 404 ==========
 export const useOddsGames = (sport?: string, options?: { forceRefresh?: boolean }) => {
   // ALL HOOKS MUST BE CALLED UNCONDITIONALLY AT THE TOP
   const [isInitialized, setIsInitialized] = useState(false);
@@ -231,6 +257,12 @@ export const useOddsGames = (sport?: string, options?: { forceRefresh?: boolean 
     endpoint: string,
     options: any = {}
   ): Promise<T> => {
+    // ✅ Immediately return mock data for known broken endpoints
+    if (BROKEN_ENDPOINTS.includes(endpoint)) {
+      console.log(`📦 [OddsGames] Endpoint ${endpoint} is not implemented, using mock data`);
+      return getMockOddsGames() as T;
+    }
+    
     // This is a regular function, conditional logic is fine here
     if (useMockData) {
       return getMockOddsGames() as T;
@@ -280,6 +312,12 @@ export const useOddsGames = (sport?: string, options?: { forceRefresh?: boolean 
       
       clearTimeout(timeoutId);
       
+      // ✅ Handle 404 gracefully
+      if (response.status === 404) {
+        console.warn(`⚠️ Endpoint ${endpoint} returned 404, using mock data`);
+        return getMockOddsGames() as T;
+      }
+      
       const data = await safeParseResponse(response, endpoint);
       
       if (shouldUseCache && (!options.method || options.method === 'GET')) {
@@ -310,7 +348,8 @@ export const useOddsGames = (sport?: string, options?: { forceRefresh?: boolean 
     gcTime: 5 * 60 * 1000,
     enabled: isInitialized,
     retry: (failureCount, error: any) => {
-      if (error?.message?.includes('Invalid response') || error?.message?.includes('Backend error')) {
+      // ✅ Don't retry on 404 or mock data
+      if (error?.message?.includes('404') || error?.message?.includes('Invalid response')) {
         return false;
       }
       return failureCount < 2;
@@ -327,7 +366,7 @@ export const useOddsGames = (sport?: string, options?: { forceRefresh?: boolean 
     ...query,
     isInitialized,
     backendHealth,
-    isUsingMockData: useMockData,
+    isUsingMockData: useMockData || BROKEN_ENDPOINTS.includes('/api/odds/games'),
     refetch
   }), [query, isInitialized, backendHealth, useMockData, refetch]);
 };
@@ -367,6 +406,12 @@ export const useLiveScores = (sport: string = 'nba') => {
     endpoint: string,
     options: any = {}
   ): Promise<T> => {
+    // ✅ Immediately return mock data for known broken endpoints
+    if (BROKEN_ENDPOINTS.includes(endpoint)) {
+      console.log(`📦 [LiveScores] Endpoint ${endpoint} is not implemented, using mock data`);
+      return getMockOddsGames() as T;
+    }
+    
     if (useMockData) {
       return getMockOddsGames() as T;
     }
@@ -399,6 +444,12 @@ export const useLiveScores = (sport: string = 'nba') => {
       
       clearTimeout(timeoutId);
       
+      // ✅ Handle 404 gracefully
+      if (response.status === 404) {
+        console.warn(`⚠️ Endpoint ${endpoint} returned 404, using mock data`);
+        return getMockOddsGames() as T;
+      }
+      
       const data = await safeParseResponse(response, endpoint);
       
       if (ENABLE_CACHE && (!options.method || options.method === 'GET')) {
@@ -423,7 +474,8 @@ export const useLiveScores = (sport: string = 'nba') => {
     gcTime: 2 * 60 * 1000,
     enabled: isInitialized,
     retry: (failureCount, error: any) => {
-      if (error?.message?.includes('Invalid response') || error?.message?.includes('Backend error')) {
+      // ✅ Don't retry on 404
+      if (error?.message?.includes('404') || error?.message?.includes('Invalid response') || error?.message?.includes('Backend error')) {
         return false;
       }
       return failureCount < 2;
@@ -435,7 +487,7 @@ export const useLiveScores = (sport: string = 'nba') => {
     isInitialized,
     backendHealth,
     endpoint,
-    isUsingMockData: useMockData
+    isUsingMockData: useMockData || BROKEN_ENDPOINTS.includes('/api/odds/games')
   }), [query, isInitialized, backendHealth, endpoint, useMockData]);
 };
 

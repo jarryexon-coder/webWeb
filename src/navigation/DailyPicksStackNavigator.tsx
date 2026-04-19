@@ -6,7 +6,7 @@ import { TouchableOpacity } from 'react-native';
 
 // Screens
 import DailyPicksScreen from '../screens/DailyPicksScreen';
-import ParlayDetailsScreen from '../screens/ParlayDetailsScreen';
+import ComboDetailsScreen from '../screens/ComboDetailsScreen';
 import PlayerTrendsScreen from '../screens/PlayerTrendsScreen';
 import GameDetailsScreen from '../screens/GameDetailsScreen';
 import OddsComparisonScreen from '../screens/OddsComparisonScreen';
@@ -54,14 +54,14 @@ const DailyPicksStackNavigator = () => {
       />
       
       <Stack.Screen
-        name="ParlayDetails"
-        component={ParlayDetailsScreen}
+        name="ComboDetails"
+        component={ComboDetailsScreen}
         options={({ route }) => ({
-          title: route.params.parlayType === 'same_game_parlay' 
-            ? 'Same Game Parlay' 
+          title: route.params.parlayType === 'same_game_combo' 
+            ? 'Same Game Combo' 
             : route.params.parlayType === 'teaser' 
-            ? 'Teaser Details' 
-            : 'Round Robin',
+            ? 'Point Adjustment Adjuster Details' 
+            : 'Multi-Leg Combos',
         })}
       />
       
@@ -85,7 +85,7 @@ const DailyPicksStackNavigator = () => {
         name="OddsComparison"
         component={OddsComparisonScreen}
         options={{
-          title: 'Odds Comparison',
+          title: 'Multiplier Comparison',
         }}
       />
     </Stack.Navigator>

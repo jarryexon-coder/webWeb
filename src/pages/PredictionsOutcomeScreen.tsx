@@ -1,13 +1,5 @@
 // src/pages/PredictionsOutcomeScreen.tsx
-// Final version with all updates:
-// - Fuse.js for fuzzy matching
-// - PrizePicks endpoint for all sports
-// - NHL team name normalization
-// - Sport detection
-// - Fixed "rookie" keyword handling
-// - Added team‑prop support (intent detection + endpoint call)
-// - transformTeamProps to format team props
-// - Enhanced scoring with token‑based fuzzy matching
+// UPDATED: Fixed credit deduction endpoint and added proper user_id
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Fuse from 'fuse.js';
@@ -17,7 +9,8 @@ import {
   InputAdornment, Modal, Fade, List, ListItem, ListItemAvatar, ListItemText,
   ListItemSecondaryAction, FormControl, InputLabel, Select, MenuItem, Accordion,
   AccordionSummary, AccordionDetails, Badge, Snackbar, Stack, Collapse, Dialog,
-  DialogTitle, DialogContent, DialogActions, Tooltip, ToggleButton, ToggleButtonGroup
+  DialogTitle, DialogContent, DialogActions, Tooltip, ToggleButton, ToggleButtonGroup,
+  Divider
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -29,20 +22,23 @@ import {
   SportsBaseball as BaseballIcon, EmojiEvents as TrophyIcon, AutoAwesome as SparklesIcon,
   Star as StarIcon, RocketLaunch as RocketLaunchIcon, AutoAwesome as AutoAwesomeIcon,
   Psychology as PsychologyIcon, Visibility as VisibilityIcon, VisibilityOff as VisibilityOffIcon,
-  Warning as WarningIcon, Refresh as RefreshIcon
+  Warning as WarningIcon, Refresh as RefreshIcon, CreditCard as CreditCardIcon
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 import { format, subDays } from 'date-fns';
 import { preprocessQuery, QueryIntent } from '../utils/queryProcessor';
 import { logPromptPerformance } from '../utils/analytics';
+import { useAuth } from '../contexts/AuthContext';
 
 // ========== API BASES ==========
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 // ========== SEASON CONTEXT ==========
 const CURRENT_SEASON = '2025-26';
 const CURRENT_YEAR = '2026';
 const AS_OF_DATE = format(new Date(), 'MMMM d, yyyy');
+const MAX_VISIBLE_CARDS = 5;
 
 // ========== NHL TEAM NAME TO ABBREVIATION MAPPING ==========
 const NHL_TEAM_MAP: Record<string, string> = {
@@ -59,6 +55,72 @@ const NHL_TEAM_MAP: Record<string, string> = {
   'Vegas Golden Knights': 'VGK', 'Arizona Coyotes': 'ARI',
 };
 
+// ========== NHL PLAYER → TEAM MAPPING (FALLBACK) ==========
+const NHL_PLAYER_TEAM_MAP: Record<string, string> = {
+  'connor mcdavid': 'EDM',
+  'leon draisaitl': 'EDM',
+  'nathan mackinnon': 'COL',
+  'cale makar': 'COL',
+  'mikko rantanen': 'COL',
+  'auston matthews': 'TOR',
+  'david pastrnak': 'BOS',
+  'nikita kucherov': 'TBL',
+  'jack hughes': 'NJD',
+  'talent': 'NJD',
+  'kirill kaprizov': 'MIN',
+  'jason robertson': 'DAL',
+  'sidney crosby': 'PIT',
+  'alex ovechkin': 'WSH',
+  'artemi panarin': 'NYR',
+  'mika zibanejad': 'NYR',
+  'adam fox': 'NYR',
+  'sebastian aho': 'CAR',
+  'andrei svechnikov': 'CAR',
+  'brady tkachuk': 'OTT',
+  'tim stutzle': 'OTT',
+  'elias pettersson': 'VAN',
+  'quinn hughes': 'VAN',
+  'roman josi': 'NSH',
+  'filip forsberg': 'NSH',
+  'johnny gaudreau': 'CBJ',
+  'patrik laine': 'CBJ',
+  'steven stamkos': 'TBL',
+  'brayden point': 'TBL',
+  'mark scheifele': 'WPG',
+  'kyle connor': 'WPG',
+  'robert thomas': 'STL',
+  'jordan kyrou': 'STL',
+  'clayton keller': 'ARI',
+  'jakob chychrun': 'ARI',
+  'trevor zegras': 'ANA',
+  'mason mctavish': 'ANA',
+  'jordan eberle': 'SEA',
+  'matty beniers': 'SEA',
+  'jonathan marchessault': 'VGK',
+  'jack eichel': 'VGK',
+  'evander kane': 'EDM',
+  'ryan nugent-hopkins': 'EDM',
+  'john carlson': 'WSH',
+  'evgeny kuznetsov': 'WSH',
+  'mats zuccarello': 'MIN',
+  'joel eriksson ek': 'MIN',
+  'jamie benn': 'DAL',
+  'tyler seguin': 'DAL',
+  'jakob silfverberg': 'ANA',
+  'adam henrique': 'ANA'
+};
+
+function getPlayerTeam(playerName: string): string | null {
+  if (!playerName) return null;
+  const normalized = playerName.toLowerCase().replace(/[^a-z]/g, '');
+  for (const [key, team] of Object.entries(NHL_PLAYER_TEAM_MAP)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return team;
+    }
+  }
+  return null;
+}
+
 // ========== NHL POSITION MAPPING ==========
 const NHL_POSITION_MAP: Record<string, string> = {
   'Center': 'C', 'Left Wing': 'LW', 'Right Wing': 'RW', 'Defense': 'D',
@@ -70,7 +132,7 @@ const SPORT_KEYWORDS: Record<string, string[]> = {
   nba: ['nba', 'basketball'], mlb: ['mlb', 'baseball'], nhl: ['nhl', 'hockey'],
 };
 
-// ========== INTENT PATTERNS (UPDATED) ==========
+// ========== INTENT PATTERNS ==========
 const intentPatterns = [
   { phrase: 'value props', intent: 'value' }, { phrase: 'best props', intent: 'top' },
   { phrase: 'top props', intent: 'top' }, { phrase: 'elite props', intent: 'top' },
@@ -93,11 +155,9 @@ const NON_PLAYER_KEYWORDS = new Set(['Rookie', 'Rookies', 'ROTY', 'MVP', 'All-St
 const parseQuery = (query: string) => {
   console.log('🔍 parseQuery input:', query);
   
-  // First, try Fuse.js
   const results = fuseIntents.search(query);
   let matchedIntents = [...new Set(results.map(r => r.item.intent))];
 
-  // Fallback: if Fuse returns nothing, do explicit substring matching
   if (matchedIntents.length === 0) {
     const lowerQuery = query.toLowerCase();
     for (const pattern of intentPatterns) {
@@ -111,7 +171,6 @@ const parseQuery = (query: string) => {
     console.log('🔍 matchedIntents via Fuse:', matchedIntents);
   }
 
-  // Player name detection (exclude keywords)
   const words = query.split(/\s+/);
   const potentialPlayer = words.find(w =>
     /^[A-Z][a-z]+$/.test(w) &&
@@ -119,7 +178,6 @@ const parseQuery = (query: string) => {
     !NON_PLAYER_KEYWORDS.has(w)
   );
 
-  // Sport detection
   let detectedSport: string | null = null;
   const lowerQuery = query.toLowerCase();
   for (const [sport, keywords] of Object.entries(SPORT_KEYWORDS)) {
@@ -153,6 +211,21 @@ const transformSelections = (rawSelections: any[], sport: string, marketType: st
       if (teamAbbr && NHL_TEAM_MAP[teamAbbr]) teamAbbr = NHL_TEAM_MAP[teamAbbr];
       if (oppAbbr && NHL_TEAM_MAP[oppAbbr]) oppAbbr = NHL_TEAM_MAP[oppAbbr];
       if (sel.team && NHL_TEAM_MAP[sel.team]) teamAbbr = NHL_TEAM_MAP[sel.team];
+      
+      // FALLBACK: use player name to get team if still missing
+      if (!teamAbbr || teamAbbr === 'TBD') {
+        const mappedTeam = getPlayerTeam(sel.player || '');
+        if (mappedTeam) teamAbbr = mappedTeam;
+      }
+      if (!oppAbbr || oppAbbr === 'TBD') {
+        if (sel.game && sel.game.includes(' vs ')) {
+          const parts = sel.game.split(' vs ');
+          if (parts.length === 2) {
+            const opp = parts[1] === teamAbbr ? parts[0] : parts[1];
+            oppAbbr = opp;
+          }
+        }
+      }
     }
 
     let position = sel.position || '';
@@ -161,12 +234,46 @@ const transformSelections = (rawSelections: any[], sport: string, marketType: st
     let gameDisplay = 'Game TBD';
     if (sel.game) gameDisplay = sel.game;
     else if (teamAbbr && oppAbbr) gameDisplay = `${teamAbbr} vs ${oppAbbr}`;
-    else if (teamAbbr) gameDisplay = `${teamAbbr} vs TBD`;
+    else if (teamAbbr) gameDisplay = `${teamAbbr} vs Opponent TBD`;
 
-    const projectionVal = sel.projection || sel.line || 0;
+    let projectionVal = sel.projection || sel.line || 0;
     const lineVal = sel.line || 1;
-    const edgeDisplay = ((projectionVal - lineVal) / lineVal * 100).toFixed(1) + '%';
-    const edgePrefix = parseFloat(edgeDisplay) > 0 ? '+' : '';
+
+    // ===== NHL REALISTIC PROJECTION CAP =====
+    if (sport === 'nhl' && statType === 'goals' && projectionVal > 1.5) {
+      // Unrealistic projection – use a more reasonable value
+      projectionVal = lineVal + 0.1;  // or use static average if available
+    }
+
+// ===== CAP UNREALISTIC VALUES =====
+// Cap edge at ±15% for realistic predictions
+let rawEdgePercent = (projectionVal - lineVal) / lineVal * 100;
+const cappedEdgePercent = Math.min(15, Math.max(-15, rawEdgePercent));
+const edgeDisplay = cappedEdgePercent.toFixed(1) + '%';
+const edgePrefix = cappedEdgePercent > 0 ? '+' : '';
+
+// Cap confidence at 55-90 range
+let confidenceScore = 70;
+if (sel.confidence === 'high') confidenceScore = 85;
+else if (sel.confidence === 'medium') confidenceScore = 70;
+else if (sel.confidence === 'low') confidenceScore = 60;
+else if (typeof sel.confidence === 'number') {
+  confidenceScore = Math.min(90, Math.max(55, sel.confidence));
+}
+else if (sel.confidence_score) {
+  confidenceScore = Math.min(90, Math.max(55, sel.confidence_score));
+}
+else {
+  const edgePercent = Math.abs(cappedEdgePercent);
+  if (edgePercent > 10) confidenceScore = 85;
+  else if (edgePercent > 5) confidenceScore = 75;
+  else if (edgePercent > 2) confidenceScore = 65;
+  else confidenceScore = 60;
+}
+
+// Cap projection to be realistic (within 30% of line)
+if (projectionVal > lineVal * 1.3) projectionVal = lineVal * 1.2;
+if (projectionVal < lineVal * 0.7) projectionVal = lineVal * 0.8;
 
     return {
       id: sel.id || `prop-${sport}-${idx}-${Date.now()}`,
@@ -177,7 +284,7 @@ const transformSelections = (rawSelections: any[], sport: string, marketType: st
       prop: `${statType} ${sel.line || ''}`,
       outcome: 'pending',
       actual_result: 'Pending',
-      confidence_pre_game: sel.confidence === 'high' ? 85 : sel.confidence === 'medium' ? 70 : sel.confidence || 70,
+      confidence_pre_game: confidenceScore,
       accuracy: null,
       timestamp: sel.game_date || new Date().toISOString(),
       sport: sel.sport?.toLowerCase() || sport,
@@ -200,26 +307,28 @@ const transformSelections = (rawSelections: any[], sport: string, marketType: st
   });
 };
 
-// Transform team props from the new endpoint
 const transformTeamProps = (rawProps: any[], sport: string, marketType: string, seasonPhase: string) => {
   return rawProps.map((prop: any, idx: number) => {
     const statType = prop.stat || 'points';
     const lineVal = prop.line || 0;
-    const projectionVal = prop.projection || 0;
+    let projectionVal = prop.projection || 0;
     
-    // Handle edge - could be string or number
-    let edgeVal = prop.edge;
-    let edgeDisplay;
-    if (typeof edgeVal === 'string') {
-      // If it already has % sign, use as is, otherwise format
-      edgeDisplay = edgeVal.includes('%') ? edgeVal : `${edgeVal}%`;
-    } else if (typeof edgeVal === 'number') {
-      edgeDisplay = `${edgeVal > 0 ? '+' : ''}${edgeVal.toFixed(1)}%`;
-    } else {
-      edgeDisplay = '+0.0%';
+    // Edge capping
+    let rawEdgePercent = (projectionVal - lineVal) / lineVal * 100;
+    const cappedEdgePercent = Math.min(30, Math.max(-30, rawEdgePercent));
+    let edgeDisplay = `${cappedEdgePercent > 0 ? '+' : ''}${cappedEdgePercent.toFixed(1)}%`;
+    
+    let confidenceScore = prop.confidence || 70;
+    if (typeof confidenceScore === 'string') {
+      if (confidenceScore === 'high') confidenceScore = 85;
+      else if (confidenceScore === 'medium') confidenceScore = 70;
+      else if (confidenceScore === 'low') confidenceScore = 55;
+      else confidenceScore = 70;
+    }
+    if (Math.abs(rawEdgePercent) > 30) {
+      confidenceScore = Math.min(confidenceScore, 60);
     }
     
-    const confidence = prop.confidence || 70;
     const type = prop.type || (projectionVal > lineVal ? 'Over' : 'Under');
 
     return {
@@ -233,7 +342,7 @@ const transformTeamProps = (rawProps: any[], sport: string, marketType: string, 
       prop: `${statType} ${lineVal.toFixed(1)}`,
       outcome: 'pending',
       actual_result: 'Pending',
-      confidence_pre_game: confidence,
+      confidence_pre_game: confidenceScore,
       accuracy: null,
       timestamp: prop.timestamp || new Date().toISOString(),
       sport: sport,
@@ -254,7 +363,7 @@ const transformTeamProps = (rawProps: any[], sport: string, marketType: string, 
   });
 };
 
-// ========== CACHE IMPLEMENTATION (unchanged) ==========
+// ========== CACHE IMPLEMENTATION ==========
 const CACHE_DURATION = 5 * 60 * 1000;
 interface CacheEntry { data: any; timestamp: number; sport: string; }
 const predictionCache = new Map<string, CacheEntry>();
@@ -276,7 +385,6 @@ const setToCache = (sport: string, endpoint: string, data: any): void => {
 
 // ========== MOCK DATA ==========
 const generateMockOutcomes = (sport: string, count: number = 20) => {
-  // ... (same as before, keep unchanged)
   const playersBySport: Record<string, string[]> = {
     nba: ['LeBron James', 'Stephen Curry', 'Jayson Tatum', 'Giannis Antetokounmpo', 'Luka Doncic', 'Nikola Jokic', 'Joel Embiid', 'Shai Gilgeous-Alexander'],
     nfl: ['Patrick Mahomes', 'Josh Allen', 'Justin Jefferson', 'Christian McCaffrey', 'Jalen Hurts', 'Lamar Jackson', 'Ja\'Marr Chase', 'Tyreek Hill'],
@@ -336,6 +444,11 @@ const generateMockOutcomes = (sport: string, count: number = 20) => {
         ? Math.round((line + (Math.random() * 2 + 0.5)) * 10) / 10
         : Math.round((line - (Math.random() * 2 + 0.5)) * 10) / 10;
     
+    // Realistic edge for mock data (capped)
+    let rawEdge = (actual - line) / line * 100;
+    let cappedEdge = Math.min(30, Math.max(-30, rawEdge));
+    let edgeDisplay = `${cappedEdge > 0 ? '+' : ''}${cappedEdge.toFixed(1)}%`;
+    
     return {
       id: `outcome-${sport}-${i + 1}-${Date.now()}`,
       game: `${homeTeam} vs ${awayTeam}`,
@@ -360,7 +473,7 @@ const generateMockOutcomes = (sport: string, count: number = 20) => {
       line,
       actual_value: actual,
       projection: line + 0.2,
-      edge: randomOutcome === 'correct' ? `+${(Math.random() * 15 + 5).toFixed(1)}` : randomOutcome === 'incorrect' ? `-${(Math.random() * 10 + 2).toFixed(1)}` : '0',
+      edge: edgeDisplay,
       units: randomOutcome === 'correct' ? `+${(Math.random() * 2 + 0.5).toFixed(1)}` : randomOutcome === 'incorrect' ? `-${(Math.random() + 0.5).toFixed(1)}` : '0',
       season: CURRENT_SEASON,
       year: 2026,
@@ -422,7 +535,7 @@ const usePredictionData = (sport: string, seasonPhase: string, marketType: strin
 
     try {
       const response = await fetch(endpoint, { signal: abortControllerRef.current?.signal });
-      if (response.status === 429) { /* rate limit handling */ throw new Error('Rate limited'); }
+      if (response.status === 429) { throw new Error('Rate limited'); }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
       const rawSelections = result.selections || [];
@@ -470,6 +583,13 @@ const usePredictionData = (sport: string, seasonPhase: string, marketType: strin
 // ========== MAIN CONTENT COMPONENT ==========
 const PredictionsOutcomeContent = () => {
   const navigate = useNavigate();
+  const { user, token, fetchProfile } = useAuth();
+
+  // ========== CREDITS STATE ==========
+  const [generatorCredits, setGeneratorCredits] = useState(0);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
   const [selectedSport, setSelectedSport] = useState('nba');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('cards');
   const [filterOutcome, setFilterOutcome] = useState<'all' | 'correct' | 'incorrect' | 'pending'>('all');
@@ -490,19 +610,417 @@ const PredictionsOutcomeContent = () => {
 
   const [seasonPhase, setSeasonPhase] = useState<'regular' | 'playoffs' | 'all-star' | 'futures'>('regular');
   const [marketType, setMarketType] = useState<'standard' | 'alt_line' | 'special' | 'futures'>('standard');
-  
+
   const { data: outcomesData, isLoading, error, refetch, isRefetching, dataSource, cacheInfo, retryCount, lastRetryTime } =
     usePredictionData(selectedSport, seasonPhase, marketType);
 
   const outcomes = useMemo(() => outcomesData?.outcomes || [], [outcomesData]);
 
-  const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
-    setSnackbarMessage(message);
-    setSnackbarSeverity(severity);
-    setSnackbarOpen(true);
+  // ========== FETCH CREDITS (FIXED: using correct endpoint) ==========
+  const refreshCredits = useCallback(async () => {
+    const userId = user?.uid || user?.id;
+    
+    if (!userId || !token) {
+      console.log('❌ No user ID or token available, cannot fetch credits');
+      return;
+    }
+    
+    console.log(`🔄 Fetching credits for user: ${userId}`);
+    
+    try {
+      // FIXED: Use the correct endpoint with user_id
+      const response = await fetch(`${PYTHON_API_BASE}/api/user/generations/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      console.log(`📡 Credits API response status: ${response.status}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`💰 Remaining credits: ${data.remaining}`);
+        setGeneratorCredits(data.remaining);
+      } else {
+        console.error('❌ Failed to fetch credits:', response.status);
+        setGeneratorCredits(0);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching credits:', error);
+      setGeneratorCredits(0);
+    }
+  }, [user, token]);
+
+  useEffect(() => {
+    refreshCredits();
+  }, [refreshCredits]);
+
+  // ========== CREDITS CHECKOUT ==========
+  const handleCreditsCheckout = async (credits: number) => {
+    if (!user || !token) {
+      showSnackbar('Please log in first', 'error');
+      return;
+    }
+    try {
+      const response = await fetch(`${PYTHON_API_BASE}/api/generator/credits/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ credits }),
+      });
+      const data = await response.json();
+      if (data.url) window.location.href = data.url;
+      else throw new Error(data.error || 'Failed to create checkout session');
+    } catch (error) {
+      console.error('Credits checkout error:', error);
+      showSnackbar('Failed to start checkout', 'error');
+    }
   };
 
-  // Scoring function (with token‑based fuzzy match)
+  // ========== GENERATION HANDLER (FIXED: correct decrement endpoint) ==========
+  const generateTimeoutRef = useRef<NodeJS.Timeout>();
+  const debouncedGenerate = useCallback(() => {
+    if (generateTimeoutRef.current) clearTimeout(generateTimeoutRef.current);
+    generateTimeoutRef.current = setTimeout(() => handleGeneratePredictions(), 300);
+  }, [customQuery]);
+
+const handleGeneratePredictions = async () => {
+  if (!customQuery.trim()) {
+    alert('Please enter a prediction query');
+    return;
+  }
+
+  // Refresh credits first to ensure we have latest
+  await refreshCredits();
+  
+  if (generatorCredits <= 0) {
+    setShowCreditsModal(true);
+    return;
+  }
+
+  setGeneratingPredictions(true);
+  setShowSimulationModal(true);
+
+  try {
+    const userId = user?.uid || user?.id;
+    
+    if (!userId || !token) {
+      throw new Error('Not logged in');
+    }
+
+    // Deduct credit
+    const useResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        pickType: 'prediction_outcome',
+        pickData: { 
+          query: customQuery, 
+          sport: selectedSport,
+          seasonPhase,
+          marketType
+        },
+      }),
+    });
+
+    if (!useResponse.ok) {
+      const errorData = await useResponse.json();
+      throw new Error(errorData.error || 'Failed to use credit');
+    }
+
+    const creditData = await useResponse.json();
+    console.log(`✅ Credit used successfully! Remaining: ${creditData.remaining}`);
+    setGeneratorCredits(creditData.remaining);
+    showSnackbar(`Used 1 credit. ${creditData.remaining} remaining.`, 'info');
+
+    const { intents, player: detectedPlayer, sport: detectedSport } = parseQuery(customQuery);
+    console.log('🔍 Parsed intents:', intents, 'player:', detectedPlayer, 'sport:', detectedSport);
+
+    const targetSport = detectedSport || selectedSport;
+    console.log(`🎯 Fetching fresh data for sport: ${targetSport}`);
+
+    // FIRST: Fetch today's games to filter players
+    const gamesResponse = await fetch(`${NODE_API_BASE}/api/games`, {
+      params: { sport: targetSport, date: new Date().toISOString().split('T')[0] }
+    });
+    
+    let todaysGames: any[] = [];
+    try {
+      const gamesData = await gamesResponse.json();
+      todaysGames = gamesData.games || [];
+      console.log(`🏀 Today's ${targetSport} games:`, todaysGames.map((g: any) => `${g.home_team} vs ${g.away_team}`));
+    } catch (err) {
+      console.warn('Could not fetch games, will use all props');
+    }
+
+    // Create set of valid teams from today's games
+    const validTeams = new Set<string>();
+    todaysGames.forEach((game: any) => {
+      validTeams.add(game.home_team?.toLowerCase());
+      validTeams.add(game.away_team?.toLowerCase());
+    });
+
+    let endpoint: string;
+    let result: any;
+    let rawSelections: any[] = [];
+
+    if (intents.includes('team')) {
+      endpoint = `${NODE_API_BASE}/api/team/props?sport=${targetSport}&_t=${Date.now()}`;
+      console.log(`🏀 Fetching team props from: ${endpoint}`);
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`Team props API error: ${response.status}`);
+      result = await response.json();
+      rawSelections = result.data || [];
+      console.log(`📦 Team props count: ${rawSelections.length}`);
+    } else {
+      const url = new URL(`${NODE_API_BASE}/api/prizepicks/selections`);
+      url.searchParams.append('sport', targetSport);
+      url.searchParams.append('_t', Date.now().toString());
+      endpoint = url.toString();
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      result = await response.json();
+      rawSelections = result.selections || [];
+      console.log(`📦 Fresh data for ${targetSport}:`, result);
+    }
+
+    let freshOutcomes: any[] = [];
+    if (intents.includes('team')) {
+      freshOutcomes = transformTeamProps(rawSelections, targetSport, marketType, seasonPhase);
+    } else {
+      const transformed = transformSelections(rawSelections, targetSport, marketType, seasonPhase);
+      freshOutcomes = deduplicateOutcomes(transformed);
+    }
+
+    // FILTER: Only include players from today's games
+    let filteredByGame = freshOutcomes;
+    if (validTeams.size > 0) {
+      filteredByGame = freshOutcomes.filter(outcome => {
+        const teamLower = (outcome.team || '').toLowerCase();
+        const isValid = validTeams.has(teamLower);
+        if (!isValid && outcome.player) {
+          console.log(`⏭️ Filtering out ${outcome.player} (${outcome.team}) - not playing today`);
+        }
+        return isValid;
+      });
+      console.log(`📊 Filtered from ${freshOutcomes.length} to ${filteredByGame.length} props (only today's games)`);
+    }
+
+    // CAP unrealistic values
+    const cappedOutcomes = filteredByGame.map(outcome => {
+      // Cap edge at reasonable levels (±15%)
+      let edgeValue = outcome.edge;
+      if (edgeValue && typeof edgeValue === 'string') {
+        const edgeNum = parseFloat(edgeValue);
+        if (!isNaN(edgeNum)) {
+          const cappedEdgeNum = Math.min(15, Math.max(-15, edgeNum));
+          edgeValue = `${cappedEdgeNum > 0 ? '+' : ''}${cappedEdgeNum.toFixed(1)}%`;
+        }
+      }
+      
+      // Cap confidence at reasonable levels (55-90)
+      let confidence = outcome.confidence_pre_game || 70;
+      if (confidence > 90) confidence = 85;
+      if (confidence < 55) confidence = 60;
+      
+      // Cap projection to be realistic (within 30% of line)
+      let projection = outcome.projection;
+      const line = outcome.line;
+      if (projection && line && typeof projection === 'number' && typeof line === 'number') {
+        const maxProjection = line * 1.3;
+        const minProjection = line * 0.7;
+        if (projection > maxProjection) projection = maxProjection;
+        if (projection < minProjection) projection = minProjection;
+      }
+      
+      return {
+        ...outcome,
+        edge: edgeValue,
+        confidence_pre_game: confidence,
+        projection: projection
+      };
+    });
+
+    let selections: any[] = [];
+    const maxResults = 5;
+
+    if (cappedOutcomes.length > 0) {
+      let filtered = [...cappedOutcomes];
+      
+      // Filter by over/under intent
+      if (intents.includes('over')) {
+        filtered = filtered.filter(o => o.prediction?.toLowerCase().includes('over'));
+      } else if (intents.includes('under')) {
+        filtered = filtered.filter(o => o.prediction?.toLowerCase().includes('under'));
+      }
+
+      // Filter by value/top intent
+      if (intents.includes('value')) {
+        filtered = filtered.filter(o => {
+          const edgeNum = parseFloat(o.edge);
+          return !isNaN(edgeNum) && edgeNum > 0;
+        });
+        filtered.sort((a, b) => {
+          const aEdge = parseFloat(a.edge) || 0;
+          const bEdge = parseFloat(b.edge) || 0;
+          return bEdge - aEdge;
+        });
+      } else if (intents.includes('top')) {
+        filtered.sort((a, b) => (b.confidence_pre_game || 0) - (a.confidence_pre_game || 0));
+      }
+
+      // Filter by specific player if detected
+      if (detectedPlayer && !intents.includes('team')) {
+        const playerFuse = new Fuse(filtered, { keys: ['player'], threshold: 0.3 });
+        const playerMatches = playerFuse.search(detectedPlayer);
+        filtered = playerMatches.map(m => m.item);
+      }
+
+      if (filtered.length === 0) filtered = [...cappedOutcomes];
+
+      const intentObj = preprocessQuery(customQuery);
+      const scored = filtered.map(o => ({
+        ...o,
+        relevanceScore: scorePredictionRelevance(o, intentObj, customQuery)
+      }));
+      scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+      selections = scored.slice(0, maxResults);
+    }
+
+    if (selections.length === 0) {
+      console.log(`No matches found for today's games, showing message`);
+      setPredictionResults({
+        success: true,
+        analysis: `⚠️ No player props found for today's ${targetSport.toUpperCase()} games.\n\nTry a different sport or check back when games are scheduled.`,
+        model: 'filtered',
+        timestamp: new Date().toISOString(),
+        source: 'No games today'
+      });
+      setGeneratingPredictions(false);
+      setShowSimulationModal(false);
+      return;
+    }
+
+    const formattedAnalysis = selections.map((item: any, idx: number) => {
+      const edgeDisplay = typeof item.edge === 'string' ? item.edge : 
+                      (item.edge > 0 ? `+${item.edge.toFixed(1)}%` : `${item.edge.toFixed(1)}%`);
+      
+      // Add game info to display
+      const gameInfo = item.game ? ` (${item.game})` : '';
+      
+      return `**${idx + 1}. ${item.player}**${gameInfo}\n` +
+        `   📈 **Stat:** ${item.stat_type}\n` +
+        `   🎯 **Line:** ${typeof item.line === 'number' ? item.line.toFixed(1) : item.line}\n` +
+        `   🔮 **Projection:** ${typeof item.projection === 'number' ? item.projection.toFixed(1) : item.projection}\n` +
+        `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
+        `   💰 **Advantage:** ${edgeDisplay}\n` +
+        `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+    }).join('\n\n');
+
+    setPredictionResults({
+      success: true,
+      analysis: `🎯 **AI Prediction Results**\n\nBased on your query for ${targetSport.toUpperCase()} games on ${new Date().toLocaleDateString()}:\n\n${formattedAnalysis}`,
+      model: 'fresh-api',
+      timestamp: new Date().toISOString(),
+      source: intents.includes('team') ? 'Team Props API' : (result.scraped ? 'Live Data' : 'API Data')
+    });
+
+    setGeneratedSets(prev => [...prev, selections]);
+    setCurrentSetIndex(prev => prev + 1);
+    logPromptPerformance(customQuery, selections.length, 0, 'generator');
+  } catch (error) {
+    console.error('❌ Error in generator:', error);
+    const maxResults = 5;
+    const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), maxResults);
+    const mockAnalysis = mockSelections.map((item: any, idx: number) => {
+      return `**${idx + 1}. ${item.player}**\n` +
+        `   📈 **Stat:** ${item.stat_type}\n` +
+        `   🎯 **Line:** ${item.line}\n` +
+        `   🔮 **Projection:** ${item.projection.toFixed(1)}\n` +
+        `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
+        `   💰 **Advantage:** ${item.edge}\n` +
+        `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+    }).join('\n\n');
+
+    setPredictionResults({
+      success: true,
+      analysis: `🎯 **AI Prediction Results (Demo)**\n\nBased on your query:\n\n${mockAnalysis}`,
+      model: 'demo-model',
+      timestamp: new Date().toISOString(),
+      source: 'Demo Data'
+    });
+    setGeneratedSets(prev => [...prev, mockSelections]);
+    setCurrentSetIndex(prev => prev + 1);
+  } finally {
+    setGeneratingPredictions(false);
+  }
+};
+
+  const handlePrevSet = () => {
+    if (currentSetIndex > 0) {
+      const newIndex = currentSetIndex - 1;
+      setCurrentSetIndex(newIndex);
+      const prevSet = generatedSets[newIndex];
+      if (prevSet) {
+        if (prevSet[0]?.analysis) {
+          setPredictionResults(prevSet[0]);
+        } else {
+          const formatted = prevSet.map((item: any, idx: number) => {
+            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
+              `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
+              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
+              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
+              `   💎 **Confidence:** ${item.confidence_pre_game || 'medium'}\n` +
+              `   💰 **Advantage:** ${item.edge}\n` +
+              `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+          }).join('\n\n');
+          setPredictionResults({
+            success: true,
+            analysis: `🎯 **AI Prediction Results**\n\n${formatted}`,
+            source: 'Generated Set'
+          });
+        }
+      }
+    }
+  };
+
+  const handleNextSet = () => {
+    if (currentSetIndex < generatedSets.length - 1) {
+      const newIndex = currentSetIndex + 1;
+      setCurrentSetIndex(newIndex);
+      const nextSet = generatedSets[newIndex];
+      if (nextSet) {
+        if (nextSet[0]?.analysis) {
+          setPredictionResults(nextSet[0]);
+        } else {
+          const formatted = nextSet.map((item: any, idx: number) => {
+            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
+              `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
+              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
+              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
+              `   💎 **Confidence:** ${item.confidence_pre_game || 'medium'}\n` +
+              `   💰 **Advantage:** ${item.edge}\n` +
+              `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
+          }).join('\n\n');
+          setPredictionResults({
+            success: true,
+            analysis: `🎯 **AI Prediction Results**\n\n${formatted}`,
+            source: 'Generated Set'
+          });
+        }
+      }
+    }
+  };
+
+  const clearGenerated = () => {
+    setGeneratedSets([]);
+    setCurrentSetIndex(0);
+    setPredictionResults(null);
+  };
+
   const scorePredictionRelevance = (prediction: any, intent: QueryIntent, rawQuery: string): number => {
     let score = 0;
     const player = (prediction.player || '').toLowerCase();
@@ -537,7 +1055,6 @@ const PredictionsOutcomeContent = () => {
     const conf = prediction.confidence_pre_game || 0;
     score += conf / 25;
 
-    // Fuzzy token match
     const queryTokens = rawQuery.toLowerCase().split(/\s+/);
     let tokenMatchCount = 0;
     for (const token of queryTokens) {
@@ -548,7 +1065,6 @@ const PredictionsOutcomeContent = () => {
     }
     score += Math.min(tokenMatchCount, 5) * 10;
 
-    // Rookie boost
     const lowerRawQuery = rawQuery.toLowerCase();
     if (lowerRawQuery.includes('rookie') || lowerRawQuery.includes('rookies') || lowerRawQuery.includes('roty')) {
       if (predictionText.includes('rookie') || predictionText.includes('roty')) score += 30;
@@ -557,218 +1073,13 @@ const PredictionsOutcomeContent = () => {
     return score;
   };
 
-  // Generator handler (UPDATED: detects team intent)
-  const generateTimeoutRef = useRef<NodeJS.Timeout>();
-  const debouncedGenerate = useCallback(() => {
-    if (generateTimeoutRef.current) clearTimeout(generateTimeoutRef.current);
-    generateTimeoutRef.current = setTimeout(() => handleGeneratePredictions(), 300);
-  }, [customQuery]);
-
-  const handleGeneratePredictions = async () => {
-    if (!customQuery.trim()) {
-      alert('Please enter a prediction query');
-      return;
-    }
-
-    setGeneratingPredictions(true);
-    setShowSimulationModal(true);
-
-    try {
-      const { intents, player: detectedPlayer, sport: detectedSport } = parseQuery(customQuery);
-      console.log('🔍 Parsed intents:', intents, 'player:', detectedPlayer, 'sport:', detectedSport);
-
-      const targetSport = detectedSport || selectedSport;
-      console.log(`🎯 Fetching fresh data for sport: ${targetSport}`);
-
-      let endpoint: string;
-      let result: any;
-      let rawSelections: any[] = [];
-
-      // 🔥 KEY CHANGE: if team intent is present, call team props endpoint
-      if (intents.includes('team')) {
-        endpoint = `${NODE_API_BASE}/api/team/props?sport=${targetSport}&_t=${Date.now()}`;
-        console.log(`🏀 Fetching team props from: ${endpoint}`);
-        const response = await fetch(endpoint);
-        if (!response.ok) throw new Error(`Team props API error: ${response.status}`);
-        result = await response.json();
-        rawSelections = result.data || [];
-        console.log(`📦 Team props count: ${rawSelections.length}`);
-      } else {
-        // Standard player props endpoint
-        const url = new URL(`${NODE_API_BASE}/api/prizepicks/selections`);
-        url.searchParams.append('sport', targetSport);
-        url.searchParams.append('_t', Date.now().toString());
-        endpoint = url.toString();
-        const response = await fetch(endpoint);
-        if (!response.ok) throw new Error(`API error: ${response.status}`);
-        result = await response.json();
-        rawSelections = result.selections || [];
-        console.log(`📦 Fresh data for ${targetSport}:`, result);
-      }
-
-      // Transform data
-      let freshOutcomes: any[] = [];
-      if (intents.includes('team')) {
-        freshOutcomes = transformTeamProps(rawSelections, targetSport, marketType, seasonPhase);
-      } else {
-        const transformed = transformSelections(rawSelections, targetSport, marketType, seasonPhase);
-        freshOutcomes = deduplicateOutcomes(transformed);
-      }
-
-      // Filter, sort, score, etc. (same as before)
-      let selections: any[] = [];
-      const maxResults = 5;
-
-      if (freshOutcomes.length > 0) {
-        let filtered = [...freshOutcomes];
-        if (intents.includes('over')) filtered = filtered.filter(o => o.prediction?.toLowerCase().includes('over'));
-        else if (intents.includes('under')) filtered = filtered.filter(o => o.prediction?.toLowerCase().includes('under'));
-
-        if (intents.includes('value')) {
-          filtered = filtered.filter(o => parseFloat(o.edge) > 0);
-          filtered.sort((a, b) => (parseFloat(b.edge) || 0) - (parseFloat(a.edge) || 0));
-        } else if (intents.includes('top')) {
-          filtered.sort((a, b) => (b.confidence_pre_game || 0) - (a.confidence_pre_game || 0));
-        }
-
-        if (detectedPlayer && !intents.includes('team')) {
-          const playerFuse = new Fuse(filtered, { keys: ['player'], threshold: 0.3 });
-          const playerMatches = playerFuse.search(detectedPlayer);
-          filtered = playerMatches.map(m => m.item);
-        }
-
-        if (filtered.length === 0) filtered = [...freshOutcomes];
-
-        const intentObj = preprocessQuery(customQuery);
-        const scored = filtered.map(o => ({
-          ...o,
-          relevanceScore: scorePredictionRelevance(o, intentObj, customQuery)
-        }));
-        scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
-        selections = scored.slice(0, maxResults);
-      }
-
-      if (selections.length === 0) {
-        console.log(`No matches found, using mock data for ${targetSport}`);
-        const mockSelections = generateMockOutcomes(targetSport.toLowerCase(), maxResults);
-        selections = mockSelections.map((item, idx) => ({ ...item, relevanceScore: idx + 1 }));
-      }
-
-// Format the analysis text
-const formattedAnalysis = selections.map((item: any, idx: number) => {
-  const edgeDisplay = typeof item.edge === 'string' ? item.edge : 
-                      (item.edge > 0 ? `+${item.edge.toFixed(1)}%` : `${item.edge.toFixed(1)}%`);
-  
-  return `**${idx + 1}. ${item.player}**\n` +
-    `   📈 **Stat:** ${item.stat_type}\n` +
-    `   🎯 **Line:** ${typeof item.line === 'number' ? item.line.toFixed(1) : item.line}\n` +
-    `   🔮 **Projection:** ${typeof item.projection === 'number' ? item.projection.toFixed(1) : item.projection}\n` +
-    `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
-    `   💰 **Edge:** ${edgeDisplay}\n` +
-    `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
-}).join('\n\n');
-
-      setPredictionResults({
-        success: true,
-        analysis: `🎯 **AI Prediction Results**\n\nBased on your query:\n\n${formattedAnalysis}`,
-        model: 'fresh-api',
-        timestamp: new Date().toISOString(),
-        source: intents.includes('team') ? 'Team Props API' : (result.scraped ? 'Live Data' : 'API Data')
-      });
-
-      setGeneratedSets(prev => [...prev, selections]);
-      setCurrentSetIndex(prev => prev + 1);
-      logPromptPerformance(customQuery, selections.length, 0, 'generator');
-    } catch (error) {
-      console.error('❌ Error in generator:', error);
-      const maxResults = 5;
-      const mockSelections = generateMockOutcomes(selectedSport.toLowerCase(), maxResults);
-      const mockAnalysis = mockSelections.map((item: any, idx: number) => {
-        return `**${idx + 1}. ${item.player}**\n` +
-          `   📈 **Stat:** ${item.stat_type}\n` +
-          `   🎯 **Line:** ${item.line}\n` +
-          `   🔮 **Projection:** ${item.projection.toFixed(1)}\n` +
-          `   💎 **Confidence:** ${item.confidence_pre_game}%\n` +
-          `   💰 **Edge:** ${item.edge}\n` +
-          `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
-      }).join('\n\n');
-
-      setPredictionResults({
-        success: true,
-        analysis: `🎯 **AI Prediction Results (Demo)**\n\nBased on your query:\n\n${mockAnalysis}`,
-        model: 'demo-model',
-        timestamp: new Date().toISOString(),
-        source: 'Demo Data'
-      });
-      setGeneratedSets(prev => [...prev, mockSelections]);
-      setCurrentSetIndex(prev => prev + 1);
-    } finally {
-      setGeneratingPredictions(false);
-    }
+  const showSnackbar = (message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
   };
 
-  const handlePrevSet = () => {
-    if (currentSetIndex > 0) {
-      const newIndex = currentSetIndex - 1;
-      setCurrentSetIndex(newIndex);
-      const prevSet = generatedSets[newIndex];
-      if (prevSet) {
-        if (prevSet[0]?.analysis) {
-          setPredictionResults(prevSet[0]);
-        } else {
-          const formatted = prevSet.map((item: any, idx: number) => {
-            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
-              `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
-              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
-              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
-              `   💎 **Confidence:** ${item.confidence_pre_game || 'medium'}\n` +
-              `   💰 **Edge:** ${item.edge}\n` +
-              `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
-          }).join('\n\n');
-          setPredictionResults({
-            success: true,
-            analysis: `🎯 **AI Prediction Results**\n\n${formatted}`,
-            source: 'Generated Set'
-          });
-        }
-      }
-    }
-  };
-
-  const handleNextSet = () => {
-    if (currentSetIndex < generatedSets.length - 1) {
-      const newIndex = currentSetIndex + 1;
-      setCurrentSetIndex(newIndex);
-      const nextSet = generatedSets[newIndex];
-      if (nextSet) {
-        if (nextSet[0]?.analysis) {
-          setPredictionResults(nextSet[0]);
-        } else {
-          const formatted = nextSet.map((item: any, idx: number) => {
-            return `**${idx + 1}. ${item.player || 'Player'}**\n` +
-              `   📈 **Stat:** ${item.stat_type || 'N/A'}\n` +
-              `   🎯 **Line:** ${item.line || 'N/A'}\n` +
-              `   🔮 **Projection:** ${item.projection || 'N/A'}\n` +
-              `   💎 **Confidence:** ${item.confidence_pre_game || 'medium'}\n` +
-              `   💰 **Edge:** ${item.edge}\n` +
-              `   📝 **Analysis:** ${item.key_factors?.join(' ') || 'No analysis'}`;
-          }).join('\n\n');
-          setPredictionResults({
-            success: true,
-            analysis: `🎯 **AI Prediction Results**\n\n${formatted}`,
-            source: 'Generated Set'
-          });
-        }
-      }
-    }
-  };
-
-  const clearGenerated = () => {
-    setGeneratedSets([]);
-    setCurrentSetIndex(0);
-    setPredictionResults(null);
-  };
-
+  // ========== RENDER HELPERS ==========
   const filteredByOutcome = filterOutcome === 'all'
     ? outcomes
     : outcomes.filter((item: any) => item.outcome === filterOutcome);
@@ -782,6 +1093,9 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
         (item.team?.toLowerCase() || '').includes(searchQuery.toLowerCase())
       )
     : filteredByOutcome;
+
+  const visibleOutcomes = filteredOutcomes.slice(0, MAX_VISIBLE_CARDS);
+  const remainingCount = filteredOutcomes.length - MAX_VISIBLE_CARDS;
 
   const totalPredictions = filteredOutcomes.length;
   const correctPredictions = filteredOutcomes.filter((item: any) => item.outcome === 'correct').length;
@@ -902,7 +1216,7 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
             </Box>
 
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: alpha('#4CAF50', 0.1), p: 1.5, borderRadius: 2, mb: 2 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary">Edge:</Typography>
+              <Typography variant="caption" fontWeight="bold" color="text.secondary">Advantage:</Typography>
               <Typography variant="body2" fontWeight="bold" color={
                 (outcome.edge || '').startsWith('+') ? '#4CAF50' : '#FF4444'
               }>
@@ -987,7 +1301,6 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
       "Players with positive regression",
       "Underdog props with best edge",
       "Rookie performances in NBA and NHL",
-      // Team prop examples
       "NBA team points over 105.5",
       "NBA team rebounds under 40.5",
       "MLB team runs over 4.5",
@@ -1002,9 +1315,9 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
         </Box>
         <Typography variant="body1" color="text.secondary" paragraph>
           Generate custom predictions using advanced AI models – try natural language queries.
+          Each generation uses 1 credit. You have {generatorCredits} credits remaining.
         </Typography>
 
-        {/* Sample Prompts Dropdown */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" gutterBottom>Choose a Sample Prompt</Typography>
           <FormControl fullWidth>
@@ -1016,6 +1329,7 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
               onChange={(e) => setCustomQuery(e.target.value as string)}
               sx={{ borderRadius: 2, bgcolor: 'background.paper' }}
             >
+              <MenuItem value="" disabled>Select a prompt</MenuItem>
               {samplePrompts.map((prompt, index) => (
                 <MenuItem key={index} value={prompt}>
                   {prompt}
@@ -1025,7 +1339,6 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
           </FormControl>
         </Box>
 
-        {/* Custom Query Input */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" gutterBottom>Custom Prediction Query</Typography>
           <TextField
@@ -1044,9 +1357,9 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
             size="large"
             startIcon={<AutoAwesomeIcon />}
             onClick={debouncedGenerate}
-            disabled={!customQuery.trim() || generatingPredictions}
+            disabled={!customQuery.trim() || generatingPredictions || generatorCredits <= 0}
           >
-            {generatingPredictions ? 'Generating...' : 'Generate AI Prediction'}
+            {generatingPredictions ? 'Generating...' : `Generate AI Prediction (${generatorCredits} credits left)`}
           </Button>
         </Box>
 
@@ -1111,7 +1424,7 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
                   { label: 'Total Predictions', value: totalPredictions, color: '#059669' },
                   { label: 'Hit Rate', value: `${winRate}%`, color: '#10b981' },
                   { label: 'Avg Edge', value: '+8.4%', color: '#4CAF50' },
-                  { label: 'Profit (100u)', value: '$1240', color: '#10b981' },
+                  { label: 'Simulated Gain (100u)', value: '$1240', color: '#10b981' },
                   { label: 'Data Source', value: dataSource, color: '#3b82f6' },
                   { label: 'Cache Status', value: cacheInfo.isCached ? 'Cached' : 'Live', color: cacheInfo.isCached ? '#f59e0b' : '#10b981' }
                 ].map((stat, idx) => (
@@ -1186,6 +1499,26 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
           </Box>
         </Box>
       </Box>
+
+      {/* Credits Alert – always show balance */}
+      <Alert severity={generatorCredits > 0 ? "info" : "warning"} sx={{ mb: 3 }}>
+        <AlertTitle>
+          {generatorCredits > 0 ? `✨ You have ${generatorCredits} generator credits remaining` : "⚠️ No generator credits left"}
+        </AlertTitle>
+        Generating a new set of predictions uses 1 credit. Viewing the top 5 projected picks above is free.
+        {generatorCredits === 0 && " Purchase credits to generate predictions."}
+        <Box sx={{ mt: 1 }}>
+          <Button size="small" variant="outlined" onClick={() => setShowCreditsModal(true)} startIcon={<CreditCardIcon />}>
+            Buy Credits
+          </Button>
+          <Button size="small" variant="contained" sx={{ ml: 1 }} onClick={() => setShowUpgradeModal(true)}>
+            Upgrade to Premium
+          </Button>
+          <Button size="small" variant="text" onClick={refreshCredits} startIcon={<RefreshIcon />}>
+            Refresh ({generatorCredits})
+          </Button>
+        </Box>
+      </Alert>
 
       {/* Data Freshness Banner */}
       <Paper sx={{ p: 2, mb: 3, borderRadius: 2, bgcolor: '#1a2a1a', border: '1px solid #2a3a2a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1269,7 +1602,7 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
 
       {/* Market Type Filter */}
       <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <Typography variant="subtitle2" sx={{ color: '#888', mb: 1, fontWeight: 600, letterSpacing: 0.5 }}>BET TYPE</Typography>
+        <Typography variant="subtitle2" sx={{ color: '#888', mb: 1, fontWeight: 600, letterSpacing: 0.5 }}>SELECTION TYPE</Typography>
         <Stack direction="row" spacing={1} sx={{ overflowX: 'auto', pb: 0.5 }}>
           {['standard', 'alt_line', 'special', 'futures'].map(type => (
             <Chip key={type} label={type === 'alt_line' ? 'Alt Lines' : type === 'standard' ? 'Standard Props' : type === 'special' ? 'Specials' : 'Futures'} onClick={() => setMarketType(type as any)} sx={{ bgcolor: marketType === type ? '#4CAF50' : '#2a2a2a', color: marketType === type ? 'white' : '#888', '&:hover': { bgcolor: marketType === type ? '#3d8c40' : '#333' } }} />
@@ -1279,10 +1612,30 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
 
       {/* Collapsible Results Section */}
       <Collapse in={showResults}>
-        {filteredOutcomes.length > 0 ? (
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            {filteredOutcomes.map((outcome: any, index: number) => renderOutcomeCard(outcome, index))}
-          </Grid>
+        {visibleOutcomes.length > 0 ? (
+          <>
+            <Grid container spacing={3} sx={{ mb: 4 }}>
+              {visibleOutcomes.map((outcome: any, index: number) => renderOutcomeCard(outcome, index))}
+            </Grid>
+            
+            {remainingCount > 0 && (
+              <Paper sx={{ p: 3, textAlign: 'center', mb: 4, borderRadius: 2, bgcolor: alpha('#3b82f6', 0.05) }}>
+                <Typography variant="body1" color="text.secondary" gutterBottom>
+                  🔒 + {remainingCount} more {remainingCount === 1 ? 'prediction' : 'predictions'} available
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Use generator credits to unlock additional predictions. Each generation gives you 5 new picks!
+                </Typography>
+                <Button 
+                  variant="outlined" 
+                  startIcon={<CreditCardIcon />}
+                  onClick={() => setShowCreditsModal(true)}
+                >
+                  Get More Credits
+                </Button>
+              </Paper>
+            )}
+          </>
         ) : (
           <Paper sx={{ p: 8, textAlign: 'center', mb: 4, borderRadius: 3 }}>
             <Box sx={{ width: 120, height: 120, borderRadius: '50%', bgcolor: alpha('#3b82f6', 0.1), display: 'flex', alignItems: 'center', justifyContent: 'center', mx: 'auto', mb: 3 }}>
@@ -1331,6 +1684,99 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
 
       <AnalyticsDashboard />
       
+      {/* Credits Modal */}
+      <Dialog open={showCreditsModal} onClose={() => setShowCreditsModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ backgroundColor: '#6C5CE7', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CreditCardIcon sx={{ mr: 1 }} /> Purchase Credits
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>
+            Generate predictions with credits. Each generation uses 1 credit.
+          </Typography>
+          <Grid container spacing={2}>
+            {[
+              { credits: 1, price: '$1.99', perPrediction: '$1.99', description: '1 Credit' },
+              { credits: 10, price: '$14.90', perPrediction: '$1.49', popular: true, description: '10 Credits' },
+              { credits: 20, price: '$25.80', perPrediction: '$1.29', description: '20 Credits' },
+              { credits: 50, price: '$44.50', perPrediction: '$0.89', bestValue: true, description: '50 Credits' }
+            ].map((option, index) => (
+              <Grid item xs={12} sm={6} key={index}>
+                <Card 
+                  sx={{ 
+                    border: option.popular ? '2px solid #6C5CE7' : option.bestValue ? '2px solid #10b981' : '1px solid #e5e7eb', 
+                    position: 'relative', 
+                    cursor: 'pointer',
+                    '&:hover': { transform: 'translateY(-2px)', transition: 'transform 0.2s' }
+                  }}
+                  onClick={() => handleCreditsCheckout(option.credits)}
+                >
+                  {option.popular && <Chip label="POPULAR" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#6C5CE7', color: 'white' }} />}
+                  {option.bestValue && <Chip label="BEST VALUE" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#10b981', color: 'white' }} />}
+                  <CardContent sx={{ textAlign: 'center', pt: option.popular || option.bestValue ? 4 : 2 }}>
+                    <Typography variant="h6" fontWeight="bold">{option.description}</Typography>
+                    <Typography variant="h4" fontWeight="bold" color="primary" sx={{ my: 1 }}>{option.price}</Typography>
+                    <Typography variant="caption" color="text.secondary">{option.perPrediction} per credit</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
+          <Button onClick={() => setShowCreditsModal(false)} sx={{ color: '#64748b' }}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Upgrade Modal */}
+      <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ backgroundColor: '#6C5CE7', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <StarIcon sx={{ mr: 1 }} /> Upgrade to Premium
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>
+            Get unlimited AI prediction generation and premium features!
+          </Typography>
+          <Grid container spacing={2}>
+            {[
+              { planId: 'starter', name: 'Starter Plan', price: '$5.99/month', features: ['Unlimited Predictions', 'Priority Support'], popular: false },
+              { planId: 'generator', name: 'Generator Plan', price: '$39.99/month', features: ['Unlimited Predictions', 'Priority Support', 'Early Access', '8 Daily AI Picks'], popular: true }
+            ].map((option, index) => (
+              <Grid item xs={12} key={index}>
+                <Card 
+                  sx={{ 
+                    border: option.popular ? '2px solid #6C5CE7' : '1px solid #e5e7eb', 
+                    position: 'relative', 
+                    cursor: 'pointer',
+                    '&:hover': { transform: 'translateY(-2px)', transition: 'transform 0.2s' }
+                  }}
+                  onClick={() => { navigate('/subscription'); setShowUpgradeModal(false); }}
+                >
+                  {option.popular && <Chip label="POPULAR" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#6C5CE7', color: 'white' }} />}
+                  <CardContent sx={{ textAlign: 'center', pt: option.popular ? 4 : 2 }}>
+                    <Typography variant="h6" fontWeight="bold">{option.name}</Typography>
+                    <Typography variant="h4" fontWeight="bold" color="primary" sx={{ my: 1 }}>{option.price}</Typography>
+                    <Box sx={{ mt: 2 }}>
+                      {option.features.map((feature, idx) => (
+                        <Typography key={idx} variant="body2" sx={{ color: '#94a3b8', mb: 0.5 }}>
+                          ✓ {feature}
+                        </Typography>
+                      ))}
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
+          <Button onClick={() => setShowUpgradeModal(false)} sx={{ color: '#64748b' }}>Maybe Later</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Simulation Modal */}
       <Dialog open={showSimulationModal} onClose={() => !generatingPredictions && setShowSimulationModal(false)}>
         <DialogTitle>{generatingPredictions ? 'Generating AI Predictions...' : 'AI Predictions Generated!'}</DialogTitle>
@@ -1363,13 +1809,23 @@ const formattedAnalysis = selections.map((item: any, idx: number) => {
         </DialogActions>
       </Dialog>
 
-      <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={() => setSnackbarOpen(false)} message={snackbarMessage} action={<IconButton size="small" aria-label="close" color="inherit" onClick={() => setSnackbarOpen(false)}><CloseIcon fontSize="small" /></IconButton>} />
+      <Snackbar 
+        open={snackbarOpen} 
+        autoHideDuration={6000} 
+        onClose={() => setSnackbarOpen(false)} 
+        message={snackbarMessage} 
+        action={
+          <IconButton size="small" aria-label="close" color="inherit" onClick={() => setSnackbarOpen(false)}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        } 
+      />
     </Container>
   );
 };
 
 // ==============================
-// Main Component (ProtectedRoute removed)
+// Main Component
 // ==============================
 
 const PredictionsOutcomeScreen: React.FC = () => {

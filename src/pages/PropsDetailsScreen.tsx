@@ -89,7 +89,7 @@ import { format, formatDistance, subDays } from 'date-fns';
 import { useBookmarks } from '../context/BookmarkContext';
 import { useNotifications } from '../context/NotificationContext';
 import { playerPropsApi } from '../services/playerProps';
-import { loadParlayTemplates, saveParlayTemplate } from '../services/storageService';
+import { loadComboTemplates, saveComboTemplate } from '../services/storageService';
 
 // =============================================
 // TYPES & INTERFACES
@@ -199,7 +199,7 @@ const PropsDetailsScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedBookmaker, setSelectedBookmaker] = useState('best');
   const [customLine, setCustomLine] = useState<number>(0);
-  const [customStake, setCustomStake] = useState<number>(10);
+  const [customAmount, setCustomAmount] = useState<number>(10);
   const [notificationEnabled, setNotificationEnabled] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -227,28 +227,28 @@ const PropsDetailsScreen: React.FC = () => {
         action: 'Strong Over',
         color: 'success',
         icon: <TrendingUpIcon />,
-        description: 'Significant positive edge - recommended play',
+        description: 'Significant positive advantage - recommended play',
       };
     } else if (propData.edge > 5) {
       return {
         action: 'Over',
         color: 'info',
         icon: <TrendingUpIcon />,
-        description: 'Positive edge - consider playing',
+        description: 'Positive advantage - consider playing',
       };
     } else if (propData.edge > 0) {
       return {
         action: 'Lean Over',
         color: 'warning',
         icon: <TrendingFlatIcon />,
-        description: 'Slight edge - monitor',
+        description: 'Slight advantage - monitor',
       };
     } else {
       return {
         action: 'Avoid',
         color: 'error',
         icon: <TrendingDownIcon />,
-        description: 'No edge - consider other props',
+        description: 'No advantage - consider other props',
       };
     }
   }, [propData]);
@@ -258,11 +258,11 @@ const PropsDetailsScreen: React.FC = () => {
 
     const odds = propData.edge > 0 ? propData.overPrice : propData.underPrice;
     if (odds > 0) {
-      return customStake * (odds / 100);
+      return customAmount * (odds / 100);
     } else {
-      return customStake * (100 / Math.abs(odds));
+      return customAmount * (100 / Math.abs(odds));
     }
-  }, [propData, customStake]);
+  }, [propData, customAmount]);
 
   const impliedProbability = useMemo(() => {
     if (!propData) return 0;
@@ -574,7 +574,7 @@ const PropsDetailsScreen: React.FC = () => {
     if (navigator.share) {
       navigator.share({
         title: `${propData?.playerName} ${propData?.statType} Prop`,
-        text: `${propData?.playerName} ${propData?.statType}: Over/Under ${propData?.line} (${propData?.edge > 0 ? '+' : ''}${propData?.edge}% edge)`,
+        text: `${propData?.playerName} ${propData?.statType}: Over/Under ${propData?.line} (${propData?.edge > 0 ? '+' : ''}${propData?.edge}% advantage)`,
         url: window.location.href,
       }).catch(console.error);
     } else {
@@ -583,13 +583,13 @@ const PropsDetailsScreen: React.FC = () => {
     }
   };
 
-  const handleAddToParlay = () => notifications.success('Added', 'Prop added to parlay builder');
+  const handleAddToCombo = () => notifications.success('Added', 'Prop added to parlay builder');
   const handleSaveTemplate = () => {
     if (!propData) return;
     const template = {
       id: `template-${Date.now()}`,
       name: `${propData.playerName} ${propData.statType} Prop`,
-      description: `${propData.statType} Over/Under ${propData.line} - ${propData.edge}% edge`,
+      description: `${propData.statType} Over/Under ${propData.line} - ${propData.edge}% advantage`,
       sport: propData.sport,
       type: 'player_props',
       legs: [{
@@ -615,13 +615,13 @@ const PropsDetailsScreen: React.FC = () => {
       isFavorite: false,
       isCustom: true,
     };
-    saveParlayTemplate(template);
-    notifications.success('Template Saved', 'Parlay template saved successfully');
+    saveComboTemplate(template);
+    notifications.success('Template Saved', 'Combo template saved successfully');
   };
 
   const handleBookmakerChange = (event: SelectChangeEvent) => setSelectedBookmaker(event.target.value);
   const handleCustomLineChange = (_event: Event, value: number | number[]) => setCustomLine(value as number);
-  const handleStakeChange = (event: React.ChangeEvent<HTMLInputElement>) => setCustomStake(parseFloat(event.target.value) || 0);
+  const handleAmountChange = (event: React.ChangeEvent<HTMLInputElement>) => setCustomAmount(parseFloat(event.target.value) || 0);
   const handleTimeframeChange = (event: SelectChangeEvent) => setChartTimeframe(event.target.value as any);
 
   // =============================================
@@ -793,14 +793,14 @@ const PropsDetailsScreen: React.FC = () => {
                   <Typography variant="h2" component="div" sx={{ fontWeight: 'bold', my: 1, color: '#fff' }}>{propData.line?.toFixed(1) ?? '—'}</Typography>
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
                     <Box><Typography variant="caption" sx={{ color: '#aaa' }}>Projection</Typography><Typography variant="h6" sx={{ color: theme.palette.primary.main }}>{propData.projection?.toFixed(1) ?? '—'}</Typography></Box>
-                    <Box><Typography variant="caption" sx={{ color: '#aaa' }}>Edge</Typography><Typography variant="h6" sx={{ color: propData.edge > 0 ? '#4caf50' : '#f44336' }}>{propData.edge > 0 ? '+' : ''}{propData.edge?.toFixed(1)}%</Typography></Box>
+                    <Box><Typography variant="caption" sx={{ color: '#aaa' }}>Advantage</Typography><Typography variant="h6" sx={{ color: propData.edge > 0 ? '#4caf50' : '#f44336' }}>{propData.edge > 0 ? '+' : ''}{propData.edge?.toFixed(1)}%</Typography></Box>
                   </Box>
                   {renderConfidenceBadge(propData.confidence)}
                 </Box>
               </Grid>
               <Grid item xs={12} sm={6}>
                 <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="overline" sx={{ color: '#aaa' }}>Best Available Odds</Typography>
+                  <Typography variant="overline" sx={{ color: '#aaa' }}>Best Available Multipliers</Typography>
                   <Box sx={{ display: 'flex', justifyContent: 'center', gap: 3, my: 2 }}>
                     <Box sx={{ p: 2, borderRadius: 2, bgcolor: propData.edge > 0 ? alpha(theme.palette.success.main, 0.1) : 'transparent', border: 1, borderColor: propData.edge > 0 ? 'success.main' : '#333', minWidth: 120 }}>
                       <Typography variant="caption" sx={{ color: '#aaa' }}>Over {propData.line}</Typography>
@@ -824,7 +824,7 @@ const PropsDetailsScreen: React.FC = () => {
             </Grid>
             <Divider sx={{ my: 3, borderColor: '#333' }} />
             <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button variant="contained" color={propData.edge > 0 ? 'success' : 'primary'} startIcon={<CasinoIcon />} onClick={handleAddToParlay}>Add to Parlay</Button>
+              <Button variant="contained" color={propData.edge > 0 ? 'success' : 'primary'} startIcon={<CasinoIcon />} onClick={handleAddToCombo}>Add to Combo</Button>
               <Button variant="outlined" startIcon={<StarIcon />} onClick={handleSaveTemplate} sx={{ color: '#fff', borderColor: '#555' }}>Save as Template</Button>
             </Box>
           </Paper>

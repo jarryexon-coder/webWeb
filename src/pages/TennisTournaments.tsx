@@ -1,3 +1,4 @@
+// src/pages/TennisTournaments.tsx - Starter package required
 import React, { useMemo, useState } from 'react';
 import {
   Container,
@@ -37,14 +38,17 @@ import {
   Grass as GrassIcon,
   AcUnit as HardIcon,
   Spa as ClayIcon,
+  MonetizationOn as MoneyIcon,
+  Public as WorldIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
+import { PlanFeaturesDisplay } from '../components/PlanFeaturesDisplay';
 
 // ----------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------
-
 interface TennisTournament {
   id: string;
   name: string;
@@ -59,373 +63,87 @@ interface TennisTournament {
   defending_champion?: string;
 }
 
-interface TennisTournamentsData {
-  tournaments: TennisTournament[];
-  last_updated: string;
-  is_real_data: boolean;
-}
-
-interface TennisApiResponse {
-  success: boolean;
-  data: TennisTournamentsData;
-  message?: string;
-}
-
 // ----------------------------------------------------------------------
-// Mock Data (fallback)
+// Mock Data
 // ----------------------------------------------------------------------
 const getMockTennisTournaments = (): TennisTournament[] => [
-  {
-    id: '1',
-    name: 'Australian Open',
-    location: 'Melbourne',
-    country: 'Australia',
-    surface: 'Hard',
-    category: 'Grand Slam',
-    start_date: '2026-01-12',
-    end_date: '2026-01-26',
-    prize_money_usd: 76500000,
-    draw_size: 128,
-    defending_champion: 'Jannik Sinner',
-  },
-  {
-    id: '2',
-    name: 'Roland Garros',
-    location: 'Paris',
-    country: 'France',
-    surface: 'Clay',
-    category: 'Grand Slam',
-    start_date: '2026-05-25',
-    end_date: '2026-06-08',
-    prize_money_usd: 49600000,
-    draw_size: 128,
-    defending_champion: 'Carlos Alcaraz',
-  },
-  {
-    id: '3',
-    name: 'Wimbledon',
-    location: 'London',
-    country: 'United Kingdom',
-    surface: 'Grass',
-    category: 'Grand Slam',
-    start_date: '2026-06-29',
-    end_date: '2026-07-12',
-    prize_money_usd: 62000000,
-    draw_size: 128,
-    defending_champion: 'Carlos Alcaraz',
-  },
-  {
-    id: '4',
-    name: 'US Open',
-    location: 'New York',
-    country: 'USA',
-    surface: 'Hard',
-    category: 'Grand Slam',
-    start_date: '2026-08-25',
-    end_date: '2026-09-08',
-    prize_money_usd: 65000000,
-    draw_size: 128,
-    defending_champion: 'Novak Djokovic',
-  },
-  {
-    id: '5',
-    name: 'Indian Wells',
-    location: 'Indian Wells',
-    country: 'USA',
-    surface: 'Hard',
-    category: 'ATP Masters 1000',
-    start_date: '2026-03-04',
-    end_date: '2026-03-17',
-    prize_money_usd: 17700000,
-    draw_size: 96,
-    defending_champion: 'Carlos Alcaraz',
-  },
-  {
-    id: '6',
-    name: 'Miami Open',
-    location: 'Miami',
-    country: 'USA',
-    surface: 'Hard',
-    category: 'ATP Masters 1000',
-    start_date: '2026-03-19',
-    end_date: '2026-03-30',
-    prize_money_usd: 16400000,
-    draw_size: 96,
-    defending_champion: 'Jannik Sinner',
-  },
-  {
-    id: '7',
-    name: 'Monte-Carlo Masters',
-    location: 'Monte Carlo',
-    country: 'Monaco',
-    surface: 'Clay',
-    category: 'ATP Masters 1000',
-    start_date: '2026-04-07',
-    end_date: '2026-04-13',
-    prize_money_usd: 10800000,
-    draw_size: 56,
-    defending_champion: 'Stefanos Tsitsipas',
-  },
-  {
-    id: '8',
-    name: 'Madrid Open',
-    location: 'Madrid',
-    country: 'Spain',
-    surface: 'Clay',
-    category: 'ATP Masters 1000',
-    start_date: '2026-04-22',
-    end_date: '2026-05-04',
-    prize_money_usd: 16500000,
-    draw_size: 96,
-    defending_champion: 'Andrey Rublev',
-  },
-  {
-    id: '9',
-    name: 'Italian Open',
-    location: 'Rome',
-    country: 'Italy',
-    surface: 'Clay',
-    category: 'ATP Masters 1000',
-    start_date: '2026-05-06',
-    end_date: '2026-05-18',
-    prize_money_usd: 16200000,
-    draw_size: 96,
-    defending_champion: 'Alexander Zverev',
-  },
-  {
-    id: '10',
-    name: 'Canadian Open',
-    location: 'Montreal/Toronto',
-    country: 'Canada',
-    surface: 'Hard',
-    category: 'ATP Masters 1000',
-    start_date: '2026-08-04',
-    end_date: '2026-08-10',
-    prize_money_usd: 16500000,
-    draw_size: 56,
-    defending_champion: 'Alexei Popyrin',
-  },
-  {
-    id: '11',
-    name: 'Cincinnati Masters',
-    location: 'Cincinnati',
-    country: 'USA',
-    surface: 'Hard',
-    category: 'ATP Masters 1000',
-    start_date: '2026-08-11',
-    end_date: '2026-08-17',
-    prize_money_usd: 16500000,
-    draw_size: 56,
-    defending_champion: 'Jannik Sinner',
-  },
-  {
-    id: '12',
-    name: 'Shanghai Masters',
-    location: 'Shanghai',
-    country: 'China',
-    surface: 'Hard',
-    category: 'ATP Masters 1000',
-    start_date: '2026-10-05',
-    end_date: '2026-10-12',
-    prize_money_usd: 16500000,
-    draw_size: 96,
-    defending_champion: 'Daniil Medvedev',
-  },
-  {
-    id: '13',
-    name: 'Paris Masters',
-    location: 'Paris',
-    country: 'France',
-    surface: 'Hard (indoor)',
-    category: 'ATP Masters 1000',
-    start_date: '2026-10-27',
-    end_date: '2026-11-02',
-    prize_money_usd: 16500000,
-    draw_size: 56,
-    defending_champion: 'Ugo Humbert',
-  },
-  {
-    id: '14',
-    name: 'ATP Finals',
-    location: 'Turin',
-    country: 'Italy',
-    surface: 'Hard (indoor)',
-    category: 'Tour Finals',
-    start_date: '2026-11-10',
-    end_date: '2026-11-17',
-    prize_money_usd: 15000000,
-    draw_size: 8,
-    defending_champion: 'Novak Djokovic',
-  },
-  // ... (rest of mock tournaments omitted for brevity, but they exist in original)
+  { id: '1', name: 'Australian Open', location: 'Melbourne', country: 'Australia', surface: 'Hard', category: 'Grand Slam', start_date: '2026-01-12', end_date: '2026-01-26', prize_money_usd: 76500000, draw_size: 128, defending_champion: 'Jannik Sinner' },
+  { id: '2', name: 'Roland Garros', location: 'Paris', country: 'France', surface: 'Clay', category: 'Grand Slam', start_date: '2026-05-25', end_date: '2026-06-08', prize_money_usd: 49600000, draw_size: 128, defending_champion: 'Carlos Alcaraz' },
+  { id: '3', name: 'Wimbledon', location: 'London', country: 'United Kingdom', surface: 'Grass', category: 'Grand Slam', start_date: '2026-06-29', end_date: '2026-07-12', prize_money_usd: 62000000, draw_size: 128, defending_champion: 'Carlos Alcaraz' },
+  { id: '4', name: 'US Open', location: 'New York', country: 'USA', surface: 'Hard', category: 'Grand Slam', start_date: '2026-08-25', end_date: '2026-09-08', prize_money_usd: 65000000, draw_size: 128, defending_champion: 'Novak Djokovic' },
+  { id: '5', name: 'Indian Wells', location: 'Indian Wells', country: 'USA', surface: 'Hard', category: 'ATP Masters 1000', start_date: '2026-03-04', end_date: '2026-03-17', prize_money_usd: 17700000, draw_size: 96, defending_champion: 'Carlos Alcaraz' },
 ];
 
-const getMockTournamentsData = (): TennisTournamentsData => ({
-  tournaments: getMockTennisTournaments(),
-  last_updated: new Date().toISOString(),
-  is_real_data: false,
-});
-
 // ----------------------------------------------------------------------
-// Validation
+// API function with fallback (using /api/atp/tournaments)
 // ----------------------------------------------------------------------
-const requiredFields: (keyof TennisTournament)[] = [
-  'name',
-  'location',
-  'country',
-  'surface',
-  'category',
-  'start_date',
-  'end_date',
-  'prize_money_usd',
-  'draw_size',
-];
-
-function isTournamentComplete(t: any): t is TennisTournament {
-  return requiredFields.every(field => t[field] != null);
-}
-
-function areTournamentsComplete(tournaments: any[]): tournaments is TennisTournament[] {
-  return tournaments.length > 0 && tournaments.every(isTournamentComplete);
-}
-
-// ----------------------------------------------------------------------
-// Helper: convert prize money to USD (approximate)
-// ----------------------------------------------------------------------
-const currencyToUSD: Record<string, number> = {
-  '$': 1.0,
-  '€': 1.08,
-  '£': 1.25,
-  'A$': 0.65,
-  'C$': 0.73,
-  '¥': 0.0067,
-};
-
-function convertToUSD(amount: number, currency: string): number {
-  const rate = currencyToUSD[currency] || 1.0;
-  return amount * rate;
-}
-
-// ----------------------------------------------------------------------
-// API function with fallback – now using /api/atp/tournaments
-// ----------------------------------------------------------------------
-const fetchTennisTournaments = async (year?: number, surface?: string): Promise<TennisApiResponse> => {
+const fetchTennisTournaments = async (year?: number, surface?: string): Promise<{ tournaments: TennisTournament[]; is_real_data: boolean }> => {
   try {
-    // Build query params
+    const baseUrl = import.meta.env.VITE_API_BASE_PYTHON || 'https://python-api-fresh-production.up.railway.app';
     const params = new URLSearchParams();
     if (year) params.append('season', year.toString());
     if (surface && surface !== 'all') params.append('surface', surface);
-    params.append('per_page', '100'); // get as many as possible
-
-    const baseUrl = import.meta.env.VITE_API_BASE_PYTHON || 'https://python-api-fresh-production.up.railway.app';
-    const url = `${baseUrl}/api/atp/tournaments?${params.toString()}`;    
+    params.append('per_page', '100');
+    const url = `${baseUrl}/api/atp/tournaments?${params.toString()}`;
     const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`API returned ${response.status}`);
     const json = await response.json();
-
-    // The backend returns the balldontlie structure wrapped in our standard response.
     if (json.success && json.data && Array.isArray(json.data.data)) {
-      const rawTournaments = json.data.data; // balldontlie tournaments array
-
-      // Transform each tournament to our TennisTournament interface
-      const transformed: TennisTournament[] = rawTournaments.map((t: any) => {
-        // Extract country from location if possible (fallback to "Unknown")
-        const locationParts = t.location ? t.location.split(',') : [];
-        const country = locationParts.length > 1 ? locationParts[1].trim() : t.location || 'Unknown';
-
-        return {
-          id: String(t.id),
-          name: t.name || 'Unknown Tournament',
-          location: t.location || 'Unknown',
-          country,
-          surface: t.surface || 'Hard',
-          category: t.category || 'Other',
-          start_date: t.start_date || '',
-          end_date: t.end_date || '',
-          prize_money_usd: convertToUSD(t.prize_money || 0, t.prize_currency || '$'),
-          draw_size: t.draw_size || 0,
-          // defending_champion not available from this endpoint
-        };
-      });
-
-      return {
-        success: true,
-        data: {
-          tournaments: transformed,
-          last_updated: new Date().toISOString(),
-          is_real_data: true,
-        },
-      };
+      const raw = json.data.data;
+      const transformed = raw.map((t: any) => ({
+        id: String(t.id),
+        name: t.name || 'Unknown',
+        location: t.location || 'Unknown',
+        country: t.location?.split(',')[1]?.trim() || 'Unknown',
+        surface: t.surface || 'Hard',
+        category: t.category || 'Other',
+        start_date: t.start_date || '',
+        end_date: t.end_date || '',
+        prize_money_usd: t.prize_money ? parseFloat(String(t.prize_money).replace(/[^0-9.]/g, '')) : 0,
+        draw_size: t.draw_size || 0,
+        defending_champion: undefined,
+      }));
+      return { tournaments: transformed, is_real_data: true };
     }
-
-    // If data format is unexpected, fall back to mock
-    console.warn('Unexpected API response format, using mock data');
-    return {
-      success: true,
-      data: getMockTournamentsData(),
-    };
+    console.warn('Unexpected API response, using mock');
+    return { tournaments: getMockTennisTournaments(), is_real_data: false };
   } catch (error) {
-    console.error('Error fetching ATP tournaments:', error);
-    return {
-      success: true,
-      data: getMockTournamentsData(),
-    };
+    console.error('Error fetching tennis tournaments:', error);
+    return { tournaments: getMockTennisTournaments(), is_real_data: false };
   }
 };
 
 // ----------------------------------------------------------------------
-// Helper Components (defensive) – unchanged
+// Helper Components
 // ----------------------------------------------------------------------
 const SurfaceIcon = ({ surface }: { surface?: string }) => {
-  if (!surface) return <TennisIcon fontSize="small" />;
-  switch (surface) {
-    case 'Grass':
-      return <GrassIcon fontSize="small" />;
-    case 'Clay':
-      return <ClayIcon fontSize="small" />;
-    case 'Hard':
-      return <HardIcon fontSize="small" />;
-    default:
-      return <TennisIcon fontSize="small" />;
-  }
+  if (surface === 'Grass') return <GrassIcon fontSize="small" />;
+  if (surface === 'Clay') return <ClayIcon fontSize="small" />;
+  if (surface === 'Hard') return <HardIcon fontSize="small" />;
+  return <TennisIcon fontSize="small" />;
 };
-
 const SurfaceChip = ({ surface }: { surface?: string }) => {
   if (!surface) return <Chip label="—" size="small" variant="outlined" />;
-  let color: 'success' | 'warning' | 'default' | 'primary' = 'default';
+  let color: 'success' | 'warning' | 'primary' | 'default' = 'default';
   if (surface === 'Grass') color = 'success';
   else if (surface === 'Clay') color = 'warning';
   else if (surface === 'Hard') color = 'primary';
-  return (
-    <Chip
-      icon={<SurfaceIcon surface={surface} />}
-      label={surface}
-      size="small"
-      color={color}
-      variant="outlined"
-    />
-  );
+  return <Chip icon={<SurfaceIcon surface={surface} />} label={surface} size="small" color={color} variant="outlined" />;
 };
-
 const CategoryChip = ({ category }: { category?: string }) => {
-  if (!category) return <Chip label="N/A" size="small" color="default" />;
-
+  if (!category) return <Chip label="N/A" size="small" />;
   let color: 'primary' | 'secondary' | 'success' | 'default' = 'default';
   if (category.includes('Grand Slam')) color = 'primary';
-  else if (category.includes('Masters') || category.includes('Finals')) color = 'secondary';
+  else if (category.includes('Masters')) color = 'secondary';
   else if (category.includes('500')) color = 'success';
-
   return <Chip label={category} size="small" color={color} />;
 };
 
 // ----------------------------------------------------------------------
-// Main Content Component
+// Main Component
 // ----------------------------------------------------------------------
 const TennisTournamentsContent: React.FC = () => {
+  const { profile } = useAuth();
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [tabValue, setTabValue] = useState<number>(0);
   const [surfaceFilter, setSurfaceFilter] = useState<string>('all');
@@ -435,152 +153,62 @@ const TennisTournamentsContent: React.FC = () => {
     return [current - 1, current, current + 1];
   }, []);
 
-  const {
-    data: apiResponse,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['tennisTournaments', selectedYear, surfaceFilter],
     queryFn: () => fetchTennisTournaments(selectedYear, surfaceFilter !== 'all' ? surfaceFilter : undefined),
     staleTime: 1000 * 60 * 10,
-    refetchOnWindowFocus: false,
   });
 
-  // Safely extract tournaments
-  const tournaments = useMemo(() => {
-    if (!apiResponse) return [];
-    if (apiResponse.data && Array.isArray(apiResponse.data.tournaments)) {
-      return apiResponse.data.tournaments;
-    }
-    if (Array.isArray(apiResponse)) return apiResponse;
-    return [];
-  }, [apiResponse]);
+  const tournaments = data?.tournaments || [];
+  const isRealData = data?.is_real_data ?? false;
 
-  const lastUpdated = apiResponse?.data?.last_updated || new Date().toISOString();
-  const isRealData = apiResponse?.data?.is_real_data ?? false;
-
-  // Filter by surface (if not "all") – API already filters, but we keep for safety
   const filteredTournaments = useMemo(() => {
-    if (!Array.isArray(tournaments)) return [];
     if (surfaceFilter === 'all') return tournaments;
     return tournaments.filter(t => t.surface === surfaceFilter);
   }, [tournaments, surfaceFilter]);
 
-  const handleYearChange = (event: SelectChangeEvent) => {
-    setSelectedYear(parseInt(event.target.value, 10));
-  };
+  const handleYearChange = (event: SelectChangeEvent) => setSelectedYear(parseInt(event.target.value, 10));
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => setTabValue(newValue);
+  const handleSurfaceChange = (event: SelectChangeEvent) => setSurfaceFilter(event.target.value);
 
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
-  const handleSurfaceChange = (event: SelectChangeEvent) => {
-    setSurfaceFilter(event.target.value);
-  };
-
-  if (isLoading) {
-    return (
-      <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
-        <Typography variant="h4" gutterBottom>
-          Tennis Tournaments
-        </Typography>
-        <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Skeleton variant="rounded" height={80} />
-          </Grid>
-          <Grid item xs={12}>
-            <Skeleton variant="rounded" height={400} />
-          </Grid>
-        </Grid>
-      </Container>
-    );
-  }
-
-  // Only show error if we have no tournaments and there's an error
-  if ((error || apiResponse?.success === false) && tournaments.length === 0) {
-    return (
-      <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={() => refetch()}>
-              Retry
-            </Button>
-          }
-        >
-          Error loading tennis tournaments: {(error as Error)?.message || apiResponse?.message || 'Unknown error'}
-        </Alert>
-      </Container>
-    );
-  }
+  if (isLoading && !tournaments.length) return <SkeletonLoader />;
+  if (error && !tournaments.length) return <ErrorView onRetry={refetch} />;
 
   return (
     <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
-      {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box display="flex" alignItems="center" gap={2}>
           <TennisIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-          <Typography variant="h4" fontWeight="bold">
-            Tennis Tournaments
-          </Typography>
-          <Chip
-            icon={<CalendarIcon />}
-            label={`Updated: ${new Date(lastUpdated).toLocaleDateString()}`}
-            variant="outlined"
-          />
+          <Typography variant="h4" fontWeight="bold">Tennis Tournaments</Typography>
+          <Chip icon={<CalendarIcon />} label={`Updated: ${new Date().toLocaleDateString()}`} variant="outlined" />
         </Box>
         <Box display="flex" gap={2}>
           <FormControl sx={{ minWidth: 100 }} size="small">
-            <InputLabel id="year-select-label">Year</InputLabel>
-            <Select
-              labelId="year-select-label"
-              value={String(selectedYear)}
-              label="Year"
-              onChange={handleYearChange}
-            >
-              {yearOptions.map((year) => (
-                <MenuItem key={year} value={year}>
-                  {year}
-                </MenuItem>
-              ))}
+            <InputLabel>Year</InputLabel>
+            <Select value={String(selectedYear)} label="Year" onChange={handleYearChange}>
+              {yearOptions.map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
             </Select>
           </FormControl>
-          <Tooltip title="Refresh">
-            <IconButton onClick={() => refetch()} color="primary">
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
+          <Tooltip title="Refresh"><IconButton onClick={() => refetch()} color="primary"><RefreshIcon /></IconButton></Tooltip>
         </Box>
       </Box>
 
-      {/* Data source notice */}
-      {!isRealData && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          Displaying simulated tournament data. Live data will appear when available.
-        </Alert>
-      )}
+      {profile && <PlanFeaturesDisplay currentPlan={profile.plan} compact />}
 
-      {/* Surface filter */}
+      {!isRealData && <Alert severity="info" sx={{ mb: 3 }}>Displaying simulated tournament data. Live data will appear when available.</Alert>}
+
       <Box display="flex" justifyContent="flex-end" mb={2}>
         <FormControl sx={{ minWidth: 150 }} size="small">
-          <InputLabel id="surface-filter-label">Surface</InputLabel>
-          <Select
-            labelId="surface-filter-label"
-            value={surfaceFilter}
-            label="Surface"
-            onChange={handleSurfaceChange}
-          >
+          <InputLabel>Surface</InputLabel>
+          <Select value={surfaceFilter} label="Surface" onChange={handleSurfaceChange}>
             <MenuItem value="all">All Surfaces</MenuItem>
             <MenuItem value="Hard">Hard</MenuItem>
             <MenuItem value="Clay">Clay</MenuItem>
             <MenuItem value="Grass">Grass</MenuItem>
-            <MenuItem value="Carpet">Carpet</MenuItem>
           </Select>
         </FormControl>
       </Box>
 
-      {/* Tabs – unchanged */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={tabValue} onChange={handleTabChange}>
           <Tab label="All Tournaments" />
@@ -590,59 +218,23 @@ const TennisTournamentsContent: React.FC = () => {
         </Tabs>
       </Box>
 
-      {/* Tab: All Tournaments (Table) */}
       {tabValue === 0 && (
         <>
-          <Typography variant="h6" gutterBottom>
-            {surfaceFilter === 'all' ? 'All Tournaments' : `${surfaceFilter} Court Tournaments`}
-          </Typography>
-          {filteredTournaments.length === 0 ? (
-            <Alert severity="info">No tournaments found for the selected filter.</Alert>
-          ) : (
+          <Typography variant="h6" gutterBottom>{surfaceFilter === 'all' ? 'All Tournaments' : `${surfaceFilter} Court Tournaments`}</Typography>
+          {filteredTournaments.length === 0 ? <Alert severity="info">No tournaments found.</Alert> : (
             <TableContainer component={Paper} variant="outlined">
               <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Tournament</TableCell>
-                    <TableCell align="center">Location</TableCell>
-                    <TableCell align="center">Surface</TableCell>
-                    <TableCell align="center">Category</TableCell>
-                    <TableCell align="center">Dates</TableCell>
-                    <TableCell align="center">Prize Money</TableCell>
-                    <TableCell align="center">Draw</TableCell>
-                    <TableCell align="center">Defending Champ</TableCell>
-                  </TableRow>
-                </TableHead>
+                <TableHead><TableRow><TableCell>Tournament</TableCell><TableCell align="center">Location</TableCell><TableCell align="center">Surface</TableCell><TableCell align="center">Category</TableCell><TableCell align="center">Dates</TableCell><TableCell align="center">Prize Money</TableCell><TableCell align="center">Draw</TableCell></TableRow></TableHead>
                 <TableBody>
-                  {filteredTournaments.map((tournament) => (
-                    <TableRow key={tournament.id} hover>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {tournament.name}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box display="flex" alignItems="center" gap={0.5}>
-                          <LocationIcon fontSize="small" />
-                          {tournament.location ?? '—'}, {tournament.country ?? '—'}
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        <SurfaceChip surface={tournament.surface} />
-                      </TableCell>
-                      <TableCell align="center">
-                        <CategoryChip category={tournament.category} />
-                      </TableCell>
-                      <TableCell align="center">
-                        {tournament.start_date && tournament.end_date
-                          ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                          : 'TBD'}
-                      </TableCell>
-                      <TableCell align="center">
-                        ${((tournament.prize_money_usd ?? 0) / 1e6).toFixed(1)}M
-                      </TableCell>
-                      <TableCell align="center">{tournament.draw_size ?? '—'}</TableCell>
-                      <TableCell align="center">{tournament.defending_champion ?? 'N/A'}</TableCell>
+                  {filteredTournaments.map(t => (
+                    <TableRow key={t.id} hover>
+                      <TableCell><Typography variant="body2" fontWeight="medium">{t.name}</Typography></TableCell>
+                      <TableCell align="center"><Box display="flex" alignItems="center" gap={0.5}><LocationIcon fontSize="small" />{t.location}, {t.country}</Box></TableCell>
+                      <TableCell align="center"><SurfaceChip surface={t.surface} /></TableCell>
+                      <TableCell align="center"><CategoryChip category={t.category} /></TableCell>
+                      <TableCell align="center">{t.start_date && t.end_date ? `${new Date(t.start_date).toLocaleDateString()} – ${new Date(t.end_date).toLocaleDateString()}` : 'TBD'}</TableCell>
+                      <TableCell align="center">${(t.prize_money_usd / 1e6).toFixed(1)}M</TableCell>
+                      <TableCell align="center">{t.draw_size || '—'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -652,166 +244,85 @@ const TennisTournamentsContent: React.FC = () => {
         </>
       )}
 
-      {/* Other tabs remain unchanged */}
       {tabValue === 1 && (
         <>
-          <Typography variant="h6" gutterBottom>
-            Grand Slam Tournaments
-          </Typography>
-          {filteredTournaments.filter(t => t.category?.includes('Grand Slam')).length === 0 ? (
-            <Alert severity="info">No Grand Slam tournaments found for the selected filter.</Alert>
-          ) : (
-            <Grid container spacing={3}>
-              {filteredTournaments
-                .filter((t) => t.category?.includes('Grand Slam'))
-                .map((tournament) => (
-                  <Grid item xs={12} md={6} key={tournament.id}>
-                    <Card variant="outlined">
-                      <CardContent>
-                        <Box display="flex" justifyContent="space-between" alignItems="center">
-                          <Typography variant="h6">{tournament.name}</Typography>
-                          <TrophyIcon color="primary" />
-                        </Box>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                          {tournament.location ?? '—'}, {tournament.country ?? '—'}
-                        </Typography>
-                        <Divider sx={{ my: 1 }} />
-                        <Box display="flex" justifyContent="space-between">
-                          <Typography variant="body2">Surface</Typography>
-                          <SurfaceChip surface={tournament.surface} />
-                        </Box>
-                        <Box display="flex" justifyContent="space-between">
-                          <Typography variant="body2">Dates</Typography>
-                          <Typography variant="body2">
-                            {tournament.start_date && tournament.end_date
-                              ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                              : 'TBD'}
-                          </Typography>
-                        </Box>
-                        <Box display="flex" justifyContent="space-between">
-                          <Typography variant="body2">Prize Money</Typography>
-                          <Typography variant="body2" fontWeight="bold">
-                            ${((tournament.prize_money_usd ?? 0) / 1e6).toFixed(1)}M
-                          </Typography>
-                        </Box>
-                        <Box display="flex" justifyContent="space-between">
-                          <Typography variant="body2">Defending Champion</Typography>
-                          <Typography variant="body2">{tournament.defending_champion || 'N/A'}</Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                ))}
-            </Grid>
-          )}
+          <Typography variant="h6" gutterBottom>Grand Slam Tournaments</Typography>
+          <Grid container spacing={3}>
+            {filteredTournaments.filter(t => t.category?.includes('Grand Slam')).map(t => (
+              <Grid item xs={12} md={6} key={t.id}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Box display="flex" justifyContent="space-between"><Typography variant="h6">{t.name}</Typography><TrophyIcon color="primary" /></Box>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>{t.location}, {t.country}</Typography>
+                    <Divider sx={{ my: 1 }} />
+                    <Box display="flex" justifyContent="space-between"><Typography variant="body2">Surface</Typography><SurfaceChip surface={t.surface} /></Box>
+                    <Box display="flex" justifyContent="space-between"><Typography variant="body2">Dates</Typography><Typography variant="body2">{t.start_date && t.end_date ? `${new Date(t.start_date).toLocaleDateString()} – ${new Date(t.end_date).toLocaleDateString()}` : 'TBD'}</Typography></Box>
+                    <Box display="flex" justifyContent="space-between"><Typography variant="body2">Prize Money</Typography><Typography variant="body2" fontWeight="bold">${(t.prize_money_usd / 1e6).toFixed(1)}M</Typography></Box>
+                    <Box display="flex" justifyContent="space-between"><Typography variant="body2">Defending Champion</Typography><Typography variant="body2">{t.defending_champion || 'N/A'}</Typography></Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
         </>
       )}
 
       {tabValue === 2 && (
         <>
-          <Typography variant="h6" gutterBottom>
-            ATP Masters 1000 Tournaments
-          </Typography>
-          {filteredTournaments.filter(t => t.category?.includes('Masters') || t.category?.includes('1000')).length === 0 ? (
-            <Alert severity="info">No Masters 1000 tournaments found for the selected filter.</Alert>
-          ) : (
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Tournament</TableCell>
-                    <TableCell align="center">Location</TableCell>
-                    <TableCell align="center">Surface</TableCell>
-                    <TableCell align="center">Dates</TableCell>
-                    <TableCell align="center">Prize Money</TableCell>
+          <Typography variant="h6" gutterBottom>ATP Masters 1000 Tournaments</Typography>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead><TableRow><TableCell>Tournament</TableCell><TableCell align="center">Location</TableCell><TableCell align="center">Surface</TableCell><TableCell align="center">Dates</TableCell><TableCell align="center">Prize Money</TableCell></TableRow></TableHead>
+              <TableBody>
+                {filteredTournaments.filter(t => t.category?.includes('Masters')).map(t => (
+                  <TableRow key={t.id} hover>
+                    <TableCell>{t.name}</TableCell><TableCell align="center">{t.location}</TableCell>
+                    <TableCell align="center"><SurfaceChip surface={t.surface} /></TableCell>
+                    <TableCell align="center">{t.start_date && t.end_date ? `${new Date(t.start_date).toLocaleDateString()} – ${new Date(t.end_date).toLocaleDateString()}` : 'TBD'}</TableCell>
+                    <TableCell align="center">${(t.prize_money_usd / 1e6).toFixed(1)}M</TableCell>
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredTournaments
-                    .filter((t) => t.category?.includes('Masters') || t.category?.includes('1000'))
-                    .map((tournament) => (
-                      <TableRow key={tournament.id} hover>
-                        <TableCell>{tournament.name}</TableCell>
-                        <TableCell align="center">{tournament.location ?? '—'}</TableCell>
-                        <TableCell align="center">
-                          <SurfaceChip surface={tournament.surface} />
-                        </TableCell>
-                        <TableCell align="center">
-                          {tournament.start_date && tournament.end_date
-                            ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                            : 'TBD'}
-                        </TableCell>
-                        <TableCell align="center">
-                          ${((tournament.prize_money_usd ?? 0) / 1e6).toFixed(1)}M
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </>
       )}
 
       {tabValue === 3 && (
         <>
-          <Typography variant="h6" gutterBottom>
-            ATP 500 & 250 Tournaments
-          </Typography>
-          {filteredTournaments.filter(t => t.category?.includes('500') || t.category?.includes('250')).length === 0 ? (
-            <Alert severity="info">No 500/250 tournaments found for the selected filter.</Alert>
-          ) : (
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Tournament</TableCell>
-                    <TableCell align="center">Location</TableCell>
-                    <TableCell align="center">Category</TableCell>
-                    <TableCell align="center">Surface</TableCell>
-                    <TableCell align="center">Dates</TableCell>
+          <Typography variant="h6" gutterBottom>ATP 500 & 250 Tournaments</Typography>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead><TableRow><TableCell>Tournament</TableCell><TableCell align="center">Location</TableCell><TableCell align="center">Category</TableCell><TableCell align="center">Surface</TableCell><TableCell align="center">Dates</TableCell></TableRow></TableHead>
+              <TableBody>
+                {filteredTournaments.filter(t => t.category?.includes('500') || t.category?.includes('250')).map(t => (
+                  <TableRow key={t.id} hover>
+                    <TableCell>{t.name}</TableCell><TableCell align="center">{t.location}</TableCell>
+                    <TableCell align="center"><CategoryChip category={t.category} /></TableCell>
+                    <TableCell align="center"><SurfaceChip surface={t.surface} /></TableCell>
+                    <TableCell align="center">{t.start_date && t.end_date ? `${new Date(t.start_date).toLocaleDateString()} – ${new Date(t.end_date).toLocaleDateString()}` : 'TBD'}</TableCell>
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredTournaments
-                    .filter((t) => t.category?.includes('500') || t.category?.includes('250'))
-                    .map((tournament) => (
-                      <TableRow key={tournament.id} hover>
-                        <TableCell>{tournament.name}</TableCell>
-                        <TableCell align="center">{tournament.location ?? '—'}</TableCell>
-                        <TableCell align="center">
-                          <CategoryChip category={tournament.category} />
-                        </TableCell>
-                        <TableCell align="center">
-                          <SurfaceChip surface={tournament.surface} />
-                        </TableCell>
-                        <TableCell align="center">
-                          {tournament.start_date && tournament.end_date
-                            ? `${new Date(tournament.start_date).toLocaleDateString()} – ${new Date(tournament.end_date).toLocaleDateString()}`
-                            : 'TBD'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </>
       )}
     </Container>
   );
 };
 
-// ----------------------------------------------------------------------
-// Main exported component wrapped with ProtectedRoute
-// ----------------------------------------------------------------------
+const SkeletonLoader = () => (
+  <Container maxWidth="xl" sx={{ py: 4 }}><Typography variant="h4">Tennis Tournaments</Typography><Grid container spacing={3}><Grid item xs={12}><Skeleton variant="rounded" height={80} /></Grid><Grid item xs={12}><Skeleton variant="rounded" height={400} /></Grid></Grid></Container>
+);
+const ErrorView = ({ onRetry }: { onRetry: () => void }) => (
+  <Container maxWidth="xl" sx={{ py: 4 }}><Alert severity="error" action={<Button color="inherit" size="small" onClick={onRetry}>Retry</Button>}>Error loading tennis tournaments.</Alert></Container>
+);
 
-const TennisTournaments: React.FC = () => {
-  return (
-    <ProtectedRoute screenName="TennisTournaments">
-      <TennisTournamentsContent />
-    </ProtectedRoute>
-  );
-};
+const TennisTournaments: React.FC = () => (
+  <ProtectedRoute screenName="TennisTournaments">
+    <TennisTournamentsContent />
+  </ProtectedRoute>
+);
 
 export default TennisTournaments;

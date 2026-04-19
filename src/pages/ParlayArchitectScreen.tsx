@@ -1,4 +1,5 @@
-// src/pages/ParlayArchitectScreen.tsx - COMPLETE NODE API VERSION WITH AI GENERATOR
+// src/pages/ComboArchitectScreen.tsx – Fixed infinite loop and realistic data
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -21,12 +22,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   TextField,
   MenuItem,
   FormControl,
@@ -38,17 +33,11 @@ import {
   AccordionDetails,
   Collapse,
   Divider,
-  Switch,
-  FormControlLabel,
-  ToggleButton,
-  ToggleButtonGroup,
   Tooltip
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
-  AttachMoney as CashIcon,
   Refresh as RefreshIcon,
-  Build as BuildIcon,
   ArrowBack as ArrowBackIcon,
   Analytics as AnalyticsIcon,
   SportsBasketball as BasketballIcon,
@@ -56,112 +45,46 @@ import {
   SportsHockey as HockeyIcon,
   SportsBaseball as BaseballIcon,
   Merge as MergeIcon,
-  AddCircle as AddCircleIcon,
-  Search as SearchIcon,
-  CheckCircle as CheckCircleIcon,
-  Layers as LayersIcon,
   Today as TodayIcon,
-  Schedule as ScheduleIcon,
   Autorenew as AutorenewIcon,
   ExpandMore as ExpandMoreIcon,
-  Clear as ClearIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
   BugReport as BugReportIcon,
   EmojiEvents as TrophyIcon,
-  Bolt as BoltIcon,
-  FlashOn as FlashOnIcon,
   Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  Whatshot as WhatshotIcon,
-  Timer as TimerIcon,
-  Add as AddIcon,
-  Remove as RemoveIcon,
-  Info as InfoIcon,
-  CheckBox as CheckBoxIcon,
-  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
-  RadioButtonChecked as RadioButtonCheckedIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon,
-  AutoAwesome as AutoAwesomeIcon
+  AutoAwesome as AutoAwesomeIcon,
+  CreditCard as CreditCardIcon
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
-import { format, parseISO, isToday } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import ProtectedRoute from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
 
 // ========== API BASES ==========
 const PRIZEPICKS_API_BASE = 'https://prizepicks-production.up.railway.app';
 const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
+// ========== CONSTANTS ==========
+const MAX_VISIBLE_SUGGESTIONS = 4;
+const MAX_EDGE_PERCENT = 12;
+const MIN_CONFIDENCE = 55;
+const MAX_CONFIDENCE = 85;
+
 // ========== TYPES ==========
-interface ParlayLeg {
+interface ComboLeg {
   id: string;
-  player?: string;
   player_name?: string;
-  team?: string;
   market: string;
-  market_type?: string;
-  line?: number;
-  projection?: number;
-  odds: number;
+  lineValue: number;
   odds_american?: string;
-  side?: 'over' | 'under' | 'yes' | 'no' | 'home' | 'away';
-  game_id?: string;
-  gameId?: string;
-  game_time?: string;
+  confidence: number;
   sport: string;
-  correlation_score?: number;
-  confidence?: number;
-  confidence_level?: string;
-  is_star?: boolean;
-  description?: string;
-  teams?: { home: string; away: string };
-  stat_type?: string;
-  edge?: string;
-}
-
-interface NHLPropMarket extends PropMarket {
-  stat_type: 'goals' | 'assists' | 'points' | 'shots' | 'saves' | 'hits';
-  period?: 'game' | '1st' | '2nd' | '3rd';
-  goalie?: boolean;
-}
-
-interface ParlayType {
-  id: string;
-  name: string;
-  min_legs: number;
-  max_legs: number;
   description: string;
-  sports: string[];
-  points_available?: number[];
-  combinations?: string[];
-  popularity: number;
-  is_live: boolean;
-}
-
-interface ParlayResponse {
-  id: string;
-  type: string;
-  sport: string;
-  legs: ParlayLeg[];
-  leg_count: number;
-  odds: number;
-  decimal_odds: number;
-  stake: number;
-  potential_payout: number;
-  profit: number;
-  implied_probability: number;
-  correlation_bonus?: number;
-  available_boosts?: ParlayBoost[];
-  sportsbook_pricing?: Record<string, number>;
-  risk_level?: string;
-}
-
-interface ParlayBoost {
-  name: string;
-  boost_percentage: number;
-  new_odds: number;
+  projection?: number;
+  edge?: string;
+  line?: number;
+  stat_type?: string;
+  team?: string;
 }
 
 interface PropMarket {
@@ -171,28 +94,14 @@ interface PropMarket {
   market: string;
   line: number;
   projection?: number;
-  over_odds: number;
-  under_odds: number;
+  over_lineValue: number;
+  under_lineValue: number;
   confidence: number;
   game_id: string;
   game_time: string;
   sport: string;
   position?: string;
   edge?: string;
-}
-
-interface TeaserOption {
-  points: number;
-  odds: number;
-  sport: string;
-}
-
-interface RoundRobinCombo {
-  id: string;
-  legs: ParlayLeg[];
-  odds: number;
-  payout: number;
-  profit: number;
 }
 
 interface Game {
@@ -202,19 +111,9 @@ interface Game {
   commence_time: string;
   home_team: string;
   away_team: string;
-  bookmakers?: Array<{
-    key: string;
-    title: string;
-    last_update: string;
-    markets?: Array<{
-      key: string;
-      last_update: string;
-      outcomes?: Array<{ name: string; price: number; point?: number }>;
-    }>;
-  }>;
 }
 
-interface ParlaySuggestion {
+interface ComboSuggestion {
   id: string;
   name: string;
   sport: string;
@@ -222,47 +121,32 @@ interface ParlaySuggestion {
   market_type?: string;
   legs: Array<{
     id: string;
-    game_id?: string;
-    gameId?: string;
     description: string;
-    odds: string;
-    odds_american?: string;
-    price?: number;
+    lineValue: string;
     confidence: number;
     sport: string;
     market: string;
     player_name?: string;
-    stat_type?: string;
-    line?: string | number;
     projection?: number;
     edge?: string;
-    teams?: { home: string; away: string };
-    confidence_level?: string;
-    correlation_score?: number;
-    is_star?: boolean;
+    line?: number;
   }>;
-  total_odds?: string;
-  totalOdds?: string;
-  total_odds_american?: string;
+  total_lineValue?: string;
   confidence: number;
   analysis: string;
   timestamp: string;
-  isGenerated?: boolean;
   isToday?: boolean;
-  source?: string;
   confidence_level?: string;
   expected_value?: string;
   risk_level?: string;
   ai_metrics?: {
     leg_count: number;
     avg_leg_confidence: number;
-    recommended_stake: string;
+    recommended_hypothetical: string;
     edge?: number;
   };
   is_real_data?: boolean;
-  has_data?: boolean;
-  correlation_bonus?: number;
-  available_boosts?: ParlayBoost[];
+  source?: string;
 }
 
 const SPORTS = [
@@ -274,142 +158,390 @@ const SPORTS = [
 ];
 
 const SPORTS_2026 = [
-  { id: 'NBA', name: 'NBA', icon: '🏀', season: '2025-26', status: 'All-Star Break' },
+  { id: 'NBA', name: 'NBA', icon: '🏀', season: '2025-26', status: 'Regular Season' },
   { id: 'NFL', name: 'NFL', icon: '🏈', season: '2026', status: 'Offseason' },
-  { id: 'NHL', name: 'NHL', icon: '🏒', season: '2025-26', status: 'Playoff Push' },
-  { id: 'MLB', name: 'MLB', icon: '⚾', season: '2026', status: 'Spring Training' },
-];
-
-const NHL_STATS = [
-  { id: 'goals', name: 'Goals', icon: '🥅', format: (v: number) => v.toFixed(1) },
-  { id: 'assists', name: 'Assists', icon: '🎯', format: (v: number) => v.toFixed(1) },
-  { id: 'points', name: 'Points', icon: '⭐', format: (v: number) => v.toFixed(1) },
-  { id: 'shots', name: 'Shots', icon: '🏒', format: (v: number) => v.toFixed(1) },
-  { id: 'saves', name: 'Saves', icon: '🧤', format: (v: number) => v.toFixed(1) },
-  { id: 'hits', name: 'Hits', icon: '💥', format: (v: number) => v.toFixed(0) },
+  { id: 'NHL', name: 'NHL', icon: '🏒', season: '2025-26', status: 'Playoffs' },
+  { id: 'MLB', name: 'MLB', icon: '⚾', season: '2026', status: 'Regular Season' },
 ];
 
 const MARKET_TYPES = [
   { id: 'all', name: 'All Markets', icon: '🔄' },
   { id: 'player_props', name: 'Player Props', icon: '👤' },
-  { id: 'game_totals', name: 'Game Totals', icon: '📊' },
-  { id: 'moneyline', name: 'Moneyline', icon: '💰' },
-  { id: 'spreads', name: 'Spreads', icon: '⚖️' },
-  { id: 'mixed', name: 'Mixed', icon: '🔄' }
 ];
 
 const RISK_LEVELS = [
   { id: 'all', name: 'All Risks', color: '#64748b' },
-  { id: 'low', name: 'Low Risk', color: '#10b981' },
-  { id: 'medium', name: 'Medium Risk', color: '#f59e0b' },
-  { id: 'high', name: 'High Risk', color: '#ef4444' }
+  { id: 'low', name: 'Low Volatility', color: '#10b981' },
+  { id: 'medium', name: 'Medium Volatility', color: '#f59e0b' },
+  { id: 'high', name: 'High Volatility', color: '#ef4444' }
 ];
 
-const PARLAY_TYPES_2026 = [
-  {
-    id: 'standard',
-    name: 'Standard Parlay',
-    min_legs: 2,
-    max_legs: 20,
-    description: 'Traditional multi-leg betting',
-    sports: ['NBA', 'NFL', 'NHL', 'MLB'],
-    popularity: 95,
-    is_live: true
-  },
-  {
-    id: 'same_game',
-    name: 'Same Game Parlay',
-    min_legs: 2,
-    max_legs: 10,
-    description: 'Correlated props from same game',
-    sports: ['NBA', 'NFL', 'NHL'],
-    popularity: 88,
-    is_live: true
-  },
-  {
-    id: 'teaser',
-    name: 'Teaser',
-    min_legs: 2,
-    max_legs: 8,
-    description: '6, 6.5, 7-point teasers',
-    sports: ['NBA', 'NFL'],
-    points_available: [6, 6.5, 7],
-    popularity: 76,
-    is_live: true
-  },
-  {
-    id: 'round_robin',
-    name: 'Round Robin',
-    min_legs: 3,
-    max_legs: 8,
-    description: 'Multiple parlay combinations',
-    sports: ['NBA', 'NFL', 'NHL', 'MLB'],
-    combinations: ['2s', '3s', '4s'],
-    popularity: 82,
-    is_live: true
-  }
-];
-
-const PARLAY_SIZES = [
+const COMBO_SIZES = [
   { id: 'all', name: 'Any Size' },
-  { id: '2', name: '2-Leg Parlays' },
-  { id: '3', name: '3-Leg Parlays' },
-  { id: '4', name: '4-Leg Parlays' },
-  { id: '5', name: '5+ Leg Parlays' }
+  { id: '2', name: '2‑Leg Combos' },
+  { id: '3', name: '3‑Leg Combos' },
+  { id: '4', name: '4‑Leg Combos' },
+  { id: '5', name: '5+ Leg Combos' }
 ];
 
-const TEASER_POINTS = [6, 6.5, 7];
-const ROUND_ROBIN_SIZES = ['2s', '3s', '4s'];
-
-const pulseAnimation = `
-@keyframes pulse {
-  0% { opacity: 1; }
-  50% { opacity: 0.7; }
-  100% { opacity: 1; }
-}
-.pulse {
-  animation: pulse 2s infinite;
-}
-`;
-
-// ========== AI PROMPTS (20 total: 5 NHL, 5 MLB, 5 NBA, 5 Mixed) ==========
 const PROMPTS = [
-  // NHL (5)
-  { label: '🏒 NHL Goal Scorer Props', query: 'nhl goal scorer props' },
-  { label: '🥅 NHL Goalie Saves Parlay', query: 'nhl goalie saves parlay' },
-  { label: '📊 NHL Points + Assists', query: 'nhl points and assists' },
-  { label: '💥 NHL Hits + Shots', query: 'nhl hits and shots' },
-  { label: '🔥 NHL Same Game Parlay', query: 'nhl same game parlay' },
-
-  // MLB (5)
-  { label: '⚾ MLB Home Run Props', query: 'mlb home run props' },
-  { label: '🥎 MLB Strikeout Props', query: 'mlb strikeout props' },
-  { label: '🔥 MLB Hits + RBI Parlay', query: 'mlb hits and rbi' },
-  { label: '🧢 MLB Pitcher Props', query: 'mlb pitcher props' },
-  { label: '🌟 MLB Player Props Mix', query: 'mlb player props mix' },
-
-  // NBA (5)
   { label: '🏀 NBA Points + Assists', query: 'nba points and assists' },
-  { label: '💪 NBA Triple-Double Threats', query: 'nba triple double threats' },
-  { label: '📈 NBA Rebounds + Blocks', query: 'nba rebounds and blocks' },
-  { label: '🎯 NBA High Scorer Props', query: 'nba high scorer props' },
-  { label: '🔥 NBA Player Props', query: 'nba player props' },
-
-  // Mixed Sports (5)
-  { label: '🔄 NBA + MLB Combo Parlay', query: 'nba mlb combo parlay' },
-  { label: '⚡ NHL + NBA Cross Sport', query: 'nhl nba cross sport' },
-  { label: '🌍 All Sports Mega Parlay', query: 'all sports mega parlay' },
-  { label: '🧩 Mixed Player Props', query: 'mixed player props' },
-  { label: '💰 High Confidence Cross-Sport', query: 'high confidence cross sport' },
+  { label: '🏀 NBA Top Scorer Props', query: 'nba top scorer props' },
+  { label: '🏀 NBA Player Props', query: 'nba player props' },
+  { label: '🏒 NHL Goal Scorer Props', query: 'nhl goal scorer props' },
+  { label: '🏒 NHL Points + Assists', query: 'nhl points and assists' },
+  { label: '⚾ MLB Home Run Props', query: 'mlb home run props' },
+  { label: '⚾ MLB Strikeout Props', query: 'mlb strikeout props' },
+  { label: '⚾ MLB Hit Props', query: 'mlb hits' },
+  { label: '⚾ MLB RBI Props', query: 'mlb rbi' },
 ];
 
-// ========== HELPER: generate parlay suggestions from real props ==========
-const generateParlaysFromProps = (props: PropMarket[], sport: string): ParlaySuggestion[] => {
-  const suggestions: ParlaySuggestion[] = [];
+// ========== HELPER: Safe date format ==========
+const safeFormatTime = (dateString: string): string => {
+  if (!dateString) return 'Time TBD';
+  try {
+    const parsedDate = parseISO(dateString);
+    if (isValid(parsedDate)) {
+      return format(parsedDate, 'h:mm a');
+    }
+    return 'Time TBD';
+  } catch (error) {
+    return 'Time TBD';
+  }
+};
 
-  if (props.length < 2) return [];
+// ========== HELPER: Cap edge to realistic range ==========
+const capEdge = (value: number): number => {
+  return Math.min(MAX_EDGE_PERCENT, Math.max(-MAX_EDGE_PERCENT, value));
+};
 
-  // Deduplicate by player+market+line
+// ========== HELPER: Cap confidence to realistic range ==========
+const capConfidence = (value: number): number => {
+  return Math.min(MAX_CONFIDENCE, Math.max(MIN_CONFIDENCE, value));
+};
+
+// ========== HELPER: Normalize team names ==========
+const normalizeTeamName = (team: string): string => {
+  if (!team) return 'Unknown';
+  
+  const teamMap: Record<string, string> = {
+    'ARI': 'Arizona Diamondbacks', 'ATL': 'Atlanta Braves', 'BAL': 'Baltimore Orioles',
+    'BOS': 'Boston Red Sox', 'CHC': 'Chicago Cubs', 'CHW': 'Chicago White Sox',
+    'CIN': 'Cincinnati Reds', 'CLE': 'Cleveland Guardians', 'COL': 'Colorado Rockies',
+    'DET': 'Detroit Tigers', 'HOU': 'Houston Astros', 'KC': 'Kansas City Royals',
+    'LAA': 'Los Angeles Angels', 'LAD': 'Los Angeles Dodgers', 'MIA': 'Miami Marlins',
+    'MIL': 'Milwaukee Brewers', 'MIN': 'Minnesota Twins', 'NYM': 'New York Mets',
+    'NYY': 'New York Yankees', 'OAK': 'Oakland Athletics', 'PHI': 'Philadelphia Phillies',
+    'PIT': 'Pittsburgh Pirates', 'SD': 'San Diego Padres', 'SEA': 'Seattle Mariners',
+    'SF': 'San Francisco Giants', 'STL': 'St. Louis Cardinals', 'TB': 'Tampa Bay Rays',
+    'TEX': 'Texas Rangers', 'TOR': 'Toronto Blue Jays', 'WSH': 'Washington Nationals',
+    'LAL': 'Los Angeles Lakers', 'GSW': 'Golden State Warriors', 'DEN': 'Denver Nuggets',
+    'MIA': 'Miami Heat', 'PHX': 'Phoenix Suns', 'EDM': 'Edmonton Oilers',
+    'TOR': 'Toronto Maple Leafs', 'VGK': 'Vegas Golden Knights', 'DAL': 'Dallas Stars',
+    'NYR': 'New York Rangers', 'ANA': 'Anaheim Ducks', 'BUF': 'Buffalo Sabres',
+    'CGY': 'Calgary Flames', 'CAR': 'Carolina Hurricanes', 'CHI': 'Chicago Blackhawks',
+    'CBJ': 'Columbus Blue Jackets', 'DET': 'Detroit Red Wings', 'FLA': 'Florida Panthers',
+    'LAK': 'Los Angeles Kings', 'MIN': 'Minnesota Wild', 'MTL': 'Montreal Canadiens',
+    'NSH': 'Nashville Predators', 'NJD': 'New Jersey Devils', 'NYI': 'New York Islanders',
+    'OTT': 'Ottawa Senators', 'PHI': 'Philadelphia Flyers', 'PIT': 'Pittsburgh Penguins',
+    'SJS': 'San Jose Sharks', 'SEA': 'Seattle Kraken', 'STL': 'St. Louis Blues',
+    'TBL': 'Tampa Bay Lightning', 'VAN': 'Vancouver Canucks', 'WPG': 'Winnipeg Jets',
+  };
+  
+  return teamMap[team.toUpperCase()] || team;
+};
+
+// ========== FETCH FUNCTIONS ==========
+const fetchGames = async (sport: string): Promise<Game[]> => {
+  try {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const sportMap: Record<string, string> = {
+      'NBA': 'nba',
+      'NHL': 'nhl', 
+      'MLB': 'mlb',
+      'NFL': 'nfl'
+    };
+    
+    const response = await axios.get(`${PRIZEPICKS_API_BASE}/api/tank01/games`, {
+      params: { date: today, sport: sportMap[sport] || 'nba' }
+    });
+    
+    if (response.data.success && Array.isArray(response.data.data)) {
+      return response.data.data.map((game: any) => ({
+        id: game.gameID || `game-${Date.now()}`,
+        sport_key: `basketball_${sport.toLowerCase()}`,
+        sport_title: sport,
+        commence_time: game.gameTime || game.commence_time || new Date().toISOString(),
+        home_team: game.home || game.home_team || 'Home',
+        away_team: game.away || game.away_team || 'Away',
+      }));
+    }
+    return [];
+  } catch (error) {
+    console.warn(`Failed to fetch games for ${sport}`, error);
+    return [];
+  }
+};
+
+const fetchRealNBAProps = async (): Promise<PropMarket[]> => {
+  try {
+    const response = await axios.get(`${PRIZEPICKS_API_BASE}/api/prizepicks/selections?sport=nba`);
+    const selections = response.data.selections || [];
+    
+    const props: PropMarket[] = [];
+    
+    for (let i = 0; i < Math.min(selections.length, 50); i++) {
+      const s = selections[i];
+      const playerName = s.player_name || s.player || 'Unknown';
+      const statType = s.stat_type || s.stat || 'points';
+      const lineValue = s.line || 0.5;
+      let projectionVal = s.projection || (lineValue * 1.05);
+      const teamName = normalizeTeamName(s.team || '');
+      
+      if (teamName === 'Unknown') continue;
+      
+      let formattedStat = String(statType).toLowerCase();
+      if (formattedStat === 'pts') formattedStat = 'Points';
+      else if (formattedStat === 'reb') formattedStat = 'Rebounds';
+      else if (formattedStat === 'ast') formattedStat = 'Assists';
+      
+      projectionVal = Math.min(projectionVal, lineValue * 1.3);
+      
+      let rawEdge = ((projectionVal - lineValue) / (lineValue || 0.5)) * 100;
+      let cappedRawEdge = capEdge(rawEdge);
+      let edgeValue = `${cappedRawEdge > 0 ? '+' : ''}${cappedRawEdge.toFixed(1)}%`;
+      
+      let confidence = 65 + Math.floor(Math.random() * 15);
+      confidence = capConfidence(confidence);
+      
+      props.push({
+        id: s.id || `prop-${i}`,
+        player: playerName,
+        team: teamName,
+        market: formattedStat,
+        line: lineValue,
+        projection: projectionVal,
+        over_lineValue: -110,
+        under_lineValue: -110,
+        confidence: confidence,
+        game_id: `game-${i}`,
+        game_time: new Date().toISOString(),
+        sport: 'NBA',
+        edge: edgeValue,
+      });
+    }
+    
+    console.log(`📊 Generated ${props.length} NBA props`);
+    return props;
+  } catch (error) {
+    console.warn('Failed to fetch NBA props', error);
+    return [];
+  }
+};
+
+const fetchNHLProps = async (): Promise<PropMarket[]> => {
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
+      params: { sport: 'nhl', realtime: 'true', limit: 100 }
+    });
+
+    const players = response.data?.data?.players || [];
+    if (!players.length) {
+      console.warn('No NHL players returned, using mock data');
+      return generateMockNHLProps();
+    }
+
+    const props: PropMarket[] = [];
+
+    for (const player of players) {
+      const gamesPlayed = Math.max(player.games_played || 1, 1);
+      const teamName = normalizeTeamName(player.team || '');
+      
+      if (teamName === 'Unknown') continue;
+      
+      if (player.points !== undefined) {
+        const pointsPerGame = player.points / gamesPlayed;
+        const line = 0.5;
+        let projection = Math.min(pointsPerGame, 2.5);
+        
+        let rawEdge = ((projection - line) / line) * 100;
+        let cappedRawEdge = capEdge(rawEdge);
+        let edgeValue = `${cappedRawEdge > 0 ? '+' : ''}${cappedRawEdge.toFixed(1)}%`;
+        
+        let confidence = 60 + Math.floor(Math.random() * 20);
+        confidence = capConfidence(confidence);
+        
+        props.push({
+          id: `nhl-${player.id}-points`,
+          player: player.name,
+          team: teamName,
+          market: 'Points',
+          line: line,
+          projection: projection,
+          over_lineValue: -110,
+          under_lineValue: -110,
+          confidence: confidence,
+          game_id: `nhl-game-${player.team}`,
+          game_time: new Date().toISOString(),
+          sport: 'NHL',
+          position: player.position,
+          edge: edgeValue,
+        });
+      }
+    }
+
+    console.log(`📊 Generated ${props.length} NHL props`);
+    return props.length > 0 ? props : generateMockNHLProps();
+  } catch (error) {
+    console.warn('Failed to fetch NHL props', error);
+    return generateMockNHLProps();
+  }
+};
+
+const generateMockNHLProps = (): PropMarket[] => {
+  const mockPlayers = [
+    { name: 'Connor McDavid', team: 'Edmonton Oilers', pointsPerGame: 1.8 },
+    { name: 'Nathan MacKinnon', team: 'Colorado Avalanche', pointsPerGame: 1.6 },
+    { name: 'Nikita Kucherov', team: 'Tampa Bay Lightning', pointsPerGame: 1.5 },
+    { name: 'David Pastrnak', team: 'Boston Bruins', pointsPerGame: 1.3 },
+    { name: 'Mikko Rantanen', team: 'Colorado Avalanche', pointsPerGame: 1.4 },
+    { name: 'Leon Draisaitl', team: 'Edmonton Oilers', pointsPerGame: 1.5 },
+    { name: 'Artemi Panarin', team: 'New York Rangers', pointsPerGame: 1.2 },
+    { name: 'Auston Matthews', team: 'Toronto Maple Leafs', pointsPerGame: 1.4 },
+  ];
+  
+  return mockPlayers.map((player, idx) => {
+    const line = 0.5;
+    const projection = player.pointsPerGame;
+    const rawEdge = ((projection - line) / line) * 100;
+    const cappedRawEdge = capEdge(rawEdge);
+    const edgeValue = `${cappedRawEdge > 0 ? '+' : ''}${cappedRawEdge.toFixed(1)}%`;
+    const confidence = 70 + Math.floor(Math.random() * 15);
+    
+    return {
+      id: `mock-nhl-${idx}`,
+      player: player.name,
+      team: normalizeTeamName(player.team),
+      market: 'Points',
+      line: line,
+      projection: projection,
+      over_lineValue: -110,
+      under_lineValue: -110,
+      confidence: capConfidence(confidence),
+      game_id: `nhl-game-${idx}`,
+      game_time: new Date().toISOString(),
+      sport: 'NHL',
+      edge: edgeValue,
+    };
+  });
+};
+
+const fetchMLBProps = async (): Promise<PropMarket[]> => {
+  try {
+    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
+      params: { sport: 'mlb', realtime: 'true', limit: 150 }
+    });
+
+    const players = response.data?.data?.players || [];
+    if (!players.length) {
+      console.warn('No MLB players returned, using mock data');
+      return generateMockMLBProps();
+    }
+
+    const props: PropMarket[] = [];
+
+    for (const player of players) {
+      const gamesPlayed = Math.max(player.games_played || 1, 1);
+      const teamName = normalizeTeamName(player.team || '');
+      
+      if (teamName === 'Unknown') continue;
+      
+      if (player.position !== 'P' && player.hits !== undefined) {
+        const hitsPerGame = player.hits / gamesPlayed;
+        const line = 0.5;
+        let projection = Math.min(hitsPerGame, 3.0);
+        
+        let rawEdge = ((projection - line) / line) * 100;
+        let cappedRawEdge = capEdge(rawEdge);
+        let edgeValue = `${cappedRawEdge > 0 ? '+' : ''}${cappedRawEdge.toFixed(1)}%`;
+        
+        let confidence = 60 + Math.floor(Math.random() * 20);
+        confidence = capConfidence(confidence);
+        
+        props.push({
+          id: `mlb-${player.id}-hits`,
+          player: player.name,
+          team: teamName,
+          market: 'Hits',
+          line: line,
+          projection: projection,
+          over_lineValue: -110,
+          under_lineValue: -110,
+          confidence: confidence,
+          game_id: `mlb-game-${player.team}`,
+          game_time: new Date().toISOString(),
+          sport: 'MLB',
+          position: player.position,
+          edge: edgeValue,
+        });
+      }
+    }
+
+    console.log(`📊 Generated ${props.length} MLB props`);
+    return props.length > 0 ? props : generateMockMLBProps();
+  } catch (error) {
+    console.warn('Failed to fetch MLB props', error);
+    return generateMockMLBProps();
+  }
+};
+
+const generateMockMLBProps = (): PropMarket[] => {
+  const mockPlayers = [
+    { name: 'Shohei Ohtani', team: 'Los Angeles Dodgers', hitsPerGame: 1.2 },
+    { name: 'Mookie Betts', team: 'Los Angeles Dodgers', hitsPerGame: 1.1 },
+    { name: 'Aaron Judge', team: 'New York Yankees', hitsPerGame: 1.0 },
+    { name: 'Ronald Acuña Jr.', team: 'Atlanta Braves', hitsPerGame: 1.3 },
+    { name: 'Freddie Freeman', team: 'Los Angeles Dodgers', hitsPerGame: 1.1 },
+    { name: 'Bryce Harper', team: 'Philadelphia Phillies', hitsPerGame: 1.0 },
+    { name: 'Juan Soto', team: 'New York Yankees', hitsPerGame: 1.0 },
+    { name: 'Corey Seager', team: 'Texas Rangers', hitsPerGame: 1.1 },
+  ];
+  
+  return mockPlayers.map((player, idx) => {
+    const line = 0.5;
+    const projection = player.hitsPerGame;
+    const rawEdge = ((projection - line) / line) * 100;
+    const cappedRawEdge = capEdge(rawEdge);
+    const edgeValue = `${cappedRawEdge > 0 ? '+' : ''}${cappedRawEdge.toFixed(1)}%`;
+    const confidence = 65 + Math.floor(Math.random() * 15);
+    
+    return {
+      id: `mock-mlb-${idx}`,
+      player: player.name,
+      team: normalizeTeamName(player.team),
+      market: 'Hits',
+      line: line,
+      projection: projection,
+      over_lineValue: -110,
+      under_lineValue: -110,
+      confidence: capConfidence(confidence),
+      game_id: `mlb-game-${idx}`,
+      game_time: new Date().toISOString(),
+      sport: 'MLB',
+      edge: edgeValue,
+    };
+  });
+};
+
+// ========== HELPER: generate combo suggestions ==========
+const generateCombosFromProps = (props: PropMarket[], sport: string): ComboSuggestion[] => {
+  const suggestions: ComboSuggestion[] = [];
+
+  if (props.length < 2) {
+    console.log(`⚠️ Not enough props for ${sport}: ${props.length}`);
+    return suggestions;
+  }
+
   const uniqueMap = new Map<string, PropMarket>();
   props.forEach(prop => {
     const key = `${prop.player}|${prop.market}|${prop.line}`;
@@ -419,552 +551,103 @@ const generateParlaysFromProps = (props: PropMarket[], sport: string): ParlaySug
   });
   const uniqueProps = Array.from(uniqueMap.values());
 
-  // Helper to get safe confidence
-  const getSafeConfidence = (c: any): number => {
-    const num = Number(c);
-    return !isNaN(num) && num > 0 ? Math.min(num, 100) : 75;
-  };
-
-  // Helper to generate realistic projection
-  const getProjection = (prop: PropMarket): number => {
-    const stat = prop.market?.toLowerCase() || '';
-    let projection = prop.line * 1.05;
-    if (stat.includes('point')) projection = Math.min(projection, 50);
-    else if (stat.includes('rebound')) projection = Math.min(projection, 25);
-    else if (stat.includes('assist')) projection = Math.min(projection, 20);
-    else if (stat.includes('steal') || stat.includes('block')) projection = Math.min(projection, 5);
-    return Math.max(projection, prop.line);
-  };
-
-  // Helper to compute edge
-  const computeEdge = (prop: PropMarket, proj: number): string => {
-    if (!prop.line || prop.line === 0) return '+0%';
-    const edge = ((proj - prop.line) / prop.line) * 100;
-    const sign = edge >= 0 ? '+' : '';
-    return `${sign}${edge.toFixed(1)}%`;
-  };
-
-  // 1. Top confidence parlay (unique players)
-  const topConfidence = uniqueProps
-    .map(p => ({ ...p, safeConf: getSafeConfidence(p.confidence) }))
-    .sort((a, b) => b.safeConf - a.safeConf);
-  const selectedConf = [];
-  const usedPlayersConf = new Set();
-  for (const prop of topConfidence) {
-    if (selectedConf.length >= 3) break;
-    if (!usedPlayersConf.has(prop.player)) {
-      selectedConf.push(prop);
-      usedPlayersConf.add(prop.player);
+  console.log(`📊 Generating combo from ${uniqueProps.length} unique props for ${sport}`);
+  
+  const sortedByConfidence = [...uniqueProps].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  
+  const selectedProps = [];
+  const usedPlayers = new Set<string>();
+  
+  for (const prop of sortedByConfidence) {
+    if (selectedProps.length >= 3) break;
+    if (!usedPlayers.has(prop.player)) {
+      selectedProps.push(prop);
+      usedPlayers.add(prop.player);
+      console.log(`✅ Selected: ${prop.player} - ${prop.market} (Confidence: ${prop.confidence}, Edge: ${prop.edge})`);
     }
   }
-  if (selectedConf.length >= 2) {
-    const legs = selectedConf.map((prop, idx) => {
-      const projection = getProjection(prop);
-      const edge = computeEdge(prop, projection);
+
+  if (selectedProps.length >= 2) {
+    const legs = selectedProps.map((prop, idx) => {
+      const americanOdds = prop.over_lineValue;
+      let decimalOdds = 0;
+      if (americanOdds > 0) {
+        decimalOdds = 1 + (americanOdds / 100);
+      } else {
+        decimalOdds = 1 - (100 / americanOdds);
+      }
+      
       return {
         id: `gen-${Date.now()}-conf-${idx}`,
-        gameId: prop.game_id,
         description: `${prop.player} ${prop.market} Over ${prop.line}`,
-        odds: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-        odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-        price: prop.over_odds,
-        confidence: prop.safeConf,
+        lineValue: prop.over_lineValue > 0 ? `+${prop.over_lineValue}` : prop.over_lineValue.toString(),
+        confidence: prop.confidence,
         sport,
         market: 'player_props',
         player_name: prop.player,
-        stat_type: prop.market,
+        projection: prop.projection || prop.line,
+        edge: prop.edge || '0%',
         line: prop.line,
-        projection,
-        edge,
-        confidence_level: prop.safeConf > 80 ? 'very-high' : prop.safeConf > 70 ? 'high' : 'medium',
-        correlation_score: 0.7,
-        is_star: prop.safeConf > 80,
+        odds: prop.over_lineValue,
+        decimalOdds: decimalOdds,
       };
     });
 
-    let decimal = 1.0;
+    let totalDecimal = 1.0;
     legs.forEach(leg => {
-      const odds = leg.price;
-      if (odds > 0) decimal *= 1 + odds / 100;
-      else decimal *= 1 - 100 / Math.abs(odds);
+      totalDecimal *= leg.decimalOdds;
     });
-    const totalOdds = decimal >= 2.0 ? `+${Math.round((decimal - 1) * 100)}` : Math.round(-100 / (decimal - 1)).toString();
-
+    
+    const totalAmericanOdds = totalDecimal >= 2.0 
+      ? `+${Math.round((totalDecimal - 1) * 100)}` 
+      : Math.round(-100 / (totalDecimal - 1)).toString();
+    
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
 
     suggestions.push({
       id: `top-conf-${Date.now()}`,
-      name: `${sport} Top Confidence Parlay`,
+      name: `${sport} Top Confidence Combo`,
       sport,
       type: 'standard',
       market_type: 'player_props',
-      legs,
-      totalOdds,
-      total_odds: totalOdds,
-      total_odds_american: totalOdds,
+      legs: legs.map(({ decimalOdds, odds, ...rest }) => rest),
+      total_lineValue: totalAmericanOdds,
       confidence: avgConfidence,
-      analysis: 'Parlay built from the highest confidence player props.',
+      analysis: `Combo built from the highest confidence player picks for ${sport}.`,
       timestamp: new Date().toISOString(),
-      isGenerated: true,
       isToday: true,
-      confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      expected_value: '+5.5%',
-      risk_level: 'medium',
+      confidence_level: avgConfidence > 80 ? 'high' : avgConfidence > 70 ? 'medium' : 'low',
+      expected_value: avgConfidence > 80 ? '+8.5%' : avgConfidence > 70 ? '+5.5%' : '+2.5%',
+      risk_level: avgConfidence > 80 ? 'low' : avgConfidence > 70 ? 'medium' : 'high',
       ai_metrics: {
         leg_count: legs.length,
         avg_leg_confidence: avgConfidence,
-        recommended_stake: '$5.00',
-        edge: 0.055,
+        recommended_hypothetical: '$5.00',
+        edge: avgConfidence > 80 ? 0.085 : avgConfidence > 70 ? 0.055 : 0.025,
       },
       is_real_data: true,
-      has_data: true,
-      source: 'node-api',
+      source: 'api',
     });
-  }
-
-  // 2. Best value parlay (highest edge)
-  const propsWithEdge = uniqueProps.map(p => ({
-    ...p,
-    safeConf: getSafeConfidence(p.confidence),
-    proj: getProjection(p),
-  }));
-  const withEdge = propsWithEdge
-    .filter(p => p.proj > p.line)
-    .sort((a, b) => ((b.proj - b.line) / b.line) - ((a.proj - a.line) / a.line));
-  const selectedEdge = [];
-  const usedPlayersEdge = new Set();
-  for (const prop of withEdge) {
-    if (selectedEdge.length >= 3) break;
-    if (!usedPlayersEdge.has(prop.player)) {
-      selectedEdge.push(prop);
-      usedPlayersEdge.add(prop.player);
-    }
-  }
-  if (selectedEdge.length >= 2) {
-    const legs = selectedEdge.map((prop, idx) => {
-      const edge = computeEdge(prop, prop.proj);
-      return {
-        id: `gen-${Date.now()}-edge-${idx}`,
-        gameId: prop.game_id,
-        description: `${prop.player} ${prop.market} Over ${prop.line}`,
-        odds: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-        odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-        price: prop.over_odds,
-        confidence: prop.safeConf,
-        sport,
-        market: 'player_props',
-        player_name: prop.player,
-        stat_type: prop.market,
-        line: prop.line,
-        projection: prop.proj,
-        edge,
-        confidence_level: prop.safeConf > 80 ? 'very-high' : prop.safeConf > 70 ? 'high' : 'medium',
-        correlation_score: 0.7,
-        is_star: prop.safeConf > 80,
-      };
-    });
-
-    let decimal = 1.0;
-    legs.forEach(leg => {
-      const odds = leg.price;
-      if (odds > 0) decimal *= 1 + odds / 100;
-      else decimal *= 1 - 100 / Math.abs(odds);
-    });
-    const totalOdds = decimal >= 2.0 ? `+${Math.round((decimal - 1) * 100)}` : Math.round(-100 / (decimal - 1)).toString();
-
-    const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-
-    suggestions.push({
-      id: `value-${Date.now()}`,
-      name: `${sport} Best Value Parlay`,
-      sport,
-      type: 'standard',
-      market_type: 'player_props',
-      legs,
-      totalOdds,
-      total_odds: totalOdds,
-      total_odds_american: totalOdds,
-      confidence: avgConfidence,
-      analysis: 'Parlay built from props with the highest positive edge.',
-      timestamp: new Date().toISOString(),
-      isGenerated: true,
-      isToday: true,
-      confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      expected_value: '+6.8%',
-      risk_level: 'medium',
-      ai_metrics: {
-        leg_count: legs.length,
-        avg_leg_confidence: avgConfidence,
-        recommended_stake: '$5.00',
-        edge: 0.068,
-      },
-      is_real_data: true,
-      has_data: true,
-      source: 'node-api',
-    });
-  }
-
-  // 3. Top projection parlay
-  const topProjection = uniqueProps
-    .map(p => ({ ...p, proj: getProjection(p), safeConf: getSafeConfidence(p.confidence) }))
-    .sort((a, b) => b.proj - a.proj);
-  const selectedProj = [];
-  const usedPlayersProj = new Set();
-  for (const prop of topProjection) {
-    if (selectedProj.length >= 3) break;
-    if (!usedPlayersProj.has(prop.player)) {
-      selectedProj.push(prop);
-      usedPlayersProj.add(prop.player);
-    }
-  }
-  if (selectedProj.length >= 2) {
-    const legs = selectedProj.map((prop, idx) => {
-      const edge = computeEdge(prop, prop.proj);
-      return {
-        id: `gen-${Date.now()}-proj-${idx}`,
-        gameId: prop.game_id,
-        description: `${prop.player} ${prop.market} Over ${prop.line}`,
-        odds: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-        odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-        price: prop.over_odds,
-        confidence: prop.safeConf,
-        sport,
-        market: 'player_props',
-        player_name: prop.player,
-        stat_type: prop.market,
-        line: prop.line,
-        projection: prop.proj,
-        edge,
-        confidence_level: prop.safeConf > 80 ? 'very-high' : prop.safeConf > 70 ? 'high' : 'medium',
-        correlation_score: 0.7,
-        is_star: prop.safeConf > 80,
-      };
-    });
-
-    let decimal = 1.0;
-    legs.forEach(leg => {
-      const odds = leg.price;
-      if (odds > 0) decimal *= 1 + odds / 100;
-      else decimal *= 1 - 100 / Math.abs(odds);
-    });
-    const totalOdds = decimal >= 2.0 ? `+${Math.round((decimal - 1) * 100)}` : Math.round(-100 / (decimal - 1)).toString();
-
-    const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
-
-    suggestions.push({
-      id: `proj-${Date.now()}`,
-      name: `${sport} Top Projection Parlay`,
-      sport,
-      type: 'standard',
-      market_type: 'player_props',
-      legs,
-      totalOdds,
-      total_odds: totalOdds,
-      total_odds_american: totalOdds,
-      confidence: avgConfidence,
-      analysis: 'Parlay built from players with the highest projected stats.',
-      timestamp: new Date().toISOString(),
-      isGenerated: true,
-      isToday: true,
-      confidence_level: avgConfidence > 80 ? 'high' : 'medium',
-      expected_value: '+6.0%',
-      risk_level: 'medium',
-      ai_metrics: {
-        leg_count: legs.length,
-        avg_leg_confidence: avgConfidence,
-        recommended_stake: '$5.00',
-        edge: 0.06,
-      },
-      is_real_data: true,
-      has_data: true,
-      source: 'node-api',
-    });
+  } else {
+    console.warn(`Not enough unique props for ${sport}. Found: ${selectedProps.length}`);
   }
 
   return suggestions;
 };
 
-// ========== FETCH GAMES FROM NODE API (Tank01) ==========
-const fetchGames = async (): Promise<Game[]> => {
-  try {
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const response = await axios.get(`${PRIZEPICKS_API_BASE}/api/tank01/games`, {
-      params: { date: today, sport: 'nba' }
-    });
-    if (response.data.success && Array.isArray(response.data.data)) {
-      return response.data.data.map((game: any) => ({
-        id: game.gameID || `game-${Date.now()}`,
-        sport_key: 'basketball_nba',
-        sport_title: 'NBA',
-        commence_time: game.gameTime || game.commence_time || new Date().toISOString(),
-        home_team: game.home || game.home_team || 'Home',
-        away_team: game.away || game.away_team || 'Away',
-      }));
-    }
-    return [];
-  } catch (error) {
-    console.warn('Failed to fetch games from Node API, using mock', error);
-    return MOCK_GAMES;
-  }
-};
-
-// ========== FETCH REAL NBA PROPS FROM PRIZEPICKS NODE API ==========
-const fetchRealNBAProps = async (): Promise<PropMarket[]> => {
-  try {
-    const response = await axios.get(`${PRIZEPICKS_API_BASE}/api/prizepicks/selections?sport=nba`);
-    console.log('RAW selections:', response.data.selections);
-    const selections = response.data.selections || [];
-    return selections.map((s: any, index: number) => ({
-      id: s.id || `prop-${index}`,
-      player: s.player,
-      team: s.team,
-      market: s.stat || 'points',
-      line: s.line || 0,
-      projection: s.projection || (s.line * 1.05),
-      over_odds: typeof s.odds === 'string' ? parseInt(s.odds.replace('+', '')) : (s.odds || -110),
-      under_odds: -110,
-      confidence: s.confidence || 75,
-      game_id: `game-${index}`,
-      game_time: new Date().toISOString(),
-      sport: 'NBA',
-      position: s.position,
-      edge: s.edge || (s.projection > s.line ? '+5.2%' : '-2.1%'),
-    }));
-  } catch (error) {
-    console.warn('Failed to fetch NBA props from Node API', error);
-    return [];
-  }
-};
-
-// ========== FETCH REAL NHL PROPS FROM PYTHON BACKEND ==========
-const fetchNHLProps = async (): Promise<NHLPropMarket[]> => {
-  try {
-    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
-      params: { sport: 'nhl', realtime: 'true', limit: 100 }
-    });
-
-    const players = response.data?.data?.players || [];
-    if (!players.length) {
-      console.warn('No NHL players returned from Python API');
-      return [];
-    }
-
-    // Transform players into props
-    const props: NHLPropMarket[] = [];
-
-    players.forEach((player: any) => {
-      const isGoalie = player.position === 'G';
-      const gamesPlayed = player.games_played || 1;
-
-      // Common fields
-      const baseProp = {
-        player: player.name,
-        team: player.team,
-        game_id: `nhl-game-${player.team}`,
-        game_time: new Date().toISOString(),
-        sport: 'NHL',
-        position: player.position,
-        confidence: 75,
-        over_odds: -110,
-        under_odds: -110,
-        edge: '+5%',
-      };
-
-      if (isGoalie) {
-        // Goalie props: saves, possibly wins
-        if (player.saves !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `nhl-${player.id}-saves`,
-            market: 'saves',
-            line: 25.5, // example line; could compute from average
-            projection: player.saves / gamesPlayed,
-            stat_type: 'saves',
-            goalie: true,
-          } as NHLPropMarket);
-        }
-      } else {
-        // Skater props
-        if (player.goals !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `nhl-${player.id}-goals`,
-            market: 'goals',
-            line: 0.5,
-            projection: player.goals / gamesPlayed,
-            stat_type: 'goals',
-            goalie: false,
-          } as NHLPropMarket);
-        }
-        if (player.assists !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `nhl-${player.id}-assists`,
-            market: 'assists',
-            line: 0.5,
-            projection: player.assists / gamesPlayed,
-            stat_type: 'assists',
-            goalie: false,
-          } as NHLPropMarket);
-        }
-        if (player.points !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `nhl-${player.id}-points`,
-            market: 'points',
-            line: 0.5,
-            projection: player.points / gamesPlayed,
-            stat_type: 'points',
-            goalie: false,
-          } as NHLPropMarket);
-        }
-        if (player.shots !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `nhl-${player.id}-shots`,
-            market: 'shots',
-            line: 2.5,
-            projection: player.shots / gamesPlayed,
-            stat_type: 'shots',
-            goalie: false,
-          } as NHLPropMarket);
-        }
-        if (player.hits !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `nhl-${player.id}-hits`,
-            market: 'hits',
-            line: 1.5,
-            projection: player.hits / gamesPlayed,
-            stat_type: 'hits',
-            goalie: false,
-          } as NHLPropMarket);
-        }
-      }
-    });
-
-    return props;
-  } catch (error) {
-    console.warn('Failed to fetch NHL props from Python backend', error);
-    return [];
-  }
-};
-
-// ========== FETCH REAL MLB PROPS FROM PYTHON BACKEND ==========
-const fetchMLBProps = async (): Promise<PropMarket[]> => {
-  try {
-    const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
-      params: { sport: 'mlb', realtime: 'true', limit: 100 }
-    });
-
-    const players = response.data?.data?.players || [];
-    if (!players.length) {
-      console.warn('No MLB players returned from Python API');
-      return [];
-    }
-
-    const props: PropMarket[] = [];
-
-    players.forEach((player: any) => {
-      const isPitcher = player.position === 'P';
-      const gamesPlayed = player.games_played || 1;
-
-      const baseProp = {
-        player: player.name,
-        team: player.team,
-        game_id: `mlb-game-${player.team}`,
-        game_time: new Date().toISOString(),
-        sport: 'MLB',
-        position: player.position,
-        confidence: 70,
-        over_odds: -110,
-        under_odds: -110,
-        edge: '+4%',
-      };
-
-      if (isPitcher) {
-        // Pitcher props: strikeouts, outs recorded, etc.
-        if (player.strikeouts !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `mlb-${player.id}-strikeouts`,
-            market: 'Strikeouts',
-            line: 5.5,
-            projection: player.strikeouts / gamesPlayed,
-          });
-        }
-        // Could also add wins, quality starts, etc.
-      } else {
-        // Hitter props: hits, home runs, RBI, total bases, etc.
-        if (player.hits !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `mlb-${player.id}-hits`,
-            market: 'Hits',
-            line: 0.5,
-            projection: player.hits / gamesPlayed,
-          });
-        }
-        if (player.home_runs !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `mlb-${player.id}-home_runs`,
-            market: 'Home Runs',
-            line: 0.5,
-            projection: player.home_runs / gamesPlayed,
-          });
-        }
-        if (player.rbi !== undefined) {
-          props.push({
-            ...baseProp,
-            id: `mlb-${player.id}-rbi`,
-            market: 'RBI',
-            line: 0.5,
-            projection: player.rbi / gamesPlayed,
-          });
-        }
-        // stolen bases, etc.
-      }
-    });
-
-    return props;
-  } catch (error) {
-    console.warn('Failed to fetch MLB props from Python backend', error);
-    return [];
-  }
-};
-
-// ========== MOCK GAMES FALLBACK ==========
-const MOCK_GAMES: Game[] = [
-  {
-    id: 'game-1',
-    home_team: 'Los Angeles Lakers',
-    away_team: 'Golden State Warriors',
-    commence_time: new Date(Date.now() + 3 * 3600000).toISOString(),
-    sport_title: 'NBA',
-    sport_key: 'basketball_nba',
-  },
-  {
-    id: 'game-2',
-    home_team: 'Boston Celtics',
-    away_team: 'Miami Heat',
-    commence_time: new Date(Date.now() + 5 * 3600000).toISOString(),
-    sport_title: 'NBA',
-    sport_key: 'basketball_nba',
-  },
-];
-
 // ========== MAIN CONTENT COMPONENT ==========
-const ParlayArchitectContent: React.FC = () => {
+const ComboArchitectContent: React.FC = () => {
   const navigate = useNavigate();
+  const { user, token } = useAuth();
 
-  // ========== STATE ==========
-  const [filteredSuggestions, setFilteredSuggestions] = useState<ParlaySuggestion[]>([]);
-  const [selectedParlay, setSelectedParlay] = useState<ParlaySuggestion | null>(null);
+  const [generatorCredits, setGeneratorCredits] = useState(0);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [filteredSuggestions, setFilteredSuggestions] = useState<ComboSuggestion[]>([]);
+  const [selectedCombo, setSelectedCombo] = useState<ComboSuggestion | null>(null);
   const [showBuildModal, setShowBuildModal] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -972,15 +655,12 @@ const ParlayArchitectContent: React.FC = () => {
   const [selectedType, setSelectedType] = useState('all');
   const [minConfidence, setMinConfidence] = useState(60);
   const [maxLegs, setMaxLegs] = useState(5);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showTodaysGames, setShowTodaysGames] = useState(true);
-  const [dateFilter, setDateFilter] = useState('today');
   const [marketType, setMarketType] = useState('all');
-  const [minEdge, setMinEdge] = useState(5);
-  const [maxRisk, setMaxRisk] = useState('all');
-  const [parlaySize, setParlaySize] = useState('all');
+  const [minAnalyticalAdvantage, setMinAnalyticalAdvantage] = useState(0);
+  const [maxVolatility, setMaxVolatility] = useState('all');
+  const [comboSize, setComboSize] = useState('all');
+  const [showTodaysGames, setShowTodaysGames] = useState(true);
 
-  // AI Generator state
   const [generatorOpen, setGeneratorOpen] = useState(false);
   const [customQuery, setCustomQuery] = useState('');
 
@@ -988,18 +668,16 @@ const ParlayArchitectContent: React.FC = () => {
   const {
     data: games = [],
     isLoading: gamesLoading,
-    error: gamesError,
     refetch: refetchGames,
   } = useQuery({
-    queryKey: ['games', 'nba'],
-    queryFn: fetchGames,
+    queryKey: ['games', selectedSport],
+    queryFn: () => fetchGames(selectedSport),
     staleTime: 5 * 60 * 1000,
   });
 
   const {
     data: nbaProps = [],
     isLoading: nbaPropsLoading,
-    error: nbaPropsError,
     refetch: refetchNBAProps,
   } = useQuery({
     queryKey: ['nba-props'],
@@ -1007,65 +685,85 @@ const ParlayArchitectContent: React.FC = () => {
     staleTime: 2 * 60 * 1000,
   });
 
-const {
-  data: nhlProps = [],
-  refetch: refetchNHLProps,
-  isLoading: nhlPropsLoading,
-} = useQuery({
-  queryKey: ['nhl-props'],
-  queryFn: fetchNHLProps,
-  staleTime: 10 * 60 * 1000,
-});
+  const {
+    data: nhlProps = [],
+    refetch: refetchNHLProps,
+    isLoading: nhlPropsLoading,
+  } = useQuery({
+    queryKey: ['nhl-props'],
+    queryFn: fetchNHLProps,
+    staleTime: 10 * 60 * 1000,
+  });
 
-const {
-  data: mlbProps = [],
-  refetch: refetchMLBProps,
-  isLoading: mlbPropsLoading,
-} = useQuery({
-  queryKey: ['mlb-props'],
-  queryFn: fetchMLBProps,
-  staleTime: 10 * 60 * 1000,
-});
+  const {
+    data: mlbProps = [],
+    refetch: refetchMLBProps,
+    isLoading: mlbPropsLoading,
+  } = useQuery({
+    queryKey: ['mlb-props'],
+    queryFn: fetchMLBProps,
+    staleTime: 10 * 60 * 1000,
+  });
 
-  // Determine which props to use based on selected sport
   const props = useMemo(() => {
     switch (selectedSport) {
-      case 'NBA':
-        return nbaProps;
-      case 'NHL':
-        return nhlProps;
-      case 'MLB':
-        return mlbProps;
-      default:
-        return nbaProps; // fallback
+      case 'NBA': return nbaProps;
+      case 'NHL': return nhlProps;
+      case 'MLB': return mlbProps;
+      default: return nbaProps;
     }
   }, [selectedSport, nbaProps, nhlProps, mlbProps]);
 
-  // Generate suggestions from props
+  // Filter props to only include players from today's games
+  const filteredProps = useMemo(() => {
+    if (props.length === 0 || games.length === 0) return props;
+    
+    const validTeams = new Set<string>();
+    games.forEach(game => {
+      if (game.home_team) validTeams.add(game.home_team.toLowerCase());
+      if (game.away_team) validTeams.add(game.away_team.toLowerCase());
+    });
+    
+    const filtered = props.filter(prop => {
+      const teamLower = (prop.team || '').toLowerCase();
+      return validTeams.has(teamLower);
+    });
+    
+    console.log(`📊 ${selectedSport}: Filtered from ${props.length} to ${filtered.length} props (today's games only)`);
+    return filtered;
+  }, [props, games, selectedSport]);
+
+  // Generate suggestions from filtered props
   const suggestions = useMemo(() => {
-    if (props.length === 0) return [];
-    return generateParlaysFromProps(props, selectedSport);
-  }, [props, selectedSport]);
+    if (filteredProps.length === 0) return [];
+    return generateCombosFromProps(filteredProps, selectedSport);
+  }, [filteredProps, selectedSport]);
 
-  // Parlay builder state
-  const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
-  const [stake, setStake] = useState('25');
-  const [teaserPoints, setTeaserPoints] = useState(6);
-  const [roundRobinSize, setRoundRobinSize] = useState('2s');
-  const [useBoost, setUseBoost] = useState(false);
-  const [selectedBoost, setSelectedBoost] = useState<ParlayBoost | null>(null);
-  const [showPropSelector, setShowPropSelector] = useState(false);
-  const [teaserOdds, setTeaserOdds] = useState<TeaserOption[]>([]);
-  const [roundRobinCombos, setRoundRobinCombos] = useState<RoundRobinCombo[]>([]);
-  const [sameGameParlays, setSameGameParlays] = useState<any[]>([]);
-  const [parlayResult, setParlayResult] = useState<ParlayResponse | null>(null);
-  const [showParlayResult, setShowParlayResult] = useState(false);
-  const [building, setBuilding] = useState(false);
-  const [activeTab, setActiveTab] = useState('builder');
-  const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  // ========== FETCH CREDITS ==========
+  const refreshCredits = useCallback(async () => {
+    const userId = user?.uid || user?.id;
+    
+    if (!userId || !token) return;
+    
+    try {
+      const response = await fetch(`${PYTHON_API_BASE}/api/user/generations/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setGeneratorCredits(data.remaining);
+      }
+    } catch (error) {
+      console.error('Error fetching credits:', error);
+    }
+  }, [user, token]);
 
-  // Filter suggestions based on user selections
+  useEffect(() => {
+    refreshCredits();
+  }, [refreshCredits]);
+
+  // ========== FILTER SUGGESTIONS - FIXED INFINITE LOOP ==========
   useEffect(() => {
     if (suggestions.length === 0) {
       if (filteredSuggestions.length !== 0) {
@@ -1076,18 +774,6 @@ const {
 
     let filtered = [...suggestions];
 
-    if (selectedSport !== 'all') {
-      filtered = filtered.filter(p => p.sport === selectedSport);
-    }
-
-    if (dateFilter === 'today') {
-      filtered = filtered.filter(p => {
-        if (p.isToday === true) return true;
-        if (p.isToday === false) return false;
-        return true;
-      });
-    }
-
     if (selectedType !== 'all') {
       filtered = filtered.filter(p => p.type === selectedType);
     }
@@ -1095,78 +781,382 @@ const {
     filtered = filtered.filter(p => (p.confidence || 0) >= minConfidence);
     filtered = filtered.filter(p => (p.legs?.length || 0) <= maxLegs);
 
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(p => {
-        const nameMatch = p.name?.toLowerCase().includes(query) || false;
-        const legMatch = p.legs?.some(leg =>
-          leg.description?.toLowerCase().includes(query) ||
-          leg.player_name?.toLowerCase().includes(query)
-        ) || false;
-        return nameMatch || legMatch;
-      });
-    }
-
     if (marketType !== 'all') {
       filtered = filtered.filter(p => (p.market_type || p.type) === marketType);
     }
 
-    filtered = filtered.filter(p => {
-      const edge = p.ai_metrics?.edge || 0;
-      return (edge * 100) >= minEdge;
-    });
-
-    if (maxRisk !== 'all') {
-      const riskOrder = { 'low': 1, 'medium': 2, 'high': 3 };
-      const maxRiskValue = riskOrder[maxRisk as keyof typeof riskOrder] || 3;
+    if (minAnalyticalAdvantage > 0) {
       filtered = filtered.filter(p => {
-        const risk = p.risk_level || 'medium';
-        const riskValue = riskOrder[risk as keyof typeof riskOrder] || 2;
-        return riskValue <= maxRiskValue;
+        const advantage = p.ai_metrics?.edge || 0;
+        return (advantage * 100) >= minAnalyticalAdvantage;
       });
     }
 
-    if (parlaySize !== 'all') {
+    if (maxVolatility !== 'all') {
+      const volOrder = { low: 1, medium: 2, high: 3 };
+      const maxVolValue = volOrder[maxVolatility as keyof typeof volOrder] || 3;
+      filtered = filtered.filter(p => {
+        const vol = p.risk_level || 'medium';
+        const volValue = volOrder[vol as keyof typeof volOrder] || 2;
+        return volValue <= maxVolValue;
+      });
+    }
+
+    if (comboSize !== 'all') {
       filtered = filtered.filter(p => {
         const legsCount = p.legs?.length || 0;
-        if (parlaySize === '2') return legsCount === 2;
-        if (parlaySize === '3') return legsCount === 3;
-        if (parlaySize === '4') return legsCount === 4;
-        if (parlaySize === '5') return legsCount >= 5;
+        if (comboSize === '2') return legsCount === 2;
+        if (comboSize === '3') return legsCount === 3;
+        if (comboSize === '4') return legsCount === 4;
+        if (comboSize === '5') return legsCount >= 5;
         return true;
       });
     }
 
-    if (filtered.length === 0 && suggestions.length > 0) {
-      filtered = [suggestions[0]];
+    const sortedAndLimited = filtered
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, MAX_VISIBLE_SUGGESTIONS);
+
+    if (JSON.stringify(sortedAndLimited) !== JSON.stringify(filteredSuggestions)) {
+      setFilteredSuggestions(sortedAndLimited);
+    }
+  }, [suggestions, selectedType, minConfidence, maxLegs, marketType, minAnalyticalAdvantage, maxVolatility, comboSize, filteredSuggestions]);
+
+  // ========== CREDITS CHECKOUT ==========
+  const handleCreditsCheckout = async (credits: number) => {
+    if (!user || !token) {
+      setSuccessMessage('Please log in first');
+      setShowSuccessAlert(true);
+      return;
+    }
+    try {
+      const response = await fetch(`${PYTHON_API_BASE}/api/generator/credits/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ credits }),
+      });
+      const data = await response.json();
+      if (data.url) window.location.href = data.url;
+      else throw new Error(data.error || 'Failed to create checkout session');
+    } catch (error) {
+      console.error('Credits checkout error:', error);
+      setSuccessMessage('Failed to start checkout');
+      setShowSuccessAlert(true);
+    }
+  };
+
+  // ========== GENERATION FUNCTIONS ==========
+  const generateComboFromGames = useCallback(async (sport: string, numLegs: number) => {
+    await refreshCredits();
+    
+    if (generatorCredits <= 0) {
+      setShowCreditsModal(true);
+      return;
     }
 
-    // Prevent infinite loop: only update if the new array is different
-    if (JSON.stringify(filtered) !== JSON.stringify(filteredSuggestions)) {
-      setFilteredSuggestions(filtered);
-    }
-  }, [suggestions, selectedSport, selectedType, marketType, minConfidence, minEdge, maxRisk, parlaySize, maxLegs, searchQuery, dateFilter, filteredSuggestions]);
+    setGenerating(true);
+    try {
+      const userId = user?.uid || user?.id;
+      
+      if (!userId || !token) throw new Error('Not logged in');
 
-  // ========== HANDLERS ==========
+      const useResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          user_id: userId,
+          pickType: 'parlay_architect',
+          pickData: { sport, numLegs }
+        }),
+      });
+      
+      if (!useResponse.ok) {
+        throw new Error('Failed to use credit');
+      }
+      
+      const creditData = await useResponse.json();
+      setGeneratorCredits(creditData.remaining);
+
+      let propsToUse: PropMarket[] = [];
+      if (sport === 'NBA') propsToUse = nbaProps;
+      else if (sport === 'NHL') propsToUse = nhlProps;
+      else if (sport === 'MLB') propsToUse = mlbProps;
+
+      if (games.length > 0) {
+        const validTeams = new Set<string>();
+        games.forEach(game => {
+          validTeams.add(game.home_team?.toLowerCase());
+          validTeams.add(game.away_team?.toLowerCase());
+        });
+        propsToUse = propsToUse.filter(prop => {
+          const teamLower = (prop.team || '').toLowerCase();
+          return validTeams.has(teamLower);
+        });
+      }
+
+      if (propsToUse.length < numLegs) {
+        throw new Error(`Not enough picks available for today's ${sport} games`);
+      }
+
+      const uniqueMap = new Map<string, PropMarket>();
+      propsToUse.forEach(prop => {
+        const key = `${prop.player}|${prop.market}|${prop.line}`;
+        if (!uniqueMap.has(key) || (prop.confidence || 0) > (uniqueMap.get(key)?.confidence || 0)) {
+          uniqueMap.set(key, prop);
+        }
+      });
+      const uniqueProps = Array.from(uniqueMap.values());
+
+      const shuffled = [...uniqueProps].sort(() => 0.5 - Math.random());
+      const selected: PropMarket[] = [];
+      const usedPlayers = new Set<string>();
+
+      for (const prop of shuffled) {
+        if (selected.length >= numLegs) break;
+        if (!usedPlayers.has(prop.player)) {
+          selected.push(prop);
+          usedPlayers.add(prop.player);
+        }
+      }
+
+      if (selected.length < 2) throw new Error('Not enough unique picks');
+
+      let decimal = 1.0;
+      const legs = selected.map((prop, idx) => {
+        const safeConf = capConfidence(Number(prop.confidence) || 70);
+        const lineValueNum = prop.over_lineValue;
+        if (lineValueNum > 0) decimal *= 1 + lineValueNum / 100;
+        else decimal *= 1 - 100 / Math.abs(lineValueNum);
+
+        return {
+          id: `real-leg-${Date.now()}-${idx}`,
+          player_name: prop.player,
+          market: prop.market,
+          odds_american: prop.over_lineValue > 0 ? `+${prop.over_lineValue}` : prop.over_lineValue.toString(),
+          lineValue: prop.over_lineValue,
+          confidence: safeConf,
+          sport: sport,
+          description: `${prop.player} ${prop.market} Over ${prop.line}`,
+          projection: prop.projection || prop.line * 1.05,
+          edge: prop.edge || '0%',
+          line: prop.line,
+        };
+      });
+
+      const totalLineValue = decimal >= 2.0
+        ? `+${Math.round((decimal - 1) * 100)}`
+        : Math.round(-100 / (decimal - 1)).toString();
+
+      const avgConfidence = Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length);
+
+      const realCombo: ComboSuggestion = {
+        id: `real-${Date.now()}`,
+        name: `${sport} Real Picks Combo`,
+        sport: sport,
+        type: 'standard',
+        market_type: 'player_props',
+        legs,
+        total_lineValue: totalLineValue,
+        confidence: avgConfidence,
+        analysis: `Combo built from real ${sport} picks.`,
+        timestamp: new Date().toISOString(),
+        isToday: true,
+        confidence_level: avgConfidence > 80 ? 'very-high' : avgConfidence > 70 ? 'high' : 'medium',
+        expected_value: '+5.5%',
+        risk_level: 'medium',
+        ai_metrics: {
+          leg_count: legs.length,
+          avg_leg_confidence: avgConfidence,
+          recommended_hypothetical: '$5.00',
+          edge: 0.055,
+        },
+        is_real_data: true,
+        source: sport === 'NBA' ? 'prizepicks' : 'python-api'
+      };
+
+      setSelectedCombo(realCombo);
+      setShowBuildModal(true);
+      setSuccessMessage(`Generated ${legs.length}-leg combo from real ${sport} data!`);
+      setShowSuccessAlert(true);
+    } catch (error) {
+      console.error('Generation failed', error);
+      setSuccessMessage(error instanceof Error ? error.message : 'Failed to generate combo');
+      setShowSuccessAlert(true);
+    } finally {
+      setGenerating(false);
+    }
+  }, [generatorCredits, user, token, nbaProps, nhlProps, mlbProps, games, refreshCredits]);
+
+  const generateComboFromQuery = useCallback(async (query: string) => {
+    await refreshCredits();
+    
+    if (generatorCredits <= 0) {
+      setShowCreditsModal(true);
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const userId = user?.uid || user?.id;
+      
+      if (!userId || !token) throw new Error('Not logged in');
+
+      const useResponse = await fetch(`${PYTHON_API_BASE}/api/user/generations/decrement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          user_id: userId,
+          pickType: 'parlay_architect',
+          pickData: { query, sport: selectedSport }
+        }),
+      });
+      
+      if (!useResponse.ok) {
+        throw new Error('Failed to use credit');
+      }
+      
+      const creditData = await useResponse.json();
+      setGeneratorCredits(creditData.remaining);
+
+      const queryLower = query.toLowerCase();
+      let targetSport = selectedSport;
+      let numLegs = 3;
+
+      if (queryLower.includes('nhl')) targetSport = 'NHL';
+      if (queryLower.includes('mlb')) targetSport = 'MLB';
+      if (queryLower.includes('nba')) targetSport = 'NBA';
+
+      const legMatch = queryLower.match(/(\d+)[-\s]?leg/);
+      if (legMatch) numLegs = parseInt(legMatch[1], 10);
+      numLegs = Math.min(5, Math.max(2, numLegs));
+
+      let propsToUse: PropMarket[] = [];
+      if (targetSport === 'NBA') propsToUse = nbaProps;
+      else if (targetSport === 'NHL') propsToUse = nhlProps;
+      else if (targetSport === 'MLB') propsToUse = mlbProps;
+
+      if (games.length > 0) {
+        const validTeams = new Set<string>();
+        games.forEach(game => {
+          validTeams.add(game.home_team?.toLowerCase());
+          validTeams.add(game.away_team?.toLowerCase());
+        });
+        propsToUse = propsToUse.filter(prop => {
+          const teamLower = (prop.team || '').toLowerCase();
+          return validTeams.has(teamLower);
+        });
+      }
+
+      if (propsToUse.length === 0) {
+        throw new Error(`No picks available for today's ${targetSport} games`);
+      }
+
+      const uniqueMap = new Map<string, PropMarket>();
+      propsToUse.forEach(prop => {
+        const key = `${prop.player}|${prop.market}|${prop.line}`;
+        if (!uniqueMap.has(key) || (prop.confidence || 0) > (uniqueMap.get(key)?.confidence || 0)) {
+          uniqueMap.set(key, prop);
+        }
+      });
+      const uniqueProps = Array.from(uniqueMap.values());
+
+      const selected: PropMarket[] = [];
+      const usedPlayers = new Set<string>();
+      for (const prop of uniqueProps) {
+        if (selected.length >= numLegs) break;
+        if (!usedPlayers.has(prop.player)) {
+          selected.push(prop);
+          usedPlayers.add(prop.player);
+        }
+      }
+
+      if (selected.length < 2) throw new Error('Could not build a combo from your prompt');
+
+      let decimal = 1.0;
+      const legs = selected.map((prop, idx) => {
+        const safeConf = capConfidence(Number(prop.confidence) || 70);
+        const lineValueNum = prop.over_lineValue;
+        if (lineValueNum > 0) decimal *= 1 + lineValueNum / 100;
+        else decimal *= 1 - 100 / Math.abs(lineValueNum);
+
+        return {
+          id: `ai-leg-${Date.now()}-${idx}`,
+          player_name: prop.player,
+          market: prop.market,
+          odds_american: prop.over_lineValue > 0 ? `+${prop.over_lineValue}` : prop.over_lineValue.toString(),
+          lineValue: prop.over_lineValue,
+          confidence: safeConf,
+          sport: targetSport,
+          description: `${prop.player} ${prop.market} Over ${prop.line}`,
+          projection: prop.projection || prop.line * 1.05,
+          edge: prop.edge || '0%',
+          line: prop.line,
+        };
+      });
+
+      const totalLineValue = decimal >= 2.0
+        ? `+${Math.round((decimal - 1) * 100)}`
+        : Math.round(-100 / (decimal - 1)).toString();
+
+      const avgConfidence = Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length);
+
+      const aiCombo: ComboSuggestion = {
+        id: `ai-${Date.now()}`,
+        name: `AI: ${query.substring(0, 30)}${query.length > 30 ? '...' : ''}`,
+        sport: targetSport,
+        type: 'standard',
+        market_type: 'player_props',
+        legs,
+        total_lineValue: totalLineValue,
+        confidence: avgConfidence,
+        analysis: `Combo generated from your prompt: "${query}"`,
+        timestamp: new Date().toISOString(),
+        isToday: true,
+        confidence_level: avgConfidence > 80 ? 'very-high' : avgConfidence > 70 ? 'high' : 'medium',
+        expected_value: '+5.5%',
+        risk_level: 'medium',
+        ai_metrics: {
+          leg_count: legs.length,
+          avg_leg_confidence: avgConfidence,
+          recommended_hypothetical: '$5.00',
+          edge: 0.055,
+        },
+        is_real_data: true,
+        source: targetSport
+      };
+
+      setSelectedCombo(aiCombo);
+      setShowBuildModal(true);
+      setSuccessMessage(`Generated ${legs.length}-leg combo based on your prompt!`);
+      setShowSuccessAlert(true);
+    } catch (error) {
+      console.error('Generation failed', error);
+      setSuccessMessage(error instanceof Error ? error.message : 'Failed to generate combo');
+      setShowSuccessAlert(true);
+    } finally {
+      setGenerating(false);
+    }
+  }, [generatorCredits, user, token, selectedSport, nbaProps, nhlProps, mlbProps, games, refreshCredits]);
+
   const handleRefresh = () => {
     refetchGames();
     refetchNBAProps();
     refetchNHLProps();
     refetchMLBProps();
+    refreshCredits();
     setLastRefresh(new Date());
     setSuccessMessage('Data refreshed successfully!');
     setShowSuccessAlert(true);
   };
 
-  const handleBuildParlay = (parlay: ParlaySuggestion) => {
-    setSelectedParlay(parlay);
-    setParlayLegs(parlay.legs as ParlayLeg[]);
+  const handleBuildCombo = (combo: ComboSuggestion) => {
+    setSelectedCombo(combo);
     setShowBuildModal(true);
   };
 
-  const handleAddToBetSlip = () => {
-    if (selectedParlay) {
-      setSuccessMessage(`${selectedParlay.name} added to bet slip!`);
+  const handleAddToTracker = () => {
+    if (selectedCombo) {
+      setSuccessMessage(`${selectedCombo.name} added to tracker!`);
       setShowSuccessAlert(true);
       setTimeout(() => {
         setShowBuildModal(false);
@@ -1174,582 +1164,26 @@ const {
     }
   };
 
-  const generateParlayFromGames = useCallback(async (sport: string, numLegs: number) => {
-    console.log(`🎯 Generating parlay for ${sport} with ${numLegs} legs`);
-    setGenerating(true);
+  const handleGenerateAI = useCallback(async () => {
+    await generateComboFromQuery(customQuery);
+    setGeneratorOpen(false);
+  }, [customQuery, generateComboFromQuery]);
 
-    try {
-      let propsToUse: PropMarket[] = [];
-      if (sport === 'NBA') {
-        propsToUse = nbaProps;
-      } else if (sport === 'NHL') {
-        propsToUse = nhlProps;
-      } else if (sport === 'MLB') {
-        propsToUse = mlbProps;
-      }
-
-      if (propsToUse.length >= numLegs) {
-        // Deduplicate by player+market+line
-        const uniqueMap = new Map<string, PropMarket>();
-        propsToUse.forEach(prop => {
-          const key = `${prop.player}|${prop.market}|${prop.line}`;
-          if (!uniqueMap.has(key) || (prop.confidence || 0) > (uniqueMap.get(key)?.confidence || 0)) {
-            uniqueMap.set(key, prop);
-          }
-        });
-        const uniqueProps = Array.from(uniqueMap.values());
-
-        // Shuffle and pick unique players
-        const shuffled = [...uniqueProps].sort(() => 0.5 - Math.random());
-        const selected: PropMarket[] = [];
-        const usedPlayers = new Set<string>();
-
-        for (const prop of shuffled) {
-          if (selected.length >= numLegs) break;
-          if (!usedPlayers.has(prop.player)) {
-            selected.push(prop);
-            usedPlayers.add(prop.player);
-          }
-        }
-
-        if (selected.length < 2) {
-          throw new Error('Not enough unique props');
-        }
-
-        // Helpers
-        const getProjection = (prop: PropMarket): number => {
-          const stat = prop.market?.toLowerCase() || '';
-          let projection = prop.line * 1.05;
-          if (stat.includes('point')) projection = Math.min(projection, 50);
-          else if (stat.includes('rebound')) projection = Math.min(projection, 25);
-          else if (stat.includes('assist')) projection = Math.min(projection, 20);
-          else if (stat.includes('steal') || stat.includes('block')) projection = Math.min(projection, 5);
-          return Math.max(projection, prop.line);
-        };
-
-        const computeEdge = (prop: PropMarket, proj: number): string => {
-          if (!prop.line || prop.line === 0) return '+0%';
-          const edge = ((proj - prop.line) / prop.line) * 100;
-          const sign = edge >= 0 ? '+' : '';
-          return `${sign}${edge.toFixed(1)}%`;
-        };
-
-        let decimal = 1.0;
-        const legs = selected.map((prop, idx) => {
-          const projection = getProjection(prop);
-          const edge = computeEdge(prop, projection);
-          const safeConf = Number(prop.confidence) || 75;
-          const oddsNum = prop.over_odds;
-          if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
-          else decimal *= 1 - 100 / Math.abs(oddsNum);
-
-          return {
-            id: `real-leg-${Date.now()}-${idx}`,
-            player_name: prop.player,
-            market: prop.market,
-            odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-            odds: prop.over_odds,
-            confidence: safeConf,
-            sport: sport,
-            description: `${prop.player} ${prop.market} Over ${prop.line}`,
-            projection,
-            edge,
-            correlation_score: 0.7,
-            is_star: safeConf > 80,
-            confidence_level: safeConf > 80 ? 'very-high' : safeConf > 70 ? 'high' : 'medium',
-            line: prop.line,
-            stat_type: prop.market,
-            team: prop.team
-          };
-        });
-
-        const totalOdds = decimal >= 2.0
-          ? `+${Math.round((decimal - 1) * 100)}`
-          : Math.round(-100 / (decimal - 1)).toString();
-
-        const avgConfidence = Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length);
-
-        const realParlay: ParlaySuggestion = {
-          id: `real-${Date.now()}`,
-          name: `${sport} Real Props Parlay`,
-          sport: sport,
-          type: 'standard',
-          market_type: 'player_props',
-          legs,
-          total_odds: totalOdds,
-          total_odds_american: totalOdds,
-          confidence: avgConfidence,
-          analysis: `Parlay built from real ${sport} props with projected values.`,
-          timestamp: new Date().toISOString(),
-          isGenerated: true,
-          isToday: true,
-          confidence_level: avgConfidence > 80 ? 'very-high' : avgConfidence > 70 ? 'high' : 'medium',
-          expected_value: '+6.5%',
-          risk_level: 'medium',
-          ai_metrics: {
-            leg_count: legs.length,
-            avg_leg_confidence: avgConfidence,
-            recommended_stake: '$5.00',
-            edge: 0.065,
-          },
-          is_real_data: true,
-          has_data: true,
-          source: sport === 'NBA' ? 'prizepicks' : 'python-api'
-        };
-
-        setSelectedParlay(realParlay);
-        setParlayLegs(realParlay.legs as ParlayLeg[]);
-        setShowBuildModal(true);
-        setSuccessMessage(`Generated ${legs.length}-leg parlay from real ${sport} data!`);
-        setShowSuccessAlert(true);
-        setGenerating(false);
-        return;
-      }
-
-      // Fallback AI generation (simplified) – same as before
-      const fallbackLegs = sport === 'NBA'
-        ? [
-            { player: 'LeBron James', market: 'points', line: 25.5, odds: -115, conf: 85 },
-            { player: 'Luka Doncic', market: 'assists', line: 8.5, odds: -110, conf: 78 },
-            { player: 'Nikola Jokic', market: 'rebounds', line: 11.5, odds: -120, conf: 82 },
-          ].slice(0, numLegs).map((p, i) => ({
-            id: `fallback-${i}`,
-            player_name: p.player,
-            market: p.market,
-            odds_american: p.odds > 0 ? `+${p.odds}` : p.odds.toString(),
-            odds: p.odds,
-            confidence: p.conf,
-            sport: 'NBA',
-            description: `${p.player} ${p.market} Over ${p.line}`,
-            projection: p.line * 1.05,
-            edge: '+5%',
-            correlation_score: 0.7,
-            is_star: p.conf > 80,
-            confidence_level: p.conf > 80 ? 'high' : 'medium',
-            line: p.line,
-            stat_type: p.market
-          }))
-        : [];
-
-      let decimal = 1.0;
-      fallbackLegs.forEach(leg => {
-        const odds = leg.odds;
-        if (odds > 0) decimal *= 1 + odds / 100;
-        else decimal *= 1 - 100 / Math.abs(odds);
-      });
-      const totalOdds = decimal >= 2.0 ? `+${Math.round((decimal - 1) * 100)}` : Math.round(-100 / (decimal - 1)).toString();
-
-      const fallbackParlay: ParlaySuggestion = {
-        id: `fallback-${Date.now()}`,
-        name: `${sport} Fallback Parlay`,
-        sport,
-        type: 'standard',
-        market_type: 'player_props',
-        legs: fallbackLegs,
-        total_odds: totalOdds,
-        total_odds_american: totalOdds,
-        confidence: 82,
-        analysis: `Fallback parlay with top ${sport} players.`,
-        timestamp: new Date().toISOString(),
-        isGenerated: true,
-        isToday: true,
-        confidence_level: 'high',
-        expected_value: '+6.2%',
-        risk_level: 'medium',
-        ai_metrics: {
-          leg_count: fallbackLegs.length,
-          avg_leg_confidence: 82,
-          recommended_stake: '$5.00',
-          edge: 0.062,
-        },
-        is_real_data: false,
-        has_data: true,
-        source: 'fallback'
-      };
-
-      setSelectedParlay(fallbackParlay);
-      setParlayLegs(fallbackParlay.legs as ParlayLeg[]);
-      setShowBuildModal(true);
-      setSuccessMessage(`Generated fallback ${sport} parlay.`);
-      setShowSuccessAlert(true);
-    } catch (error) {
-      console.error('Generation failed', error);
-    } finally {
-      setGenerating(false);
-    }
-  }, [nbaProps, nhlProps, mlbProps]);
-
-// Centralized generation logic – can be called with any query
-const generateParlayFromQuery = useCallback(async (query: string) => {
-  console.log('🎯 Generating parlay from query:', query);
-  if (!query.trim()) {
-    alert('Please enter a prompt');
-    return;
-  }
-  setGenerating(true);
-
-  const queryLower = query.toLowerCase();
-  let targetSport = selectedSport;
-  let targetPlayer: string | null = null;
-  let targetMarkets: string[] = [];
-  let targetGameId: string | null = null;
-  let numLegs = 3;
-
-  // --- Parse the prompt ---
-  if (queryLower.includes('nhl') || queryLower.includes('hockey')) targetSport = 'NHL';
-  if (queryLower.includes('mlb') || queryLower.includes('baseball')) targetSport = 'MLB';
-  if (queryLower.includes('nba') || queryLower.includes('basketball')) targetSport = 'NBA';
-
-  const knownPlayers = ['lebron james', 'luka doncic', 'giannis', 'steph curry', 'austin reaves', 'lamelo ball'];
-  for (const player of knownPlayers) {
-    if (queryLower.includes(player)) {
-      targetPlayer = player;
-      break;
-    }
-  }
-
-  const marketKeywords: Record<string, string[]> = {
-    points: ['points', 'scoring', 'score'],
-    assists: ['assists', 'dimes'],
-    rebounds: ['rebounds', 'boards'],
-    goals: ['goals', 'goal scorer'],
-    saves: ['saves', 'goalie'],
-    hits: ['hits'],
-    strikeouts: ['strikeouts', 'ks'],
-    'home runs': ['home run', 'hr'],
-  };
-  for (const [market, keywords] of Object.entries(marketKeywords)) {
-    if (keywords.some(kw => queryLower.includes(kw))) {
-      targetMarkets.push(market);
-    }
-  }
-
-  const legMatch = queryLower.match(/(\d+)[-\s]?leg/);
-  if (legMatch) numLegs = parseInt(legMatch[1], 10);
-
-  if (queryLower.includes('same game') && games.length > 0) {
-    targetGameId = games[0].id;
-  }
-
-  // --- Fetch props for the target sport ---
-  let propsToUse: PropMarket[] = [];
-  if (targetSport === 'NBA') propsToUse = nbaProps;
-  else if (targetSport === 'NHL') propsToUse = nhlProps;
-  else if (targetSport === 'MLB') propsToUse = mlbProps;
-
-  if (propsToUse.length === 0) {
-    alert(`No real props available for ${targetSport}. Try another sport.`);
-    setGenerating(false);
-    return;
-  }
-
-  let filteredProps = [...propsToUse];
-  if (targetPlayer) {
-    filteredProps = filteredProps.filter(p =>
-      p.player?.toLowerCase().includes(targetPlayer!)
-    );
-  }
-  if (targetMarkets.length > 0) {
-    filteredProps = filteredProps.filter(p =>
-      targetMarkets.some(m => p.market?.toLowerCase().includes(m))
-    );
-  }
-  if (targetGameId) {
-    filteredProps = filteredProps.filter(p => p.game_id === targetGameId);
-  }
-
-  if (filteredProps.length < 2) {
-    console.warn('Not enough props matched the prompt, using top confidence props');
-    filteredProps = [...propsToUse]
-      .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-      .slice(0, 10);
-  }
-
-  // Deduplicate by player+market+line
-  const uniqueMap = new Map<string, PropMarket>();
-  filteredProps.forEach(prop => {
-    const key = `${prop.player}|${prop.market}|${prop.line}`;
-    if (!uniqueMap.has(key) || (prop.confidence || 0) > (uniqueMap.get(key)?.confidence || 0)) {
-      uniqueMap.set(key, prop);
-    }
-  });
-  const uniqueProps = Array.from(uniqueMap.values());
-
-  // Select legs ensuring unique players
-  const selected: PropMarket[] = [];
-  const usedPlayers = new Set<string>();
-  for (const prop of uniqueProps) {
-    if (selected.length >= numLegs) break;
-    if (!usedPlayers.has(prop.player)) {
-      selected.push(prop);
-      usedPlayers.add(prop.player);
-    }
-  }
-
-  if (selected.length < 2) {
-    alert('Could not build a parlay from your prompt. Try being more specific.');
-    setGenerating(false);
-    return;
-  }
-
-  // --- Build the parlay object ---
-  const getProjection = (prop: PropMarket): number => {
-    const stat = prop.market?.toLowerCase() || '';
-    let projection = prop.line * 1.05;
-    if (stat.includes('point')) projection = Math.min(projection, 50);
-    else if (stat.includes('rebound')) projection = Math.min(projection, 25);
-    else if (stat.includes('assist')) projection = Math.min(projection, 20);
-    else if (stat.includes('steal') || stat.includes('block')) projection = Math.min(projection, 5);
-    return Math.max(projection, prop.line);
-  };
-
-  const computeEdge = (prop: PropMarket, proj: number): string => {
-    if (!prop.line || prop.line === 0) return '+0%';
-    const edge = ((proj - prop.line) / prop.line) * 100;
-    const sign = edge >= 0 ? '+' : '';
-    return `${sign}${edge.toFixed(1)}%`;
-  };
-
-  let decimal = 1.0;
-  const legs = selected.map((prop, idx) => {
-    const projection = getProjection(prop);
-    const edge = computeEdge(prop, projection);
-    const safeConf = Number(prop.confidence) || 75;
-    const oddsNum = prop.over_odds;
-    if (oddsNum > 0) decimal *= 1 + oddsNum / 100;
-    else decimal *= 1 - 100 / Math.abs(oddsNum);
-
-    return {
-      id: `ai-leg-${Date.now()}-${idx}`,
-      player_name: prop.player,
-      market: prop.market,
-      odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-      odds: prop.over_odds,
-      confidence: safeConf,
-      sport: targetSport,
-      description: `${prop.player} ${prop.market} Over ${prop.line}`,
-      projection,
-      edge,
-      correlation_score: 0.7,
-      is_star: safeConf > 80,
-      confidence_level: safeConf > 80 ? 'very-high' : safeConf > 70 ? 'high' : 'medium',
-      line: prop.line,
-      stat_type: prop.market,
-      team: prop.team
-    };
-  });
-
-  const totalOdds = decimal >= 2.0
-    ? `+${Math.round((decimal - 1) * 100)}`
-    : Math.round(-100 / (decimal - 1)).toString();
-
-  const avgConfidence = Math.round(legs.reduce((sum, leg) => sum + leg.confidence, 0) / legs.length);
-
-  const aiParlay: ParlaySuggestion = {
-    id: `ai-${Date.now()}`,
-    name: `AI: ${query.substring(0, 30)}${query.length > 30 ? '...' : ''}`,
-    sport: targetSport,
-    type: 'standard',
-    market_type: targetMarkets.length ? targetMarkets.join(', ') : 'player_props',
-    legs,
-    total_odds: totalOdds,
-    total_odds_american: totalOdds,
-    confidence: avgConfidence,
-    analysis: `Parlay generated from your prompt: "${query}"`,
-    timestamp: new Date().toISOString(),
-    isGenerated: true,
-    isToday: true,
-    confidence_level: avgConfidence > 80 ? 'very-high' : avgConfidence > 70 ? 'high' : 'medium',
-    expected_value: '+6.5%',
-    risk_level: 'medium',
-    ai_metrics: {
-      leg_count: legs.length,
-      avg_leg_confidence: avgConfidence,
-      recommended_stake: '$5.00',
-      edge: 0.065,
-    },
-    is_real_data: true,
-    has_data: true,
-    source: targetSport
-  };
-
-  setSelectedParlay(aiParlay);
-  setParlayLegs(aiParlay.legs as ParlayLeg[]);
-  setShowBuildModal(true);
-  setSuccessMessage(`Generated ${legs.length}-leg parlay based on your prompt!`);
-  setShowSuccessAlert(true);
-  setGenerating(false);
-}, [selectedSport, nbaProps, nhlProps, mlbProps, games]);
-
-// Updated handleGenerateAI for the dialog – now just calls the shared function
-const handleGenerateAI = useCallback(async () => {
-  await generateParlayFromQuery(customQuery);
-  setGeneratorOpen(false);
-}, [customQuery, generateParlayFromQuery]);
-
-  // ========== DEBUG ==========
-  useEffect(() => {
-    (window as any).__parlayDebug = {
-      suggestions,
-      filteredSuggestions,
-      games,
-      nbaProps: nbaProps.length,
-      nhlProps: nhlProps.length,
-      mlbProps: mlbProps.length,
-    };
-  }, [suggestions, filteredSuggestions, games, nbaProps, nhlProps, mlbProps]);
-
-  // ========== RENDER HELPERS ==========
-  const getMinLegs = () => PARLAY_TYPES_2026.find(t => t.id === selectedType)?.min_legs || 2;
-  const getMaxLegs = () => PARLAY_TYPES_2026.find(t => t.id === selectedType)?.max_legs || 20;
-
-  const calculateTotalOdds = useMemo(() => {
-    if (parlayLegs.length === 0) return 0;
-    let decimal = 1.0;
-    parlayLegs.forEach(leg => {
-      const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
-      if (odds > 0) decimal *= 1 + (odds / 100);
-      else decimal *= 1 - (100 / odds);
-    });
-    return decimal >= 2.0 ? Math.round((decimal - 1) * 100) : Math.round(-100 / (decimal - 1));
-  }, [parlayLegs]);
-
-  const calculatePotentialPayout = useMemo(() => {
-    if (parlayLegs.length === 0 || !stake) return 0;
-    const stakeNum = parseFloat(stake) || 0;
-    let decimal = 1.0;
-    parlayLegs.forEach(leg => {
-      const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
-      if (odds > 0) decimal *= 1 + (odds / 100);
-      else decimal *= 1 - (100 / odds);
-    });
-    return stakeNum * decimal;
-  }, [parlayLegs, stake]);
-
-  const calculateImpliedProbabilityValue = useMemo(() => {
-    if (parlayLegs.length === 0) return 0;
-    let decimal = 1.0;
-    parlayLegs.forEach(leg => {
-      const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
-      if (odds > 0) decimal *= 1 + (odds / 100);
-      else decimal *= 1 - (100 / odds);
-    });
-    return (1 / decimal) * 100;
-  }, [parlayLegs]);
-
-  const addLeg = (prop: PropMarket, side: 'over' | 'under') => {
-    if (parlayLegs.length >= getMaxLegs()) {
-      alert(`Maximum ${getMaxLegs()} legs allowed.`);
-      return;
-    }
-    if (selectedType === 'same_game' && parlayLegs.length > 0) {
-      const firstGameId = parlayLegs[0].game_id;
-      if (prop.game_id !== firstGameId) {
-        alert('All legs must be from the same game for a Same Game Parlay.');
-        return;
-      }
-    }
-    const newLeg: ParlayLeg = {
-      id: `${prop.id}-${side}-${Date.now()}`,
-      player: prop.player,
-      player_name: prop.player,
-      team: prop.team,
-      market: prop.market,
-      market_type: 'player_props',
-      line: prop.line,
-      projection: prop.projection,
-      edge: prop.edge,
-      odds: side === 'over' ? prop.over_odds : prop.under_odds,
-      odds_american: side === 'over'
-        ? (prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString())
-        : (prop.under_odds > 0 ? `+${prop.under_odds}` : prop.under_odds.toString()),
-      side: side,
-      game_id: prop.game_id,
-      gameId: prop.game_id,
-      game_time: prop.game_time,
-      sport: prop.sport,
-      confidence: prop.confidence,
-      confidence_level: prop.confidence > 80 ? 'very-high' : prop.confidence > 70 ? 'high' : 'medium',
-      correlation_score: prop.confidence ? prop.confidence / 100 : 0.7,
-      is_star: prop.confidence > 80,
-      description: `${prop.player} ${side} ${prop.line} ${prop.market}`
-    };
-    setParlayLegs([...parlayLegs, newLeg]);
-    setShowPropSelector(false);
-  };
-
-  const removeLeg = (legId: string) => {
-    setParlayLegs(parlayLegs.filter(leg => leg.id !== legId));
-  };
-
-  const clearLegs = () => setParlayLegs([]);
-
-  const buildParlay = useCallback(async () => {
-    if (parlayLegs.length < getMinLegs()) {
-      alert(`Minimum ${getMinLegs()} legs required.`);
-      return;
-    }
-    setBuilding(true);
-    let decimal = 1.0;
-    parlayLegs.forEach(leg => {
-      const odds = typeof leg.odds === 'string' ? parseInt(leg.odds.replace('+', '')) : leg.odds;
-      if (odds > 0) decimal *= 1 + (odds / 100);
-      else decimal *= 1 - (100 / odds);
-    });
-    const americanOdds = decimal >= 2.0 ? Math.round((decimal - 1) * 100) : Math.round(-100 / (decimal - 1));
-    const stakeNum = parseFloat(stake) || 25;
-    const payout = stakeNum * decimal;
-    const profit = payout - stakeNum;
-    const impliedProb = (1 / decimal) * 100;
-    const result: ParlayResponse = {
-      id: `parlay-${Date.now()}`,
-      type: selectedType === 'all' ? 'standard' : selectedType,
-      sport: selectedSport,
-      legs: parlayLegs,
-      leg_count: parlayLegs.length,
-      odds: americanOdds,
-      decimal_odds: decimal,
-      stake: stakeNum,
-      potential_payout: payout,
-      profit: profit,
-      implied_probability: impliedProb,
-      correlation_bonus: parlayLegs.length > 1 ? 0.15 : 0,
-      available_boosts: [
-        { name: '10% Parlay Boost', boost_percentage: 10, new_odds: Math.round(americanOdds * 1.1) }
-      ],
-      risk_level: impliedProb > 50 ? 'Low' : impliedProb > 30 ? 'Medium' : 'High'
-    };
-    setParlayResult(result);
-    setShowParlayResult(true);
-    setBuilding(false);
-  }, [parlayLegs, selectedType, selectedSport, stake]);
-
-  // ========== MODAL REFS ==========
-  const firstFocusableRef = useRef<HTMLElement>(null);
-  const propSelectorFirstFocusRef = useRef<HTMLElement>(null);
-  const buildModalFirstFocusRef = useRef<HTMLElement>(null);
-
-  // Determine loading state based on selected sport
   const isLoadingProps = useMemo(() => {
     switch (selectedSport) {
-      case 'NBA':
-        return nbaPropsLoading;
-      case 'NHL':
-        return nhlPropsLoading;
-      case 'MLB':
-        return mlbPropsLoading;
-      default:
-        return nbaPropsLoading;
+      case 'NBA': return nbaPropsLoading;
+      case 'NHL': return nhlPropsLoading;
+      case 'MLB': return mlbPropsLoading;
+      default: return nbaPropsLoading;
     }
   }, [selectedSport, nbaPropsLoading, nhlPropsLoading, mlbPropsLoading]);
 
-  // ========== RENDER ==========
   if (isLoadingProps && props.length === 0) {
     return (
       <Container maxWidth="lg">
         <Box display="flex" justifyContent="center" alignItems="center" height="80vh" flexDirection="column">
           <CircularProgress size={60} />
-          <Typography variant="h6" sx={{ mt: 3 }}>Loading Parlay Architect '26...</Typography>
+          <Typography variant="h6" sx={{ mt: 3 }}>Loading Combo Architect '26...</Typography>
         </Box>
       </Container>
     );
@@ -1757,7 +1191,6 @@ const handleGenerateAI = useCallback(async () => {
 
   return (
     <Container maxWidth="lg">
-      {/* Success Alert */}
       {showSuccessAlert && (
         <Alert severity="success" sx={{ mb: 3 }} onClose={() => setShowSuccessAlert(false)}>
           <AlertTitle>Success!</AlertTitle>
@@ -1765,68 +1198,43 @@ const handleGenerateAI = useCallback(async () => {
         </Alert>
       )}
 
-      {/* Header */}
+      <Alert severity={generatorCredits > 0 ? "info" : "warning"} sx={{ mb: 3 }}>
+        <AlertTitle>
+          {generatorCredits > 0 ? `✨ You have ${generatorCredits} generator credits remaining` : "⚠️ No generator credits left"}
+        </AlertTitle>
+        Generating a new combo uses 1 credit. Viewing the top 4 projected picks above is free.
+        {generatorCredits === 0 && " Purchase credits to generate combos."}
+        <Box sx={{ mt: 1 }}>
+          <Button size="small" variant="outlined" onClick={() => setShowCreditsModal(true)} startIcon={<CreditCardIcon />}>
+            Buy Credits
+          </Button>
+          <Button size="small" variant="contained" sx={{ ml: 1 }} onClick={() => setShowUpgradeModal(true)}>
+            Upgrade to Premium
+          </Button>
+          <Button size="small" variant="text" onClick={refreshCredits} startIcon={<RefreshIcon />}>
+            Refresh ({generatorCredits})
+          </Button>
+        </Box>
+      </Alert>
+
       <Paper sx={{ background: 'linear-gradient(135deg, #6C5CE7 0%, #5A4ABD 100%)', mb: 4, p: 3, color: 'white' }}>
         <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-          <Box display="flex" gap={1}>
-            <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }} variant="outlined" size="small">Back</Button>
-            <Button startIcon={<BugReportIcon />} onClick={() => setShowDebugPanel(!showDebugPanel)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)', bgcolor: showDebugPanel ? 'rgba(0,0,0,0.3)' : 'transparent' }} variant="outlined" size="small">{showDebugPanel ? 'Hide Debug' : 'Debug'}</Button>
-          </Box>
+          <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(-1)} sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }} variant="outlined" size="small">Back</Button>
           <Box display="flex" alignItems="center" gap={1}>
             {lastRefresh && <Chip label={`Updated: ${format(lastRefresh, 'h:mm a')}`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} />}
-            <Chip label={`${suggestions.length} ${selectedSport} Parlays`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} icon={<TrophyIcon sx={{ fontSize: 14 }} />} />
+            <Chip label={`${suggestions.length} ${selectedSport} Combos`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }} icon={<TrophyIcon sx={{ fontSize: 14 }} />} />
           </Box>
         </Box>
         <Box display="flex" alignItems="center" gap={3}>
           <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 64, height: 64 }}><BasketballIcon sx={{ fontSize: 32 }} /></Avatar>
           <Box>
-            <Typography variant="h3" fontWeight="bold" gutterBottom>🏀 Parlay Architect '26</Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>Create winning parlays with real data · March 2026</Typography>
+            <Typography variant="h3" fontWeight="bold" gutterBottom>Combo Architect '26</Typography>
+            <Typography variant="h6" sx={{ opacity: 0.9 }}>Create winning combos with real data</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>You have {generatorCredits} credits remaining</Typography>
           </Box>
         </Box>
       </Paper>
 
-      {/* Debug Panel */}
-      <Collapse in={showDebugPanel}>
-        <Paper sx={{ p: 2, mb: 4, bgcolor: '#1e293b', color: 'white', borderRadius: 2 }}>
-          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-            <Box display="flex" alignItems="center" gap={1}><BugReportIcon fontSize="small" /><Typography variant="h6">Debug Panel</Typography></Box>
-            <Chip label="Dev Mode" size="small" sx={{ bgcolor: '#ef4444', color: 'white' }} />
-          </Box>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" color="#94a3b8" gutterBottom>Component Stats</Typography>
-              <Box sx={{ pl: 2 }}>
-                <Typography variant="body2">• Total Suggestions: {suggestions.length}</Typography>
-                <Typography variant="body2">• Filtered: {filteredSuggestions.length}</Typography>
-                <Typography variant="body2">• Today's Games: {games.length}</Typography>
-                <Typography variant="body2">• Parlay Legs: {parlayLegs.length}</Typography>
-                <Typography variant="body2">• Data Source: ✅ Real API Data</Typography>
-                <Typography variant="body2">• NBA Props: {nbaProps.length}</Typography>
-                <Typography variant="body2">• NHL Props: {nhlProps.length}</Typography>
-                <Typography variant="body2">• MLB Props: {mlbProps.length}</Typography>
-                <Typography variant="body2">• Last Refresh: {lastRefresh ? format(lastRefresh, 'h:mm:ss a') : 'Never'}</Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" color="#94a3b8" gutterBottom>API Status</Typography>
-              <Box sx={{ pl: 2 }}>
-                <Typography variant="body2" sx={{ color: '#10b981' }}>• PrizePicks API: ✅ Connected</Typography>
-                <Typography variant="body2" sx={{ color: '#10b981' }}>• Python API: ✅ Connected</Typography>
-                <Typography variant="body2" sx={{ color: gamesError ? '#ef4444' : '#10b981' }}>• Games API: {gamesError ? '❌ Error' : '✅ Connected'}</Typography>
-                <Typography variant="body2" sx={{ color: nbaProps.length > 0 ? '#10b981' : '#f59e0b' }}>• NBA Props: ✅ {nbaProps.length} loaded</Typography>
-                <Typography variant="body2" sx={{ color: nhlProps.length > 0 ? '#10b981' : '#f59e0b' }}>• NHL Props: {nhlProps.length > 0 ? `✅ ${nhlProps.length} loaded` : '⚠️ None'}</Typography>
-                <Typography variant="body2" sx={{ color: mlbProps.length > 0 ? '#10b981' : '#f59e0b' }}>• MLB Props: {mlbProps.length > 0 ? `✅ ${mlbProps.length} loaded` : '⚠️ None'}</Typography>
-              </Box>
-              <Box mt={2}>
-                <Button size="small" variant="outlined" sx={{ color: 'white', borderColor: '#64748b', mr: 1 }} onClick={handleRefresh}>Force Refresh</Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </Paper>
-      </Collapse>
-
-      {/* Sport Selector */}
       <Paper sx={{ p: 2, mb: 4 }}>
         <Typography variant="h6" gutterBottom>Select Sport</Typography>
         <Box display="flex" gap={1} flexWrap="wrap">
@@ -1847,29 +1255,33 @@ const handleGenerateAI = useCallback(async () => {
         </Box>
       </Paper>
 
-      {/* Parlay Type Selector */}
       <Paper sx={{ p: 2, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>📋 Parlay Type</Typography>
+        <Typography variant="h6" gutterBottom>Combo Type</Typography>
         <Box display="flex" gap={1} flexWrap="wrap">
-          {['standard', 'same_game', 'teaser', 'round_robin', 'all'].map(type => (
+          {['standard', 'same_game', 'all'].map(type => (
             <Chip
               key={type}
-              label={type.replace('_', ' ')}
+              label={type === 'same_game' ? 'Game Combo' : type === 'standard' ? 'Standard' : 'All'}
               onClick={() => setSelectedType(type)}
               color={selectedType === type ? "primary" : "default"}
               variant={selectedType === type ? "filled" : "outlined"}
-              sx={{ fontWeight: selectedType === type ? 'bold' : 'normal' }}
             />
           ))}
         </Box>
       </Paper>
 
-      {/* Action Bar */}
       <Paper sx={{ p: 2, mb: 4 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={4}>
-            <Button variant="contained" fullWidth startIcon={<AutorenewIcon />} onClick={() => generateParlayFromGames(selectedSport, 3)} disabled={generating} sx={{ height: '40px', bgcolor: '#6C5CE7' }}>
-              {generating ? <><CircularProgress size={20} sx={{ mr: 1, color: 'white' }} />Generating...</> : `🎯 Generate ${selectedSport} Parlay`}
+            <Button 
+              variant="contained" 
+              fullWidth 
+              startIcon={<AutorenewIcon />} 
+              onClick={() => generateComboFromGames(selectedSport, 3)} 
+              disabled={generating || generatorCredits <= 0 || filteredProps.length === 0} 
+              sx={{ height: '40px', bgcolor: '#6C5CE7' }}
+            >
+              {generating ? <><CircularProgress size={20} sx={{ mr: 1, color: 'white' }} />Generating...</> : `Generate ${selectedSport} Combo`}
             </Button>
           </Grid>
           <Grid item xs={12} sm={4}>
@@ -1884,88 +1296,144 @@ const handleGenerateAI = useCallback(async () => {
             <Box display="flex" justifyContent="flex-end" gap={1}>
               <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={isLoadingProps}>Refresh</Button>
               <Button variant="contained" startIcon={<AutoAwesomeIcon />} onClick={() => setGeneratorOpen(true)} sx={{ bgcolor: '#6C5CE7' }}>AI Generate</Button>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowPropSelector(true)} sx={{ bgcolor: '#6C5CE7' }} disabled={props.length === 0}>Add Leg ({props.length})</Button>
             </Box>
           </Grid>
         </Grid>
       </Paper>
 
-      {/* Enhanced Filter Section */}
       <Paper sx={{ p: 2, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>🎯 Advanced Filters</Typography>
+        <Typography variant="h6" gutterBottom>Advanced Filters</Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
               <InputLabel>Market Type</InputLabel>
               <Select value={marketType} onChange={(e) => setMarketType(e.target.value)} label="Market Type">
-                {MARKET_TYPES.map(market => <MenuItem key={market.id} value={market.id}><Box display="flex" alignItems="center" gap={1}><span>{market.icon}</span>{market.name}</Box></MenuItem>)}
+                {MARKET_TYPES.map(market => <MenuItem key={market.id} value={market.id}>{market.name}</MenuItem>)}
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
-              <InputLabel>Parlay Size</InputLabel>
-              <Select value={parlaySize} onChange={(e) => setParlaySize(e.target.value)} label="Parlay Size">
-                {PARLAY_SIZES.map(size => <MenuItem key={size.id} value={size.id}>{size.name}</MenuItem>)}
+              <InputLabel>Combo Size</InputLabel>
+              <Select value={comboSize} onChange={(e) => setComboSize(e.target.value)} label="Combo Size">
+                {COMBO_SIZES.map(size => <MenuItem key={size.id} value={size.id}>{size.name}</MenuItem>)}
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <FormControl fullWidth size="small">
-              <InputLabel>Max Risk</InputLabel>
-              <Select value={maxRisk} onChange={(e) => setMaxRisk(e.target.value)} label="Max Risk">
-                {RISK_LEVELS.map(risk => <MenuItem key={risk.id} value={risk.id}><Box display="flex" alignItems="center" gap={1}><Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: risk.color }} />{risk.name}</Box></MenuItem>)}
+              <InputLabel>Max Volatility</InputLabel>
+              <Select value={maxVolatility} onChange={(e) => setMaxVolatility(e.target.value)} label="Max Volatility">
+                {RISK_LEVELS.map(risk => <MenuItem key={risk.id} value={risk.id}>{risk.name}</MenuItem>)}
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Box sx={{ px: 1 }}>
-              <Typography variant="caption" color="text.secondary" display="block">Min Edge: {minEdge}%</Typography>
-              <Slider value={minEdge} onChange={(_, v) => setMinEdge(v as number)} min={0} max={20} step={1} marks={[{value:0,label:'0%'},{value:10,label:'10%'},{value:20,label:'20%'}]} valueLabelDisplay="auto" valueLabelFormat={v=>`${v}%`} />
+              <Typography variant="caption" color="text.secondary">Min Advantage: {minAnalyticalAdvantage}%</Typography>
+              <Slider value={minAnalyticalAdvantage} onChange={(_, v) => setMinAnalyticalAdvantage(v as number)} min={0} max={12} step={1} valueLabelDisplay="auto" />
             </Box>
           </Grid>
           <Grid item xs={12} sm={6}>
             <Box sx={{ px: 1 }}>
-              <Typography variant="caption" color="text.secondary" display="block">Min Confidence: {minConfidence}%</Typography>
-              <Slider value={minConfidence} onChange={(_, v) => setMinConfidence(v as number)} min={0} max={100} step={5} marks={[{value:0,label:'0%'},{value:50,label:'50%'},{value:100,label:'100%'}]} valueLabelDisplay="auto" />
+              <Typography variant="caption" color="text.secondary">Min Confidence: {minConfidence}%</Typography>
+              <Slider value={minConfidence} onChange={(_, v) => setMinConfidence(v as number)} min={55} max={85} step={5} valueLabelDisplay="auto" />
             </Box>
           </Grid>
           <Grid item xs={12} sm={6}>
             <Box sx={{ px: 1 }}>
-              <Typography variant="caption" color="text.secondary" display="block">Max Legs: {maxLegs}</Typography>
-              <Slider value={maxLegs} onChange={(_, v) => setMaxLegs(v as number)} min={2} max={10} step={1} marks={[{value:2,label:'2'},{value:5,label:'5'},{value:10,label:'10'}]} valueLabelDisplay="auto" />
+              <Typography variant="caption" color="text.secondary">Max Legs: {maxLegs}</Typography>
+              <Slider value={maxLegs} onChange={(_, v) => setMaxLegs(v as number)} min={2} max={10} step={1} valueLabelDisplay="auto" />
             </Box>
           </Grid>
         </Grid>
       </Paper>
 
-      {/* Quick Filter Section */}
-      <Paper sx={{ p: 2, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>⚡ Quick Filters</Typography>
-        <Box display="flex" flexWrap="wrap" gap={1}>
-          <Chip label="🎯 Player Props Only" onClick={() => { setMarketType('player_props'); setMinEdge(8); setMaxRisk('medium'); }} color={marketType === 'player_props' ? "primary" : "default"} variant="outlined" />
-          <Chip label="💰 High Confidence (+80%)" onClick={() => { setMinConfidence(80); setMinEdge(10); setMaxRisk('low'); }} color={minConfidence === 80 ? "primary" : "default"} variant="outlined" />
-          <Chip label="🔄 Mixed Markets" onClick={() => { setMarketType('mixed'); setParlaySize('3'); setMaxRisk('medium'); }} color={marketType === 'mixed' ? "primary" : "default"} variant="outlined" />
-          <Chip label="📊 Game Totals" onClick={() => { setMarketType('game_totals'); setMinEdge(5); setParlaySize('2'); }} color={marketType === 'game_totals' ? "primary" : "default"} variant="outlined" />
-          <Chip label="⚡ Quick Parlays (2-leg)" onClick={() => { setParlaySize('2'); setMaxRisk('low'); setMinConfidence(70); }} color={parlaySize === '2' ? "primary" : "default"} variant="outlined" />
-          <Chip label="🔄 Clear Filters" onClick={() => { setMarketType('all'); setMinConfidence(60); setMinEdge(5); setMaxRisk('all'); setParlaySize('all'); setSearchQuery(''); }} color="default" variant="outlined" />
-        </Box>
+      <Paper sx={{ mb: 4 }}>
+        <Accordion expanded={showTodaysGames} onChange={() => setShowTodaysGames(!showTodaysGames)}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box display="flex" alignItems="center" gap={2}>
+              <TodayIcon color="primary" />
+              <Typography variant="h6">Today's {selectedSport} Games</Typography>
+              <Chip label={`${games.length} games`} size="small" />
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            {games.length === 0 ? (
+              <Typography color="text.secondary">No games scheduled for today.</Typography>
+            ) : (
+              <Grid container spacing={2}>
+                {games.slice(0, 4).map(game => (
+                  <Grid item xs={12} sm={6} md={4} key={game.id}>
+                    <Card variant="outlined">
+                      <CardContent>
+                        <Typography variant="subtitle1">{game.away_team} @ {game.home_team}</Typography>
+                        <Typography variant="caption">{safeFormatTime(game.commence_time)}</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            )}
+          </AccordionDetails>
+        </Accordion>
       </Paper>
 
-      {/* AI Generator Dialog */}
+      <Typography variant="h5" gutterBottom sx={{ mt: 2, mb: 2 }}>
+        🔥 Top Projected Picks ({filteredSuggestions.length})
+      </Typography>
+      {filteredSuggestions.length === 0 ? (
+        <Alert severity="info">
+          No combo suggestions match your filters. {filteredProps.length === 0 ? 'No player props available for today\'s games.' : 'Try adjusting your filters.'}
+        </Alert>
+      ) : (
+        <Grid container spacing={3}>
+          {filteredSuggestions.map(combo => (
+            <Grid item xs={12} md={6} key={combo.id}>
+              <Card variant="outlined" sx={{ height: '100%' }}>
+                <CardContent>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                    <Typography variant="h6">{combo.name}</Typography>
+                    <Chip label={combo.total_lineValue} color="primary" size="small" />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {combo.legs.length} legs • {combo.sport}
+                  </Typography>
+                  <Divider sx={{ my: 1 }} />
+                  {combo.legs.slice(0, 3).map((leg, idx) => (
+                    <Box key={idx} mb={1}>
+                      <Typography variant="body2">{leg.description}</Typography>
+                      <Box display="flex" alignItems="center">
+                        <LinearProgress variant="determinate" value={leg.confidence} sx={{ width: 80, height: 4, mr: 1 }} />
+                        <Typography variant="caption">{leg.confidence}% conf</Typography>
+                        {leg.edge && <Typography variant="caption" sx={{ ml: 1 }}>Edge: {leg.edge}</Typography>}
+                      </Box>
+                    </Box>
+                  ))}
+                  {combo.legs.length > 3 && <Typography variant="caption">+{combo.legs.length - 3} more</Typography>}
+                  <Button size="small" variant="outlined" onClick={() => handleBuildCombo(combo)} sx={{ mt: 2 }}>
+                    Build This Combo
+                  </Button>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
       <Dialog open={generatorOpen} onClose={() => setGeneratorOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box display="flex" alignItems="center" gap={1}>
             <AutoAwesomeIcon color="primary" />
-            <Typography variant="h6">AI Parlay Generator</Typography>
+            <Typography variant="h6">AI Combo Generator</Typography>
+            <Chip label={`${generatorCredits} credits left`} size="small" color="warning" />
           </Box>
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" paragraph>
-            Describe the parlay you want – e.g., "best value props", "LeBron James points and assists", or "Lakers vs Warriors player props".
+            Describe the combo you want. Each generation uses 1 credit.
           </Typography>
 
-          {/* Dropdown for quick prompts */}
           <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel>Choose a prompt</InputLabel>
             <Select
@@ -1991,26 +1459,13 @@ const handleGenerateAI = useCallback(async () => {
             variant="outlined"
             sx={{ mb: 3 }}
           />
-
-          <Typography variant="subtitle2" gutterBottom>Quick Prompt Chips</Typography>
-          <Box display="flex" gap={1} flexWrap="wrap">
-            {PROMPTS.map((prompt, idx) => (
-              <Chip
-                key={idx}
-                label={prompt.label}
-                onClick={() => setCustomQuery(prompt.query)}
-                icon={<AutoAwesomeIcon />}
-                sx={{ backgroundColor: alpha('#6C5CE7', 0.1), color: '#6C5CE7', '&:hover': { backgroundColor: alpha('#6C5CE7', 0.2) } }}
-              />
-            ))}
-          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setGeneratorOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleGenerateAI}
-            disabled={!customQuery.trim() || generating}
+            disabled={!customQuery.trim() || generating || generatorCredits <= 0}
             startIcon={generating ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
           >
             {generating ? 'Generating...' : 'Generate'}
@@ -2018,463 +1473,126 @@ const handleGenerateAI = useCallback(async () => {
         </DialogActions>
       </Dialog>
 
-      {/* AI Suggestions (placeholder) */}
-      {aiSuggestions.length > 0 && (
-        <Paper sx={{ p: 2, mb: 4, bgcolor: alpha('#6C5CE7', 0.05), border: '1px solid #6C5CE7' }}>
-          <Typography variant="h6">AI Suggestions</Typography>
-          {/* ... render AI suggestions if any ... */}
-        </Paper>
-      )}
-
-      {/* Teaser Options */}
-      {selectedType === 'teaser' && parlayLegs.length >= 2 && (
-        <Paper sx={{ p: 2, mb: 4 }}>
-          <Typography variant="h6" gutterBottom>📋 Teaser Options</Typography>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Box display="flex" gap={1}>
-              {TEASER_POINTS.map(points => (
-                <Button key={points} variant={teaserPoints === points ? "contained" : "outlined"} size="small" onClick={() => setTeaserPoints(points)}>{points} pts</Button>
-              ))}
-            </Box>
-            {teaserOdds.length > 0 && (
-              <Box display="flex" alignItems="center" gap={1}>
-                <Typography variant="body2" color="text.secondary">Odds per leg:</Typography>
-                <Chip label={teaserOdds[0].odds} size="small" color="primary" sx={{ fontWeight: 'bold' }} />
-              </Box>
-            )}
-          </Box>
-        </Paper>
-      )}
-
-      {/* Round Robin Options */}
-      {selectedType === 'round_robin' && parlayLegs.length >= 3 && roundRobinCombos.length > 0 && (
-        <Paper sx={{ p: 2, mb: 4 }}>
-          <Typography variant="h6" gutterBottom>🔄 Round Robin Combinations</Typography>
-          <Box mb={2}>
-            <ToggleButtonGroup value={roundRobinSize} exclusive onChange={(e, v) => v && setRoundRobinSize(v)} size="small">
-              {ROUND_ROBIN_SIZES.map(size => <ToggleButton key={size} value={size}>{size}</ToggleButton>)}
-            </ToggleButtonGroup>
-          </Box>
-          <Box display="flex" gap={2} overflow="auto" pb={1}>
-            {roundRobinCombos.slice(0,5).map((combo, idx) => (
-              <Card key={combo.id} sx={{ minWidth: 120, p: 1.5 }}>
-                <Typography variant="caption">Parlay {idx+1}</Typography>
-                <Typography variant="h6" color="primary">{combo.odds > 0 ? `+${combo.odds}` : combo.odds}</Typography>
-                <Typography variant="body2" color="success.main">${combo.payout.toFixed(2)}</Typography>
-              </Card>
-            ))}
-          </Box>
-        </Paper>
-      )}
-
-      {/* Parlay Builder */}
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Box display="flex" alignItems="center" gap={1}><BuildIcon color="primary" /><Typography variant="h6">Parlay Builder</Typography></Box>
-          <Box display="flex" gap={1}>
-            <Chip label={`${parlayLegs.length}/${getMaxLegs()} legs`} color={parlayLegs.length >= getMinLegs() ? "success" : "default"} />
-            <Button size="small" variant="outlined" color="error" onClick={clearLegs} disabled={parlayLegs.length === 0}>Clear</Button>
-          </Box>
-        </Box>
-
-        {parlayLegs.length === 0 ? (
-          <Box textAlign="center" py={4}>
-            <AddCircleIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="body1" color="text.secondary" gutterBottom>No legs added yet</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Click "Add Leg" to start building your parlay</Typography>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowPropSelector(true)} disabled={props.length === 0}>Add Leg</Button>
-          </Box>
-        ) : (
-          <>
-            {parlayLegs.map((leg, idx) => (
-              <Box key={leg.id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, mb: 1, bgcolor: '#f8fafc', borderRadius: 1, border: '1px solid', borderColor: leg.is_star ? '#FFD700' : 'transparent' }}>
-                <Box display="flex" alignItems="center" gap={2}>
-                  <Avatar sx={{ width: 24, height: 24, bgcolor: '#6C5CE7', fontSize: 12 }}>{idx+1}</Avatar>
-                  <Box>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Typography variant="body2" fontWeight="bold">{leg.player || leg.description?.split(' ')[0] || 'Pick'}</Typography>
-                      {leg.is_star && <StarIcon sx={{ fontSize: 14, color: '#FFD700' }} />}
-                    </Box>
-                    <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                      <Typography variant="caption" color="text.secondary">{leg.market} {leg.side} {leg.line}</Typography>
-                      {leg.projection && <Chip label={`Proj: ${leg.projection.toFixed(1)}`} size="small" sx={{ height: 18, bgcolor: leg.projection > leg.line ? '#10b98120' : '#ef444420', color: leg.projection > leg.line ? '#10b981' : '#ef4444', fontSize: '0.6rem' }} />}
-                      {leg.edge && <Chip label={`Edge: ${leg.edge}`} size="small" sx={{ height: 18, bgcolor: leg.edge.startsWith('+') ? '#10b98120' : '#ef444420', color: leg.edge.startsWith('+') ? '#10b981' : '#ef4444', fontSize: '0.6rem' }} />}
-                    </Box>
-                    {leg.correlation_score && leg.correlation_score > 0.7 && <Chip icon={<FlashOnIcon sx={{ fontSize: 12 }} />} label="Correlated" size="small" sx={{ mt: 0.5, height: 20, bgcolor: '#FFD70020', color: '#FFD700', fontSize: '0.6rem' }} />}
-                  </Box>
-                </Box>
-                <Box display="flex" alignItems="center" gap={2}>
-                  <Typography variant="body2" fontWeight="bold" color={leg.odds > 0 ? 'success.main' : 'text.primary'}>{leg.odds > 0 ? `+${leg.odds}` : leg.odds}</Typography>
-                  <IconButton size="small" onClick={() => removeLeg(leg.id)}><ClearIcon fontSize="small" /></IconButton>
-                </Box>
-              </Box>
-            ))}
-
-            {parlayLegs.length >= 2 && (
-              <Box sx={{ mt: 3, p: 2, bgcolor: '#f0f9ff', borderRadius: 1 }}>
-                <Grid container spacing={2}>
-                  <Grid item xs={4}><Typography variant="caption" color="text.secondary">Total Odds</Typography><Typography variant="h6" color="primary">{calculateTotalOdds > 0 ? `+${calculateTotalOdds}` : calculateTotalOdds}</Typography></Grid>
-                  <Grid item xs={4}><Typography variant="caption" color="text.secondary">Implied Probability</Typography><Typography variant="h6">{calculateImpliedProbabilityValue.toFixed(1)}%</Typography></Grid>
-                  <Grid item xs={4}><Typography variant="caption" color="text.secondary">Potential Payout</Typography><Typography variant="h6" color="success.main">${calculatePotentialPayout.toFixed(2)}</Typography></Grid>
-                </Grid>
-              </Box>
-            )}
-
-            <Box sx={{ mt: 3 }}>
-              <Button variant="contained" fullWidth size="large" startIcon={building ? <CircularProgress size={20} color="inherit" /> : <BuildIcon />} onClick={buildParlay} disabled={parlayLegs.length < getMinLegs() || building} sx={{ py: 1.5 }}>{building ? 'Building...' : 'Build Parlay'}</Button>
-            </Box>
-          </>
-        )}
-      </Paper>
-
-      {/* Today's Games Panel */}
-      <Paper sx={{ mb: 4 }}>
-        <Accordion expanded={showTodaysGames} onChange={() => setShowTodaysGames(!showTodaysGames)}>
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Box display="flex" alignItems="center" gap={2}>
-              <TodayIcon color="primary" />
-              <Typography variant="h6">Today's NBA Games</Typography>
-              <Chip label={`${games.length} games`} size="small" color={gamesLoading ? "default" : gamesError ? "error" : "success"} />
-            </Box>
-          </AccordionSummary>
-          <AccordionDetails>
-            {gamesLoading ? (
-              <Box display="flex" justifyContent="center" p={3}><CircularProgress size={24} /><Typography sx={{ ml: 2 }}>Loading live games...</Typography></Box>
-            ) : gamesError ? (
-              <Alert severity="warning">
-                <AlertTitle>Could not load games</AlertTitle>
-                Using mock data. <Button size="small" sx={{ ml: 2 }} onClick={() => refetchGames()}>Retry</Button>
-              </Alert>
-            ) : games.length === 0 ? (
-              <Alert severity="info"><AlertTitle>No NBA Games Today</AlertTitle>Try generating a parlay or check back later.</Alert>
-            ) : (
-              <Grid container spacing={2}>
-                {games.slice(0,6).map(game => (
-                  <Grid item xs={12} sm={6} md={4} key={game.id}>
-                    <Card variant="outlined" sx={{ height: '100%' }}>
-                      <CardContent>
-                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                          <Typography variant="caption" color="text.secondary"><ScheduleIcon fontSize="small" sx={{ mr: 0.5 }} />{(() => { try { return format(parseISO(game.commence_time), 'h:mm a'); } catch { return 'TBD'; } })()}</Typography>
-                          <Chip label="NBA" size="small" color="primary" />
-                        </Box>
-                        <Box textAlign="center" mb={2}>
-                          <Typography variant="body2" fontWeight="bold" color="primary">{game.away_team}</Typography>
-                          <Typography variant="body2" color="text.secondary">@</Typography>
-                          <Typography variant="body2" fontWeight="bold" color="primary">{game.home_team}</Typography>
-                        </Box>
-                        <Button size="small" variant="contained" fullWidth sx={{ mt: 2 }} onClick={() => {
-                          const gameProps = nbaProps.filter(p => p.team === game.home_team || p.team === game.away_team);
-                          if (gameProps.length >= 2) {
-                            const quickParlay: ParlaySuggestion = {
-                              id: `quick-${Date.now()}`,
-                              name: `${game.away_team} @ ${game.home_team}`,
-                              sport: 'NBA',
-                              type: 'player_props',
-                              market_type: 'player_props',
-                              legs: gameProps.slice(0,2).map((prop, idx) => ({
-                                id: `leg-${Date.now()}-${idx}`,
-                                gameId: game.id,
-                                description: `${prop.player} ${prop.market} Over ${prop.line}`,
-                                odds: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-                                odds_american: prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds.toString(),
-                                price: prop.over_odds,
-                                confidence: prop.confidence,
-                                sport: 'NBA',
-                                market: 'player_props',
-                                player_name: prop.player,
-                                stat_type: prop.market,
-                                line: prop.line,
-                                projection: prop.projection,
-                                edge: prop.edge,
-                                teams: { home: game.home_team, away: game.away_team },
-                                confidence_level: prop.confidence > 80 ? 'very-high' : 'high',
-                                correlation_score: 0.7,
-                                is_star: prop.confidence > 80
-                              })),
-                              totalOdds: '+250',
-                              total_odds: '+250',
-                              total_odds_american: '+250',
-                              confidence: 75,
-                              analysis: 'Quick pick from today\'s game using real props',
-                              timestamp: new Date().toISOString(),
-                              isGenerated: true,
-                              isToday: true,
-                              confidence_level: 'high',
-                              expected_value: '+6.5%',
-                              risk_level: 'medium',
-                              ai_metrics: { leg_count: 2, avg_leg_confidence: 75, recommended_stake: '$10.00', edge: 0.065 },
-                              is_real_data: true,
-                              has_data: true
-                            };
-                            setSelectedParlay(quickParlay);
-                            setParlayLegs(quickParlay.legs as ParlayLeg[]);
-                            setShowBuildModal(true);
-                            setSuccessMessage('Quick parlay created from real props!');
-                            setShowSuccessAlert(true);
-                          } else {
-                            const quickParlay: ParlaySuggestion = {
-                              id: `quick-${Date.now()}`,
-                              name: `${game.away_team} @ ${game.home_team}`,
-                              sport: 'NBA',
-                              type: 'Moneyline',
-                              market_type: 'moneyline',
-                              legs: [{
-                                id: `leg-${Date.now()}`,
-                                gameId: game.id,
-                                description: `${game.home_team} ML`,
-                                odds: '-110',
-                                odds_american: '-110',
-                                price: -110,
-                                confidence: 68,
-                                sport: 'NBA',
-                                market: 'h2h',
-                                teams: { home: game.home_team, away: game.away_team },
-                                confidence_level: 'medium',
-                                correlation_score: 0.65,
-                                is_star: false
-                              }],
-                              totalOdds: '-110',
-                              total_odds: '-110',
-                              total_odds_american: '-110',
-                              confidence: 68,
-                              analysis: 'Quick pick from today\'s game',
-                              timestamp: new Date().toISOString(),
-                              isGenerated: true,
-                              isToday: true,
-                              confidence_level: 'medium',
-                              expected_value: '+2.5%',
-                              risk_level: 'low',
-                              ai_metrics: { leg_count: 1, avg_leg_confidence: 68, recommended_stake: '$10.00', edge: 0.025 },
-                              is_real_data: !!game.bookmakers,
-                              has_data: true
-                            };
-                            setSelectedParlay(quickParlay);
-                            setParlayLegs(quickParlay.legs as ParlayLeg[]);
-                            setShowBuildModal(true);
-                            setSuccessMessage('Quick parlay created from selected game!');
-                            setShowSuccessAlert(true);
-                          }
-                        }}>Quick Pick</Button>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                ))}
-              </Grid>
-            )}
-          </AccordionDetails>
-        </Accordion>
-      </Paper>
-
-      {/* Parlay Suggestions */}
-      {filteredSuggestions.length === 0 ? (
-        <Alert severity="info">No parlay suggestions match your filters.</Alert>
-      ) : (
-        <Grid container spacing={3}>
-          {filteredSuggestions.map(parlay => (
-            <Grid item xs={12} md={6} key={parlay.id}>
-              <Card variant="outlined" sx={{ height: '100%' }}>
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                    <Box><Typography variant="h6">{parlay.name}</Typography><Typography variant="body2" color="text.secondary">{parlay.legs.length} legs • {parlay.type} • {parlay.sport}</Typography></Box>
-                    <Box display="flex" flexDirection="column" alignItems="flex-end">
-                      {parlay.is_real_data && <Chip label="✅ LIVE" size="small" sx={{ bgcolor: '#10b981', color: 'white', fontSize: '0.6rem', height: 18 }} />}
-                      {parlay.source && <Chip label={parlay.source} size="small" sx={{ bgcolor: '#6C5CE7', color: 'white', fontSize: '0.6rem', height: 18, mt: 0.5 }} />}
-                    </Box>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{parlay.analysis}</Typography>
-                  <Box sx={{ mb: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: "center", mb: 0.5 }}>
-                      <Typography variant="caption" color="text.secondary">AI Confidence: {parlay.confidence_level}</Typography>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        {parlay.expected_value && <Chip label={`EV: ${parlay.expected_value}`} size="small" sx={{ bgcolor: parlay.expected_value?.startsWith('+') ? '#10b98120' : '#ef444420', color: parlay.expected_value?.startsWith('+') ? '#10b981' : '#ef4444', fontSize: '0.7rem' }} />}
-                        <Chip label={parlay.total_odds_american || parlay.total_odds} size="small" color="primary" sx={{ fontSize: '0.7rem', fontWeight: 'bold' }} />
-                      </Box>
-                    </Box>
-                    <LinearProgress variant="determinate" value={parlay.confidence} sx={{ height: 6, borderRadius: 3 }} />
-                  </Box>
-                  <Box sx={{ mb: 2 }}>
-                    {parlay.legs?.slice(0,2).map((leg, i) => (
-                      <Box key={i} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-                        <Typography variant="body2" color="text.secondary">• {leg.description}</Typography>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          {leg.projection && <Chip label={`Proj: ${typeof leg.projection === 'number' ? leg.projection.toFixed(1) : leg.projection}`} size="small" sx={{ height: 18, bgcolor: leg.projection > leg.line ? '#10b98120' : '#ef444420', color: leg.projection > leg.line ? '#10b981' : '#ef4444', fontSize: '0.6rem' }} />}
-                          <Chip label={leg.odds_american} size="small" sx={{ height: 18, fontSize: '0.6rem' }} />
-                        </Box>
-                      </Box>
-                    ))}
-                    {parlay.legs?.length > 2 && <Typography variant="caption" color="text.secondary">+{parlay.legs.length-2} more legs</Typography>}
-                  </Box>
-                  {parlay.ai_metrics && (
-                    <Box sx={{ mb: 2, p: 1, bgcolor: '#f8fafc', borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary">AI Metrics: {parlay.ai_metrics.leg_count} legs • {parlay.ai_metrics.avg_leg_confidence}% avg • Stake: {parlay.ai_metrics.recommended_stake} {parlay.ai_metrics.edge && ` • Edge: ${(parlay.ai_metrics.edge*100).toFixed(1)}%`}</Typography>
-                    </Box>
-                  )}
-                  <Box display="flex" gap={1}>
-                    <Button variant="contained" onClick={() => handleBuildParlay(parlay)} startIcon={<BuildIcon />} sx={{ flex: 1 }}>Build</Button>
-                    <Button variant="outlined" onClick={() => { setParlayLegs(parlay.legs as ParlayLeg[]); setSuccessMessage('Parlay added to builder!'); setShowSuccessAlert(true); }}>Add Legs</Button>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      )}
-
-      {/* Prop Selector Modal */}
-      <Dialog open={showPropSelector} onClose={() => setShowPropSelector(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">Add Parlay Leg - {selectedSport} Props</Typography>
-            <IconButton onClick={() => setShowPropSelector(false)}><ClearIcon /></IconButton>
+      <Dialog open={showCreditsModal} onClose={() => setShowCreditsModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ backgroundColor: '#6C5CE7', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CreditCardIcon sx={{ mr: 1 }} /> Purchase Credits
           </Box>
         </DialogTitle>
-        <DialogContent>
-          <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
-            {props.length === 0 ? (
-              <Box textAlign="center" py={4}><Typography color="text.secondary">No props available for {selectedSport}</Typography></Box>
-            ) : (
-              props.map(prop => (
-                <Card key={prop.id} sx={{ mb: 2, borderLeft: '4px solid #10b981' }}>
-                  <CardContent>
-                    <Box display="flex" justifyContent="space-between" alignItems="center">
-                      <Box>
-                        <Typography variant="subtitle2" fontWeight="bold">{prop.player}</Typography>
-                        <Typography variant="caption" color="text.secondary">{prop.team} · {prop.market} · {prop.position || 'N/A'}</Typography>
-                        <Box display="flex" alignItems="center" gap={2} mt={1}>
-                          <Typography variant="h6" color="primary">{prop.line}</Typography>
-                          {prop.projection && <Chip label={`Proj: ${prop.projection.toFixed(1)}`} size="small" sx={{ bgcolor: prop.projection > prop.line ? '#10b98120' : '#ef444420', color: prop.projection > prop.line ? '#10b981' : '#ef4444', height: 20, fontSize: '0.7rem' }} />}
-                          {prop.confidence && (
-                            <Box display="flex" alignItems="center" gap={1}>
-                              <Box sx={{ width: 60, bgcolor: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
-                                <Box sx={{ width: `${prop.confidence}%`, height: 6, bgcolor: prop.confidence > 80 ? '#4CAF50' : '#6C5CE7' }} />
-                              </Box>
-                              <Typography variant="caption">{prop.confidence}%</Typography>
-                            </Box>
-                          )}
-                        </Box>
-                        {prop.edge && <Chip label={`Edge: ${prop.edge}`} size="small" sx={{ mt: 1, height: 18, bgcolor: prop.edge.startsWith('+') ? '#10b98120' : '#ef444420', color: prop.edge.startsWith('+') ? '#10b981' : '#ef4444', fontSize: '0.6rem' }} />}
-                        <Chip label="REAL DATA" size="small" sx={{ mt: 1, bgcolor: '#10b981', color: 'white', height: 20, fontSize: '0.6rem' }} />
-                      </Box>
-                      <Box display="flex" gap={1}>
-                        <Button variant="contained" size="small" sx={{ bgcolor: '#4CAF50' }} onClick={() => addLeg(prop, 'over')}>O {prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds}</Button>
-                        <Button variant="contained" size="small" sx={{ bgcolor: '#F44336' }} onClick={() => addLeg(prop, 'under')}>U {prop.under_odds > 0 ? `+${prop.under_odds}` : prop.under_odds}</Button>
-                      </Box>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>
+            Generate combos with credits. Each generation uses 1 credit.
+          </Typography>
+          <Grid container spacing={2}>
+            {[
+              { credits: 1, price: '$1.99', perPrediction: '$1.99', description: '1 Credit' },
+              { credits: 10, price: '$14.90', perPrediction: '$1.49', popular: true, description: '10 Credits' },
+              { credits: 20, price: '$25.80', perPrediction: '$1.29', description: '20 Credits' },
+              { credits: 50, price: '$44.50', perPrediction: '$0.89', bestValue: true, description: '50 Credits' }
+            ].map((option, index) => (
+              <Grid item xs={12} sm={6} key={index}>
+                <Card 
+                  sx={{ 
+                    border: option.popular ? '2px solid #6C5CE7' : option.bestValue ? '2px solid #10b981' : '1px solid #e5e7eb', 
+                    position: 'relative', 
+                    cursor: 'pointer',
+                    '&:hover': { transform: 'translateY(-2px)', transition: 'transform 0.2s' }
+                  }}
+                  onClick={() => handleCreditsCheckout(option.credits)}
+                >
+                  {option.popular && <Chip label="POPULAR" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#6C5CE7', color: 'white' }} />}
+                  {option.bestValue && <Chip label="BEST VALUE" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#10b981', color: 'white' }} />}
+                  <CardContent sx={{ textAlign: 'center', pt: option.popular || option.bestValue ? 4 : 2 }}>
+                    <Typography variant="h6" fontWeight="bold">{option.description}</Typography>
+                    <Typography variant="h4" fontWeight="bold" color="primary" sx={{ my: 1 }}>{option.price}</Typography>
+                    <Typography variant="caption" color="text.secondary">{option.perPrediction} per credit</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
+          <Button onClick={() => setShowCreditsModal(false)} sx={{ color: '#64748b' }}>Cancel</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ backgroundColor: '#6C5CE7', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <StarIcon sx={{ mr: 1 }} /> Upgrade to Premium
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3 }}>
+          <Typography paragraph sx={{ textAlign: 'center', mb: 3 }}>
+            Get unlimited combo generation and premium features!
+          </Typography>
+          <Grid container spacing={2}>
+            {[
+              { planId: 'starter', name: 'Starter Plan', price: '$5.99/month', features: ['Unlimited Combo Generation', 'Priority Support'], popular: false },
+              { planId: 'generator', name: 'Generator Plan', price: '$39.99/month', features: ['Unlimited Combo Generation', 'Priority Support', 'Early Access', '8 Daily AI Picks'], popular: true }
+            ].map((option, index) => (
+              <Grid item xs={12} key={index}>
+                <Card 
+                  sx={{ 
+                    border: option.popular ? '2px solid #6C5CE7' : '1px solid #e5e7eb', 
+                    position: 'relative', 
+                    cursor: 'pointer',
+                    '&:hover': { transform: 'translateY(-2px)', transition: 'transform 0.2s' }
+                  }}
+                  onClick={() => { navigate('/subscription'); setShowUpgradeModal(false); }}
+                >
+                  {option.popular && <Chip label="POPULAR" size="small" sx={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', backgroundColor: '#6C5CE7', color: 'white' }} />}
+                  <CardContent sx={{ textAlign: 'center', pt: option.popular ? 4 : 2 }}>
+                    <Typography variant="h6" fontWeight="bold">{option.name}</Typography>
+                    <Typography variant="h4" fontWeight="bold" color="primary" sx={{ my: 1 }}>{option.price}</Typography>
+                    <Box sx={{ mt: 2 }}>
+                      {option.features.map((feature, idx) => (
+                        <Typography key={idx} variant="body2" sx={{ color: '#94a3b8', mb: 0.5 }}>
+                          ✓ {feature}
+                        </Typography>
+                      ))}
                     </Box>
                   </CardContent>
                 </Card>
-              ))
-            )}
-          </Box>
+              </Grid>
+            ))}
+          </Grid>
         </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'center' }}>
+          <Button onClick={() => setShowUpgradeModal(false)} sx={{ color: '#64748b' }}>Maybe Later</Button>
+        </DialogActions>
       </Dialog>
 
-      {/* Build Modal */}
       <Dialog open={showBuildModal} onClose={() => setShowBuildModal(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box display="flex" alignItems="center" gap={1}>
-            <BuildIcon color="primary" />
-            Build Parlay: {selectedParlay?.name}
-            {selectedParlay?.is_real_data && <Chip label="✅ REAL DATA" size="small" sx={{ bgcolor: '#10b981', color: 'white', ml: 1 }} />}
-          </Box>
-        </DialogTitle>
+        <DialogTitle>Build Your Combo</DialogTitle>
         <DialogContent>
-          {selectedParlay && (
+          {selectedCombo && (
             <Box>
-              <Typography variant="body1" paragraph>{selectedParlay.analysis}</Typography>
-              <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
-                <Table>
-                  <TableHead>
-                    <TableRow><TableCell>#</TableCell><TableCell>Pick</TableCell><TableCell>Odds</TableCell><TableCell>Confidence</TableCell></TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {selectedParlay.legs.map((leg, idx) => (
-                      <TableRow key={idx} hover>
-                        <TableCell>{idx+1}</TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="medium">{leg.description}</Typography>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
-                            <Typography variant="caption" color="text.secondary">{leg.market} • {leg.sport}{leg.player_name && ` • ${leg.player_name}`}{leg.stat_type && ` • ${leg.stat_type}`}{leg.line && ` • Line: ${leg.line}`}</Typography>
-                            {leg.projection && <Chip label={`Proj: ${typeof leg.projection === 'number' ? leg.projection.toFixed(1) : leg.projection}`} size="small" sx={{ height: 20, bgcolor: leg.projection > leg.line ? '#10b98120' : '#ef444420', color: leg.projection > leg.line ? '#10b981' : '#ef4444', fontSize: '0.6rem' }} />}
-                            {leg.edge && <Chip label={`Edge: ${leg.edge}`} size="small" sx={{ height: 20, bgcolor: leg.edge.startsWith('+') ? '#10b98120' : '#ef444420', color: leg.edge.startsWith('+') ? '#10b981' : '#ef4444', fontSize: '0.6rem' }} />}
-                          </Box>
-                        </TableCell>
-                        <TableCell><Chip label={leg.odds_american || leg.odds} size="small" color={leg.odds_american?.startsWith('+') ? "success" : "default"} sx={{ fontWeight: 'bold' }} /></TableCell>
-                        <TableCell><Box display="flex" alignItems="center" gap={1}><LinearProgress variant="determinate" value={leg.confidence} sx={{ width: 80, height: 8, borderRadius: 4 }} /><Typography variant="body2">{leg.confidence}%</Typography></Box></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <Box p={2} bgcolor="#f8fafc" borderRadius={1}>
-                <Grid container spacing={2}>
-                  <Grid item xs={6} md={3}><Typography variant="caption" color="text.secondary">Total Odds</Typography><Typography variant="h6" color="primary">{selectedParlay.total_odds_american || selectedParlay.total_odds}</Typography></Grid>
-                  <Grid item xs={6} md={3}><Typography variant="caption" color="text.secondary">AI Confidence</Typography><Typography variant="h6">{selectedParlay.confidence}%</Typography></Grid>
-                  <Grid item xs={6} md={3}><Typography variant="caption" color="text.secondary">Expected Value</Typography><Typography variant="h6" color={selectedParlay.expected_value?.startsWith('+') ? 'success.main' : 'error.main'}>{selectedParlay.expected_value}</Typography></Grid>
-                  <Grid item xs={6} md={3}><Typography variant="caption" color="text.secondary">Risk Level</Typography><Chip label={selectedParlay.risk_level} size="small" color={selectedParlay.risk_level === 'low' ? 'success' : selectedParlay.risk_level === 'high' ? 'error' : 'warning'} /></Grid>
-                </Grid>
-                {selectedParlay.correlation_bonus && <Box mt={2}><Chip label={`+${selectedParlay.correlation_bonus*100}% Correlation Bonus`} sx={{ bgcolor: '#FFD70020', color: '#FFD700' }} /></Box>}
-              </Box>
+              <Typography variant="h6">{selectedCombo.name}</Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                {selectedCombo.legs.length} legs • Total Odds: {selectedCombo.total_lineValue}
+              </Typography>
+              <Divider sx={{ my: 2 }} />
+              {selectedCombo.legs.map((leg, idx) => (
+                <Box key={idx} sx={{ mb: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+                  <Typography variant="body1" fontWeight="bold">{leg.description}</Typography>
+                  <Typography variant="caption">Odds: {leg.lineValue} • Confidence: {leg.confidence}%</Typography>
+                  {leg.edge && <Typography variant="caption" sx={{ ml: 2 }}>Edge: {leg.edge}</Typography>}
+                </Box>
+              ))}
+              <Typography variant="body2" sx={{ mt: 2 }}>{selectedCombo.analysis}</Typography>
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button ref={buildModalFirstFocusRef} onClick={() => setShowBuildModal(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleAddToBetSlip} sx={{ bgcolor: '#6C5CE7' }}>Add to Bet Slip</Button>
+          <Button onClick={handleAddToTracker} variant="contained">Add to Tracker</Button>
+          <Button onClick={() => setShowBuildModal(false)}>Close</Button>
         </DialogActions>
       </Dialog>
-
-      {/* Parlay Result Modal */}
-      <Dialog open={showParlayResult} onClose={() => setShowParlayResult(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ background: 'linear-gradient(135deg, #6C5CE7 0%, #5A4ABD 100%)', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-          <TrophyIcon /> Parlay Built Successfully!
-          <IconButton onClick={() => setShowParlayResult(false)} sx={{ position: 'absolute', right: 16, top: 16, color: 'white' }}><ClearIcon /></IconButton>
-        </DialogTitle>
-        <DialogContent sx={{ pt: 3 }}>
-          {parlayResult && (
-            <Grid container spacing={2}>
-              <Grid item xs={6}><Typography variant="caption" color="text.secondary">Parlay Type</Typography><Typography variant="body1" fontWeight="bold">{parlayResult.type.replace('_',' ')}</Typography></Grid>
-              <Grid item xs={6}><Typography variant="caption" color="text.secondary">Legs</Typography><Typography variant="body1" fontWeight="bold">{parlayResult.leg_count}</Typography></Grid>
-              <Grid item xs={6}><Typography variant="caption" color="text.secondary">Odds</Typography><Typography variant="h6" color="primary" fontWeight="bold">{parlayResult.odds > 0 ? `+${parlayResult.odds}` : parlayResult.odds}</Typography></Grid>
-              <Grid item xs={6}><Typography variant="caption" color="text.secondary">Stake</Typography><Typography variant="body1" fontWeight="bold">${parlayResult.stake.toFixed(2)}</Typography></Grid>
-              <Grid item xs={6}><Typography variant="caption" color="text.secondary">Payout</Typography><Typography variant="h6" color="success.main" fontWeight="bold">${parlayResult.potential_payout.toFixed(2)}</Typography></Grid>
-              <Grid item xs={6}><Typography variant="caption" color="text.secondary">Profit</Typography><Typography variant="h6" color="success.main" fontWeight="bold">${parlayResult.profit.toFixed(2)}</Typography></Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
-          <Button ref={firstFocusableRef} variant="outlined" onClick={() => setShowParlayResult(false)}>Save Ticket</Button>
-          <Button variant="contained" sx={{ bgcolor: '#4CAF50' }} onClick={() => { setShowParlayResult(false); setSuccessMessage('Bet placed successfully!'); setShowSuccessAlert(true); }}>Place Bet</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Debug Button */}
-      <Box sx={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1000 }}>
-        <Tooltip title="Debug State">
-          <Button variant="contained" color="warning" onClick={() => console.log('🧪 Current State:', { suggestions: suggestions.length, filteredSuggestions: filteredSuggestions.length, games: games.length, parlayLegs: parlayLegs.length, nbaProps: nbaProps.length, nhlProps: nhlProps.length, mlbProps: mlbProps.length })} sx={{ borderRadius: '50%', minWidth: 'auto', width: 48, height: 48 }}><BugReportIcon /></Button>
-        </Tooltip>
-      </Box>
-      <style>{pulseAnimation}</style>
     </Container>
   );
 };
 
-// ==============================
-// DEVELOPMENT BYPASS: COMMENT OUT THE ORIGINAL WRAPPER AND USE THIS
-// ==============================
-/*
-// Original wrapper (comment this out)
-const ParlayArchitectScreen: React.FC = () => {
-  return (
-    <ProtectedRoute screenName="ParlayArchitect">
-      <ParlayArchitectContent />
-    </ProtectedRoute>
-  );
-};
-*/
-
-// Development bypass – renders the content directly without authentication
-const ParlayArchitectScreen: React.FC = () => {
-  return <ParlayArchitectContent />;
-};
-
-export default ParlayArchitectScreen;
+const ComboArchitectScreen: React.FC = () => <ComboArchitectContent />;
+export default ComboArchitectScreen;

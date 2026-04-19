@@ -26,7 +26,7 @@ import WhatshotIcon from '@mui/icons-material/Whatshot';
 import SportsIcon from '@mui/icons-material/Sports';
 import { format } from 'date-fns';
 import { usePredictions } from '../context/PredictionsContext';
-import { useParlay, BetSlipLeg } from '../context/ParlayContext';
+import { useCombo, BetSlipLeg } from '../context/ComboContext';
 
 // ------------------------------------------------------------
 // Styled Components
@@ -37,7 +37,7 @@ const StyledCard = styled(Card)(({ theme }) => ({
   boxShadow: theme.shadows[3],
 }));
 
-const OddsButton = styled(Button)(({ theme }) => ({
+const PickButton = styled(Button)(({ theme }) => ({
   justifyContent: 'space-between',
   padding: theme.spacing(1.5, 2),
   borderRadius: theme.shape.borderRadius,
@@ -65,7 +65,7 @@ const PredictionDetailScreen: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getPredictionById, isLoading, error, predictions } = usePredictions();
-  const { addLeg, currentSlip } = useParlay();
+  const { addLeg, currentSlip } = useCombo();
   const [shareTooltip, setShareTooltip] = useState('Copy link');
 
   // 🔐 Safety check: if id is the literal ":id", show a helpful message
@@ -103,8 +103,8 @@ const PredictionDetailScreen: React.FC = () => {
     setTimeout(() => setShareTooltip('Copy link'), 2000);
   };
 
-  // Add to bet slip
-  const handleAddToSlip = (side: 'yes' | 'no') => {
+  // Add to tracker
+  const handleAddToTracker = (side: 'yes' | 'no') => {
     if (!prediction) return;
 
     const leg: BetSlipLeg = {
@@ -159,8 +159,8 @@ const PredictionDetailScreen: React.FC = () => {
     );
   }
 
-  // Helper: format odds with + sign for positive
-  const formatOdds = (odds: number): string => {
+  // Helper: format line value with + sign for positive
+  const formatLineValue = (odds: number): string => {
     return odds > 0 ? `+${odds}` : `${odds}`;
   };
 
@@ -193,7 +193,7 @@ const PredictionDetailScreen: React.FC = () => {
           <ArrowBackIcon />
         </IconButton>
         <Typography variant="h4" component="h1" fontWeight="bold" sx={{ flexGrow: 1 }}>
-          {prediction.platform === 'kalshi' ? '📈' : '🎲'} Prediction Market
+          {prediction.platform === 'kalshi' ? '📈' : '🎲'} Forecast Market
         </Typography>
         <Tooltip title={shareTooltip}>
           <IconButton onClick={handleShare}>
@@ -238,9 +238,9 @@ const PredictionDetailScreen: React.FC = () => {
 
               <Divider sx={{ my: 3 }} />
 
-              {/* Market odds display */}
+              {/* Market line values display */}
               <Typography variant="h6" gutterBottom>
-                Market Odds
+                Line Values
               </Typography>
               <Grid container spacing={2} sx={{ mb: 4 }}>
                 <Grid item xs={6}>
@@ -249,7 +249,7 @@ const PredictionDetailScreen: React.FC = () => {
                       YES
                     </Typography>
                     <Typography variant="h4" fontWeight="bold" color="success.main">
-                      {formatOdds(prediction.yesPrice)}
+                      {formatLineValue(prediction.yesPrice)}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       Implied: {yesNorm}%
@@ -259,9 +259,9 @@ const PredictionDetailScreen: React.FC = () => {
                       color="success"
                       fullWidth
                       sx={{ mt: 2 }}
-                      onClick={() => handleAddToSlip('yes')}
+                      onClick={() => handleAddToTracker('yes')}
                     >
-                      Bet YES
+                      Pick YES
                     </Button>
                   </Paper>
                 </Grid>
@@ -271,7 +271,7 @@ const PredictionDetailScreen: React.FC = () => {
                       NO
                     </Typography>
                     <Typography variant="h4" fontWeight="bold" color="error.main">
-                      {formatOdds(prediction.noPrice)}
+                      {formatLineValue(prediction.noPrice)}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       Implied: {noNorm}%
@@ -281,9 +281,9 @@ const PredictionDetailScreen: React.FC = () => {
                       color="error"
                       fullWidth
                       sx={{ mt: 2 }}
-                      onClick={() => handleAddToSlip('no')}
+                      onClick={() => handleAddToTracker('no')}
                     >
-                      Bet NO
+                      Pick NO
                     </Button>
                   </Paper>
                 </Grid>
@@ -341,11 +341,11 @@ const PredictionDetailScreen: React.FC = () => {
                 </Grid>
               </Grid>
 
-              {/* Edge if present */}
+              {/* Analytical Advantage if present */}
               {prediction.edge && (
                 <Box sx={{ mt: 3, p: 2, bgcolor: 'background.default', borderRadius: 2 }}>
                   <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Market Edge
+                    Analytical Advantage
                   </Typography>
                   <Typography variant="h5" fontWeight="bold" color={prediction.edge.startsWith('+') ? 'success.main' : 'error.main'}>
                     {prediction.edge}
@@ -356,21 +356,21 @@ const PredictionDetailScreen: React.FC = () => {
           </StyledCard>
         </Grid>
 
-        {/* Sidebar */}
+        {/* Sidebar - Tracker */}
         <Grid item xs={12} md={4}>
           <StyledCard>
             <CardContent sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                <TrendingUpIcon sx={{ mr: 1 }} /> Your Bet Slip
+                <TrendingUpIcon sx={{ mr: 1 }} /> My Picks
               </Typography>
               {!currentSlip || currentSlip.legs.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 2 }}>
-                  Your bet slip is empty. Click YES or NO to add this market.
+                  Your tracker is empty. Click YES or NO to add this forecast.
                 </Alert>
               ) : (
                 <>
                   <Typography variant="body2" color="text.secondary">
-                    {currentSlip.legs.length} leg{currentSlip.legs.length !== 1 && 's'}
+                    {currentSlip.legs.length} selection{currentSlip.legs.length !== 1 && 's'}
                   </Typography>
                   <Box sx={{ my: 2 }}>
                     {currentSlip.legs.slice(0, 3).map((leg) => (
@@ -391,17 +391,17 @@ const PredictionDetailScreen: React.FC = () => {
                   </Box>
                   <Divider sx={{ my: 2 }} />
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body1">Total Odds</Typography>
+                    <Typography variant="body1">Combined Value</Typography>
                     <Typography variant="body1" fontWeight="bold">
                       {currentSlip.totalOdds}
                     </Typography>
                   </Box>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body1">Stake</Typography>
-                    <Typography variant="body1">${currentSlip.totalStake.toFixed(2)}</Typography>
+                    <Typography variant="body1">Hypothetical Amount</Typography>
+                    <Typography variant="body1">${currentSlip.totalAmount.toFixed(2)}</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                    <Typography variant="body1" fontWeight="bold">Payout</Typography>
+                    <Typography variant="body1" fontWeight="bold">Estimated Return</Typography>
                     <Typography variant="body1" fontWeight="bold" color="success.main">
                       ${currentSlip.potentialPayout.toFixed(2)}
                     </Typography>
@@ -411,7 +411,7 @@ const PredictionDetailScreen: React.FC = () => {
                     fullWidth
                     onClick={() => navigate('/bet-slip')}
                   >
-                    View Full Slip
+                    View My Picks
                   </Button>
                 </>
               )}
@@ -419,7 +419,7 @@ const PredictionDetailScreen: React.FC = () => {
               {/* Similar predictions could go here */}
               <Divider sx={{ my: 3 }} />
               <Typography variant="subtitle2" gutterBottom>
-                Market Confidence
+                Forecast Confidence
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <Box sx={{ flexGrow: 1, mr: 1 }}>
@@ -435,7 +435,7 @@ const PredictionDetailScreen: React.FC = () => {
                 </Typography>
               </Box>
               <Typography variant="caption" color="text.secondary">
-                Confidence score based on projection models and historical accuracy.
+                Confidence score based on projection models and forecast accuracy.
               </Typography>
 
               {/* Data source badge */}

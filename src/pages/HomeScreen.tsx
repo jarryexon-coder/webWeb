@@ -30,19 +30,19 @@ import MergeIcon from '@mui/icons-material/Merge';
 import AddTaskIcon from '@mui/icons-material/AddTask';
 
 const HomeScreen = () => {
-  // Parlay & Betting Tools Section
+  // Combo & Analytics Tools Section
   const parlayTools = [
     {
-      title: '🏗️ Parlay Architect',
-      description: 'Build data-driven parlays with real-time player props across NBA, NHL, and MLB. AI-powered generation, smart filtering by confidence (60-100%) and risk level, plus support for Standard, Same-Game, Teaser, and Round Robin parlays. Real odds calculation with correlation scoring and payout projections.',
+      title: '🏗️ Combo Architect',
+      description: 'Build data-driven combos with real-time player props across NBA, NHL, and MLB. AI-powered generation, smart filtering by confidence (60-100%) and volatility level, plus support for Standard, Game Combos, Point Adjustment, and Multi‑leg Combos. Real multipliers calculation with correlation scoring and estimated return projections.',
       icon: <MergeIcon fontSize="large" />,
       path: '/parlay-architect',
       color: '#8b5cf6',
-      badges: ['Live Data', 'AI-Powered', '6 Parlay Types']
+      badges: ['Live Data', 'AI-Powered', '6 Combo Types']
     },
     {
-      title: '🎯 Same-Game Parlay',
-      description: 'One featured parlay per sport—completely free. AI generator with 15+ curated prompts + custom prompt support. Combines player props, moneyline, and totals into optimized parlays. Each leg shows confidence scoring, projected stats, and risk assessment with expected value calculations.',
+      title: '🎯 Game Combos',
+      description: 'One featured combo per sport—completely free. AI generator with 15+ curated prompts + custom prompt support. Combines player props, match winner, and totals into optimized combos. Each leg shows confidence scoring, projected stats, and volatility assessment with positive expectation calculations.',
       icon: <AddTaskIcon fontSize="large" />,
       path: '/same-game-parlay',
       color: '#ec4899',
@@ -50,19 +50,19 @@ const HomeScreen = () => {
     },
     {
       title: 'PrizePicks Props',
-      description: 'Real-time player props with odds from multiple bookmakers. Kelly Criterion bet sizing calculates optimal wagers based on your bankroll. Filter by stat type, edge threshold, and value side. AI prop generator creates personalized recommendations from natural language prompts.',
+      description: 'Real-time player props with multipliers from multiple bookmakers. Kelly Criterion allocation calculates optimal amounts based on your bankroll. Filter by stat type, advantage threshold, and value side. AI prop generator creates personalized recommendations from natural language prompts.',
       icon: <CasinoOutlinedIcon fontSize="large" />,
-      path: '/prizepicks',
+      path: '/prize-picks',
       color: '#f59e0b',
-      badges: ['Live Odds', 'Kelly Criterion', '+EV Finder']
+      badges: ['Live Multipliers', 'Kelly Criterion', 'Positive Expectation Finder']
     },
     {
-      title: 'AI Parlay Suggestions',
-      description: 'AI-generated parlay recommendations based on real player props. Analyzes confidence levels, betting edges, and odds to suggest high-confidence, best-value, and balanced parlays. Filter by sport, confidence threshold, or number of legs with confidence distribution charts.',
+      title: 'AI Combo Suggestions',
+      description: 'AI-generated combo recommendations based on real player props. Analyzes confidence levels, analytics advantages, and multipliers to suggest high-confidence, best-value, and balanced combos. Filter by sport, confidence threshold, or number of legs with confidence distribution charts.',
       icon: <AutoAwesomeIcon fontSize="large" />,
-      path: '/ai-parlay-suggestions',
+      path: '/ai-suggestions',
       color: '#10b981',
-      badges: ['AI Recommendations', 'Edge Analysis', 'Confidence Scoring']
+      badges: ['AI Recommendations', 'Advantage Analysis', 'Confidence Scoring']
     }
   ];
 
@@ -78,11 +78,11 @@ const HomeScreen = () => {
     },
     {
       title: 'NBA Dashboard',
-      description: 'Fantasy basketball command center with player projections, top 10 charts, value picks table, and today\'s games. Real-time fantasy points, points, rebounds, assists, and value metrics with data freshness timestamps.',
+      description: 'Fantasy basketball command center with player projections, top 10 charts, top projections table, and today\'s games. Real-time fantasy points, points, rebounds, assists, and value metrics with data freshness timestamps.',
       icon: <SportsBasketballIcon fontSize="large" />,
       path: '/nba-dashboard',
       color: '#ef4444',
-      badges: ['Fantasy Points', 'Value Picks', 'Live Games']
+      badges: ['Fantasy Points', 'Top Projections', 'Live Games']
     },
     {
       title: 'NHL Dashboard',
@@ -108,7 +108,7 @@ const HomeScreen = () => {
       title: 'SportsWire',
       description: 'The pulse of the league: real-time news, injury dashboard with color-coded severity (Out, Doubtful, Questionable), beat writer integration from top reporters, and smart search by player, team, or writer. Bookmark important news and share updates.',
       icon: <NewspaperIcon fontSize="large" />,
-      path: '/sportswire',
+      path: '/sports-wire',
       color: '#f97316',
       badges: ['Breaking News', 'Injury Tracker', 'Beat Writers']
     },
@@ -122,7 +122,7 @@ const HomeScreen = () => {
     },
     {
       title: 'Daily Picks',
-      description: 'AI-curated daily betting picks with real-time updates every 60 seconds. Browse player props, sharp money moves, and game winners. Filter by sport, confidence level, stat type, and edge percentage. 30+ prompts for insider tips and advanced analytics.',
+      description: 'AI-curated daily analytics picks with real-time updates every 60 seconds. Browse player props, sharp money moves, and game winners. Filter by sport, confidence level, stat type, and advantage percentage. 30+ prompts for insider tips and advanced analytics.',
       icon: <TrendingUpIcon fontSize="large" />,
       path: '/daily-picks',
       color: '#d32f2f',
@@ -130,7 +130,7 @@ const HomeScreen = () => {
     },
     {
       title: 'Secret Phrases Hub',
-      description: 'Unlock insider betting intelligence with AI-generated secret phrases. Access sharp money moves, advanced analytics, injury updates, line movements, and prop value insights. Special commands like "predictive clustering" and "bayesian inference" for exclusive content.',
+      description: 'Unlock insider analytics intelligence with AI-generated secret phrases. Access sharp money moves, advanced analytics, injury updates, line movements, and prop value insights. Special commands like "predictive clustering" and "bayesian inference" for exclusive content.',
       icon: <SecurityIcon fontSize="large" />,
       path: '/secret-phrases',
       color: '#7b1fa2',
@@ -198,7 +198,7 @@ const HomeScreen = () => {
   const specialEvents = [
     {
       title: 'World Cup 2026',
-      description: 'Your complete guide to the FIFA World Cup 2026 across the USA, Canada, and Mexico. Explore group stage standings, match schedules, and host city venues. Track odds to win, view AI-powered predictions, and follow the United States team schedule.',
+      description: 'Your complete guide to the FIFA World Cup 2026 across the USA, Canada, and Mexico. Explore group stage standings, match schedules, and host city venues. Track multipliers to win, view AI-powered predictions, and follow the United States team schedule.',
       icon: <SportsSoccerIcon fontSize="large" />,
       path: '/world-cup-2026',
       color: '#dc2626',
@@ -206,7 +206,7 @@ const HomeScreen = () => {
     },
     {
       title: 'NHL Trends',
-      description: 'Stay ahead of the puck with real-time NHL game analysis. View today\'s matchups with full odds, moneyline, spreads, and totals. Dive into player props, parlay recommendations, and fantasy projections. Track standings and league leaders.',
+      description: 'Stay ahead of the puck with real-time NHL game analysis. View today\'s matchups with full multipliers, match winner, spreads, and totals. Dive into player props, combo recommendations, and fantasy projections. Track standings and league leaders.',
       icon: <SportsHockeyIcon fontSize="large" />,
       path: '/nhl-trends',
       color: '#0891b2',
@@ -218,19 +218,19 @@ const HomeScreen = () => {
   const statsAnalytics = [
     {
       title: 'Analytics Dashboard',
-      description: 'Unified sports analytics hub with multi-sport overview. Key performance indicators show total players, injury counts, value bets found. Visual analytics with position distribution charts and edge analysis. Player analysis, injury reports, and value bets tabs.',
+      description: 'Unified sports analytics hub with multi-sport overview. Key performance indicators show total players, injury counts, top projections found. Visual analytics with position distribution charts and advantage analysis. Player analysis, injury reports, and top projections tabs.',
       icon: <AnalyticsIcon fontSize="large" />,
       path: '/analytics-dashboard',
       color: '#8b5cf6',
-      badges: ['Multi-Sport', 'KPIs', 'Value Bets']
+      badges: ['Multi-Sport', 'KPIs', 'Top Projections']
     },
     {
       title: 'Advanced Analytics',
-      description: 'AI-powered sports analytics hub combining PrizePicks props, odds data, player trends. Smart prompts library with 20+ analytics-focused prompts. Value picks engine identifies +EV opportunities. Parlay analytics with correlation factors and true probability calculations.',
+      description: 'AI-powered sports analytics hub combining PrizePicks props, multipliers data, player trends. Smart prompts library with 20+ analytics-focused prompts. Top picks engine identifies positive expectation opportunities. Combo analytics with correlation factors and true probability calculations.',
       icon: <BarChartIcon fontSize="large" />,
       path: '/advanced-analytics',
       color: '#059669',
-      badges: ['AI-Powered', '+EV Finder', 'Correlation']
+      badges: ['AI-Powered', 'Positive Expectation Finder', 'Correlation']
     },
     {
       title: 'Season Stats',
@@ -285,7 +285,7 @@ const HomeScreen = () => {
       </Typography>
       <Grid container spacing={4} sx={{ mb: 8 }}>
         {[
-          { title: '94.7% Success Rate', description: 'Industry-leading prediction accuracy powered by proprietary AI models', icon: <EmojiEventsOutlinedIcon fontSize="large" />, color: '#10b981' },
+          { title: '81.7% Success Rate', description: 'Industry-leading prediction accuracy powered by proprietary AI models', icon: <EmojiEventsOutlinedIcon fontSize="large" />, color: '#10b981' },
           { title: 'PrizePicks Generator', description: 'Generate optimal PrizePicks selections with our advanced AI algorithms', icon: <CasinoOutlinedIcon fontSize="large" />, color: '#8b5cf6' },
           { title: 'Kalshi Market Intelligence', description: 'Real-time CFTC-regulated prediction market analytics with AI insights', icon: <TrendingUpIcon fontSize="large" />, color: '#ec4899' }
         ].map((feature, idx) => (
@@ -301,9 +301,9 @@ const HomeScreen = () => {
         ))}
       </Grid>
 
-      {/* Parlay & Betting Tools Section */}
+      {/* Combo & Analytics Tools Section */}
       <Typography variant="h4" gutterBottom sx={{ mt: 6, mb: 3, color: 'text.primary' }}>
-        🎲 Parlay & Betting Tools
+        🎲 Combo & Analytics Tools
       </Typography>
       <Grid container spacing={4} sx={{ mb: 8 }}>
         {parlayTools.map((tool, idx) => (
@@ -510,19 +510,19 @@ const HomeScreen = () => {
         <Grid container spacing={3} sx={{ mt: 2 }}>
           <Grid item xs={6} md={3}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h3">94.7%</Typography>
+              <Typography variant="h3">81.7%</Typography>
               <Typography variant="body2">Prediction Accuracy</Typography>
             </Box>
           </Grid>
           <Grid item xs={6} md={3}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h3">10K+</Typography>
+              <Typography variant="h3">1K+</Typography>
               <Typography variant="body2">Daily Analysis</Typography>
             </Box>
           </Grid>
           <Grid item xs={6} md={3}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h3">50+</Typography>
+              <Typography variant="h3">19+</Typography>
               <Typography variant="body2">AI Models</Typography>
             </Box>
           </Grid>
@@ -570,6 +570,23 @@ const HomeScreen = () => {
           Start Free Trial
         </Button>
       </Paper>
+
+      {/* 👇 DISCLAIMER FOOTER (added for Google Ads compliance) 👇 */}
+      <Box
+        sx={{
+          fontSize: '12px',
+          textAlign: 'center',
+          marginTop: '20px',
+          padding: '16px',
+          color: '#666',
+          borderTop: '1px solid #e0e0e0',
+          backgroundColor: '#f5f5f5',
+          borderRadius: 2,
+        }}
+      >
+        For entertainment and informational purposes only. No real‑money gambling is offered or facilitated.
+        All statistics and projections are simulated.
+      </Box>
     </Container>
   );
 };

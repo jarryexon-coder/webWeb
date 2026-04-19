@@ -1,8 +1,9 @@
-// src/pages/GolfLeaderboard.tsx
+// src/pages/GolfLeaderboard.tsx - Analytics plan required
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Container,
   Typography,
+  AlertTitle,
   Paper,
   Table,
   TableBody,
@@ -22,16 +23,25 @@ import {
   Skeleton,
   Tooltip,
   IconButton,
+  Grid,
+  Card,
+  CardContent,
 } from '@mui/material';
-import { Refresh as RefreshIcon } from '@mui/icons-material';
+import {
+  Refresh as RefreshIcon,
+  TrendingUp as TrendingUpIcon,
+  EmojiEvents as TrophyIcon,
+  MonetizationOn as MoneyIcon,
+} from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import api from '../services/api'; // adjust to your actual API service
+import golfApi from '../services/golf';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
+import { PlanFeaturesDisplay } from '../components/PlanFeaturesDisplay';
 
 // ----------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------
-
 interface Tournament {
   id: number;
   name: string;
@@ -50,27 +60,14 @@ interface LeaderboardEntry {
   total_score: number | null;
   earnings: number | null;
   tournament: string;
-  // Optional round scores – not provided by real API
   round1?: string | null;
   round2?: string | null;
   round3?: string | null;
   round4?: string | null;
 }
 
-interface LeaderboardResponse {
-  success: boolean;
-  data?: {
-    leaderboard: LeaderboardEntry[];
-    tour: string;
-    tournament: string;
-    is_real_data: boolean;
-    meta?: any;
-  };
-  message?: string;
-}
-
 // ----------------------------------------------------------------------
-// Mock data for fallback
+// Mock data fallback
 // ----------------------------------------------------------------------
 const getMockLeaderboard = (): LeaderboardEntry[] => {
   const players = [
@@ -86,7 +83,7 @@ const getMockLeaderboard = (): LeaderboardEntry[] => {
     { name: 'Justin Thomas', country: 'USA' },
   ];
   return players.map((p, idx) => {
-    const score = Math.floor(Math.random() * 15) - 8; // -8 to +6
+    const score = Math.floor(Math.random() * 15) - 8;
     const toPar = score <= 0 ? `${score}` : `+${score}`;
     const total = 280 + score;
     return {
@@ -120,7 +117,7 @@ const getMockTournaments = (): Tournament[] => [
 // ----------------------------------------------------------------------
 const fetchTournaments = async (): Promise<Tournament[]> => {
   try {
-    const response = await api.getGolfTournaments('PGA', 2025); // adjust as needed
+    const response = await golfApi.getTournaments('PGA', 2025);
     if (response.success && response.data?.tournaments) {
       return response.data.tournaments;
     }
@@ -131,35 +128,11 @@ const fetchTournaments = async (): Promise<Tournament[]> => {
   }
 };
 
-// Required fields for a leaderboard entry – allow nulls, only check existence
-const leaderboardRequiredFields: (keyof LeaderboardEntry)[] = [
-  'position',
-  'player',
-  'player_id',
-  'country',
-  'tournament',
-];
-
-function isLeaderboardEntryMinimallyComplete(entry: any): entry is LeaderboardEntry {
-  return leaderboardRequiredFields.every(field => entry[field] !== undefined);
-}
-
-function areLeaderboardEntriesComplete(entries: any[]): entries is LeaderboardEntry[] {
-  return entries.length > 0 && entries.every(isLeaderboardEntryMinimallyComplete);
-}
-
 const fetchLeaderboard = async (tournamentId: number): Promise<LeaderboardEntry[]> => {
   try {
-    const response = await api.getGolfLeaderboard(tournamentId);
+    const response = await golfApi.getLeaderboard(tournamentId);
     if (response.success && response.data?.leaderboard) {
-      const entries = response.data.leaderboard;
-      if (areLeaderboardEntriesComplete(entries)) {
-        return entries;
-      } else {
-        console.warn('API returned incomplete leaderboard entries – using mock');
-      }
-    } else {
-      console.warn('API response missing leaderboard data – using mock');
+      return response.data.leaderboard;
     }
     return getMockLeaderboard();
   } catch (error) {
@@ -169,10 +142,10 @@ const fetchLeaderboard = async (tournamentId: number): Promise<LeaderboardEntry[
 };
 
 // ----------------------------------------------------------------------
-// Main Content Component
+// Main Component
 // ----------------------------------------------------------------------
-
 const GolfLeaderboardContent = () => {
+  const { profile, planFeatures } = useAuth();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [selectedTournamentId, setSelectedTournamentId] = useState<number | ''>('');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -185,7 +158,6 @@ const GolfLeaderboardContent = () => {
       try {
         const data = await fetchTournaments();
         setTournaments(data);
-        // Auto-select the most recent completed tournament, or first if none
         const completed = data.filter(t => t.status === 'completed');
         if (completed.length > 0) {
           const sorted = completed.sort(
@@ -205,7 +177,6 @@ const GolfLeaderboardContent = () => {
   // Fetch leaderboard when tournament changes
   useEffect(() => {
     if (!selectedTournamentId) return;
-
     const loadLeaderboard = async () => {
       setLoading(true);
       try {
@@ -235,9 +206,27 @@ const GolfLeaderboardContent = () => {
     }
   };
 
-  // Determine if we're using real data (simple heuristic: if any entry has earnings)
   const isRealData = useMemo(() => {
     return leaderboard.some(entry => entry.earnings != null && entry.earnings > 0);
+  }, [leaderboard]);
+
+  const premiumStats = useMemo(() => {
+    const totalEarnings = leaderboard.reduce((sum, entry) => sum + (entry.earnings || 0), 0);
+    const averageScore = leaderboard.length > 0
+      ? (leaderboard.reduce((sum, entry) => sum + (entry.total_score || 0), 0) / leaderboard.length).toFixed(1)
+      : 'N/A';
+    const underParPlayers = leaderboard.filter(entry => {
+      const toPar = entry.to_par;
+      return toPar && toPar.startsWith('-');
+    }).length;
+    const topEarner = [...leaderboard].sort((a, b) => (b.earnings || 0) - (a.earnings || 0))[0];
+    return {
+      totalEarnings: (totalEarnings / 1e6).toFixed(1),
+      averageScore,
+      underParPlayers,
+      topEarner,
+      totalPlayers: leaderboard.length,
+    };
   }, [leaderboard]);
 
   if (loading && !leaderboard.length) {
@@ -251,9 +240,7 @@ const GolfLeaderboardContent = () => {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" fontWeight="bold">
-          ⛳ PGA Leaderboard
-        </Typography>
+        <Typography variant="h4" fontWeight="bold">⛳ PGA Leaderboard</Typography>
         <Tooltip title="Refresh">
           <IconButton onClick={handleRefresh} color="primary" disabled={!selectedTournamentId}>
             <RefreshIcon />
@@ -279,19 +266,67 @@ const GolfLeaderboardContent = () => {
         </Select>
       </FormControl>
 
-      {/* Data source notice */}
+      {/* Plan features display */}
+      {profile && <PlanFeaturesDisplay currentPlan={profile.plan} compact />}
+
       {!isRealData && leaderboard.length > 0 && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Displaying simulated leaderboard data. Live data will appear when available.
         </Alert>
       )}
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      {/* Premium Stats Dashboard */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={1} mb={1}>
+                <MoneyIcon color="success" />
+                <Typography variant="body2" color="text.secondary">Total Purse</Typography>
+              </Box>
+              <Typography variant="h4">${premiumStats.totalEarnings}M</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={1} mb={1}>
+                <TrendingUpIcon color="primary" />
+                <Typography variant="body2" color="text.secondary">Avg Score</Typography>
+              </Box>
+              <Typography variant="h4">{premiumStats.averageScore}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={1} mb={1}>
+                <TrophyIcon color="warning" />
+                <Typography variant="body2" color="text.secondary">Under Par</Typography>
+              </Box>
+              <Typography variant="h4">{premiumStats.underParPlayers}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={1} mb={1}>
+                <TrendingUpIcon color="info" />
+                <Typography variant="body2" color="text.secondary">Top Earner</Typography>
+              </Box>
+              <Typography variant="h6" noWrap>{premiumStats.topEarner?.player || 'N/A'}</Typography>
+              <Typography variant="caption">${((premiumStats.topEarner?.earnings || 0) / 1e6).toFixed(1)}M</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      {/* Leaderboard Table */}
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -312,21 +347,17 @@ const GolfLeaderboardContent = () => {
             {leaderboard.map((entry) => (
               <TableRow key={`${entry.player_id}-${entry.position}`}>
                 <TableCell>
-                  <Chip
-                    label={entry.position}
-                    size="small"
-                    color={(entry.position_numeric ?? 100) <= 10 ? 'primary' : 'default'}
-                  />
+                  <Chip label={entry.position} size="small" color={(entry.position_numeric ?? 100) <= 10 ? 'primary' : 'default'} />
                 </TableCell>
                 <TableCell>
                   <Typography fontWeight="medium">{entry.player}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    ${(entry.earnings ? entry.earnings / 1000 : 0).toFixed(0)}K earned
+                  </Typography>
                 </TableCell>
                 <TableCell>{entry.country}</TableCell>
                 <TableCell align="center">
-                  <Typography
-                    fontWeight="bold"
-                    color={entry.to_par?.startsWith('-') ? 'error.main' : 'text.primary'}
-                  >
+                  <Typography fontWeight="bold" color={entry.to_par?.startsWith('-') ? 'error.main' : 'text.primary'}>
                     {entry.to_par ?? '-'}
                   </Typography>
                 </TableCell>
@@ -335,9 +366,7 @@ const GolfLeaderboardContent = () => {
                 <TableCell align="center">{entry.round3 ?? '-'}</TableCell>
                 <TableCell align="center">{entry.round4 ?? '-'}</TableCell>
                 <TableCell align="center">{entry.total_score ?? '-'}</TableCell>
-                <TableCell align="right">
-                  {entry.earnings ? `$${entry.earnings.toLocaleString()}` : '-'}
-                </TableCell>
+                <TableCell align="right">{entry.earnings ? `$${entry.earnings.toLocaleString()}` : '-'}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -353,16 +382,10 @@ const GolfLeaderboardContent = () => {
   );
 };
 
-// ----------------------------------------------------------------------
-// Main exported component wrapped with ProtectedRoute
-// ----------------------------------------------------------------------
-
-const GolfLeaderboard: React.FC = () => {
-  return (
-    <ProtectedRoute screenName="GolfLeaderboard">
-      <GolfLeaderboardContent />
-    </ProtectedRoute>
-  );
-};
+const GolfLeaderboard: React.FC = () => (
+  <ProtectedRoute screenName="GolfLeaderboard">
+    <GolfLeaderboardContent />
+  </ProtectedRoute>
+);
 
 export default GolfLeaderboard;

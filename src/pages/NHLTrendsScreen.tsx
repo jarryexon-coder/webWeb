@@ -1,4 +1,4 @@
-// src/pages/NHLTrendsScreen.tsx
+// src/pages/NHLTrendsScreen.tsx - UPDATED WITH CORRECT PLAN ACCESS (Starter Package)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
@@ -15,6 +15,7 @@ import {
   Tabs,
   Chip,
   Paper,
+  AlertTitle,
   LinearProgress,
   CircularProgress,
   Avatar,
@@ -29,9 +30,21 @@ import {
   Alert,
   Snackbar,
   useTheme,
-  alpha
+  alpha,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  SelectChangeEvent,
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { useCheckout } from '../utils/checkout';
+import ProtectedRoute from '../components/ProtectedRoute';
 import {
   Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
@@ -47,11 +60,15 @@ import {
   Star as StarIcon,
   StarBorder as StarBorderIcon,
   ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon
+  ChevronRight as ChevronRightIcon,
+  Lock as LockIcon,
+  CheckCircle as CheckCircleIcon,
+  CreditCard as CreditCardIcon,
 } from '@mui/icons-material';
 
 // API Configuration
 const API_BASE_URL = 'https://python-api-fresh-production.up.railway.app';
+const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
 // ========== INTERFACES ==========
 interface NHLGame {
@@ -591,6 +608,16 @@ const fetchTradeDeadline = async (): Promise<TradeDeadline> => {
 const NHLTrendsScreen = () => {
   const navigate = useNavigate();
   const theme = useTheme();
+  const { user, getIdToken, profile, planFeatures } = useAuth();
+  const { handleSubscriptionCheckout } = useCheckout();
+
+  // Plan-based access control - NHL Trends is part of Starter package (hasPlayerStats)
+  const hasNHLTrendsAccess = planFeatures?.hasPlayerStats || false;
+  
+  // State for upgrade modal and plan selection
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>('starter');
+  const [selectedInterval, setSelectedInterval] = useState<string>('month');
 
   // State
   const [searchInput, setSearchInput] = useState('');
@@ -618,12 +645,9 @@ const NHLTrendsScreen = () => {
   const lastSelectedTime = useRef(0);
   const isMounted = useRef(true);
 
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
+  const handleUpgrade = () => {
+    handleSubscriptionCheckout(selectedPlan, selectedInterval);
+  };
 
   // Load favorites from localStorage
   useEffect(() => {
@@ -698,17 +722,26 @@ const NHLTrendsScreen = () => {
     }
   };
 
-  // Initial load and when date changes
+  // Initial load and when date changes (only if user has access)
   useEffect(() => {
-    fetchAllNHLData();
-  }, [selectedDate]);
+    if (hasNHLTrendsAccess) {
+      fetchAllNHLData();
+    }
+  }, [selectedDate, hasNHLTrendsAccess]);
 
   // Fetch players when Players tab is active
   useEffect(() => {
-    if (activeTab === 2 && players.length === 0) {
+    if (activeTab === 2 && players.length === 0 && hasNHLTrendsAccess) {
       fetchNHLPlayers().then(setPlayers);
     }
-  }, [activeTab]);
+  }, [activeTab, hasNHLTrendsAccess]);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -758,7 +791,7 @@ const NHLTrendsScreen = () => {
     setViewModeCallback('games');
   }, [setSelectedGameCallback, setViewModeCallback]);
 
-  const handleParlayClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
+  const handleComboClick = useCallback((e: React.MouseEvent, game: NHLGame) => {
     e.stopPropagation();
     e.preventDefault();
     setSelectedGameCallback(game);
@@ -772,7 +805,154 @@ const NHLTrendsScreen = () => {
     setViewModeCallback('fantasy');
   }, [setSelectedGameCallback, setViewModeCallback]);
 
-  // ========== RENDER COMPONENTS ==========
+  // No access state - show dynamic upgrade prompt based on current plan
+  if (!hasNHLTrendsAccess) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
+        <Box display="flex" alignItems="center" gap={2} mb={3}>
+          <SportsHockeyIcon sx={{ fontSize: 40, color: 'primary.main' }} />
+          <Typography variant="h4" fontWeight="bold">
+            NHL Center
+          </Typography>
+          <Chip
+            icon={<LockIcon />}
+            label="Requires Access"
+            color="warning"
+            size="small"
+          />
+        </Box>
+
+        <Card sx={{ textAlign: 'center', py: 8, px: 4 }}>
+          <LockIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 3 }} />
+          <Typography variant="h5" gutterBottom>
+            {profile?.plan === 'free' 
+              ? 'Upgrade to Access NHL Data'
+              : 'Your current plan does not include NHL data'}
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 500, mx: 'auto' }}>
+            {profile?.plan === 'free'
+              ? 'The Starter plan includes NHL games, standings, player stats, and betting insights. Upgrade now to get full access.'
+              : 'NHL data is included in Starter, Analytics, and Generator plans. Please upgrade your plan.'}
+          </Typography>
+          
+          {/* Dynamic plan selection */}
+          <Box sx={{ maxWidth: 400, mx: 'auto', mb: 4 }}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Plan</InputLabel>
+                  <Select
+                    value={selectedPlan}
+                    label="Plan"
+                    onChange={(e: SelectChangeEvent) => setSelectedPlan(e.target.value)}
+                  >
+                    <MenuItem value="starter">Starter - $5.99/month</MenuItem>
+                    <MenuItem value="analytics">Analytics - $19.99/month</MenuItem>
+                    <MenuItem value="generator">Generator - $39.99/month</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Billing</InputLabel>
+                  <Select
+                    value={selectedInterval}
+                    label="Billing"
+                    onChange={(e: SelectChangeEvent) => setSelectedInterval(e.target.value)}
+                  >
+                    <MenuItem value="month">Monthly</MenuItem>
+                    <MenuItem value="year">Yearly (Save 20%)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            </Grid>
+          </Box>
+          
+          <Button 
+            variant="contained" 
+            size="large"
+            startIcon={<CreditCardIcon />}
+            onClick={handleUpgrade}
+            sx={{ bgcolor: '#f59e0b', '&:hover': { bgcolor: '#d97706' } }}
+          >
+            Upgrade to {selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} ({selectedInterval}ly)
+          </Button>
+        </Card>
+
+        {/* Upgrade Modal */}
+        <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <LockIcon sx={{ color: '#f59e0b' }} />
+              <Typography variant="h6">Upgrade Your Plan</Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent>
+            <Typography paragraph>
+              Get access to NHL games, standings, player stats, and betting insights.
+            </Typography>
+            
+            {/* Plan Selection */}
+            <Box sx={{ my: 3 }}>
+              <Typography variant="subtitle2" gutterBottom>Select Plan:</Typography>
+              <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                <Select
+                  value={selectedPlan}
+                  onChange={(e: SelectChangeEvent) => setSelectedPlan(e.target.value)}
+                >
+                  <MenuItem value="starter">Starter - $5.99/month</MenuItem>
+                  <MenuItem value="analytics">Analytics - $19.99/month</MenuItem>
+                  <MenuItem value="generator">Generator - $39.99/month</MenuItem>
+                </Select>
+              </FormControl>
+              
+              <FormControl fullWidth size="small">
+                <Select
+                  value={selectedInterval}
+                  onChange={(e: SelectChangeEvent) => setSelectedInterval(e.target.value)}
+                >
+                  <MenuItem value="month">Monthly</MenuItem>
+                  <MenuItem value="year">Yearly (Save 20%)</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            
+            <Box sx={{ my: 3 }}>
+              {[
+                'Complete NHL game schedules',
+                'Live standings and division rankings',
+                'Player statistics and scoring leaders',
+                'Game multiplier and betting insights',
+                'Combo recommendations',
+                'Fantasy hockey projections',
+                'Trade deadline analysis',
+                'Playoff implications tracking',
+              ].map((feature) => (
+                <Box key={feature} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">{feature}</Typography>
+                </Box>
+              ))}
+            </Box>
+            <Button
+              fullWidth
+              variant="contained"
+              size="large"
+              onClick={handleUpgrade}
+              sx={{ bgcolor: '#f59e0b', '&:hover': { bgcolor: '#d97706' } }}
+            >
+              Subscribe Now - {selectedPlan === 'starter' ? '$5.99' : selectedPlan === 'analytics' ? '$19.99' : '$39.99'}/{selectedInterval === 'month' ? 'mo' : 'yr'}
+            </Button>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
+          </DialogActions>
+        </Dialog>
+      </Container>
+    );
+  }
+
+  // ========== RENDER COMPONENTS (Only shown if hasNHLTrendsAccess is true) ==========
   const renderDateNavigation = () => (
     <Paper sx={{ p: 2, mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <IconButton onClick={() => changeDate(-1)}>
@@ -885,7 +1065,7 @@ const NHLTrendsScreen = () => {
 
         <Grid container spacing={2} sx={{ bgcolor: 'action.hover', borderRadius: 2, p: 2, mb: 2 }}>
           <Grid item xs={4} textAlign="center">
-            <Typography variant="caption" color="text.secondary">Moneyline</Typography>
+            <Typography variant="caption" color="text.secondary">Match Winner</Typography>
             <Typography variant="body2" fontWeight="bold">
               {game.home_team} {game.odds?.moneyline?.home > 0 ? '+' : ''}{game.odds?.moneyline?.home ?? 'N/A'}
             </Typography>
@@ -894,7 +1074,7 @@ const NHLTrendsScreen = () => {
             </Typography>
           </Grid>
           <Grid item xs={4} textAlign="center">
-            <Typography variant="caption" color="text.secondary">Spread</Typography>
+            <Typography variant="caption" color="text.secondary">Point Adjustment</Typography>
             <Typography variant="body2" fontWeight="bold">
               {game.home_team} {game.odds?.spread?.home > 0 ? '+' : ''}{game.odds?.spread?.home ?? 'N/A'} ({game.odds?.spread?.home_odds > 0 ? '+' : ''}{game.odds?.spread?.home_odds ?? 'N/A'})
             </Typography>
@@ -904,7 +1084,7 @@ const NHLTrendsScreen = () => {
           </Grid>
           <Grid item xs={4} textAlign="center">
             <Typography variant="caption" color="text.secondary">Total</Typography>
-            <Typography variant="body2" fontWeight="bold">O/U {game.odds?.total?.line ?? 'N/A'}</Typography>
+            <Typography variant="body2" fontWeight="bold">Total Range {game.odds?.total?.line ?? 'N/A'}</Typography>
             <Typography variant="caption">
               O {game.odds?.total?.over > 0 ? '+' : ''}{game.odds?.total?.over ?? 'N/A'} • U {game.odds?.total?.under > 0 ? '+' : ''}{game.odds?.total?.under ?? 'N/A'}
             </Typography>
@@ -939,8 +1119,8 @@ const NHLTrendsScreen = () => {
           <Button size="small" startIcon={<InfoIcon />} onClick={(e) => handleDetailsClick(e, game)}>
             Details
           </Button>
-          <Button size="small" startIcon={<TrendingUpIcon />} onClick={(e) => handleParlayClick(e, game)}>
-            Parlay
+          <Button size="small" startIcon={<TrendingUpIcon />} onClick={(e) => handleComboClick(e, game)}>
+            Combo
           </Button>
           <Button size="small" startIcon={<EmojiEventsIcon />} onClick={(e) => handleFantasyClick(e, game)}>
             Fantasy
@@ -967,19 +1147,19 @@ const NHLTrendsScreen = () => {
     </Box>
   );
 
-  const renderParlayRecommendations = (game: NHLGame) => (
+  const renderComboRecommendations = (game: NHLGame) => (
     <Box>
-      <Typography variant="h5" gutterBottom fontWeight="bold">🎲 Parlay Recommendations</Typography>
+      <Typography variant="h5" gutterBottom fontWeight="bold">🎲 Combo Recommendations</Typography>
       {game.parlay_recommendations && game.parlay_recommendations.length > 0 ? (
         game.parlay_recommendations.map((parlay, idx) => (
           <Card key={idx} sx={{ mb: 3 }}>
             <CardContent>
-              <Typography>Parlay recommendations coming soon...</Typography>
+              <Typography>Combo recommendations coming soon...</Typography>
             </CardContent>
           </Card>
         ))
       ) : (
-        <Alert severity="info">No parlay recommendations available for this game.</Alert>
+        <Alert severity="info">No combo recommendations available for this game.</Alert>
       )}
     </Box>
   );
@@ -1289,10 +1469,10 @@ const NHLTrendsScreen = () => {
           </Grid>
         </Grid>
         <Divider sx={{ my: 2 }} />
-        <Typography variant="subtitle1">Odds</Typography>
+        <Typography variant="subtitle1">Multiplier</Typography>
         <Box display="flex" justifyContent="space-around" sx={{ mt: 1 }}>
-          <Box>ML: {selectedGame.home_team} {selectedGame.odds?.moneyline?.home}</Box>
-          <Box>Spread: {selectedGame.home_team} {selectedGame.odds?.spread?.home}</Box>
+          <Box>Winner: {selectedGame.home_team} {selectedGame.odds?.moneyline?.home}</Box>
+          <Box>spread: {selectedGame.home_team} {selectedGame.odds?.spread?.home}</Box>
           <Box>Total: {selectedGame.odds?.total?.line}</Box>
         </Box>
       </Box>
@@ -1320,14 +1500,14 @@ const NHLTrendsScreen = () => {
         <Paper sx={{ p: 3 }}>
           {viewMode === 'games' && renderGameSummary()}
           {viewMode === 'props' && renderPlayerProps(selectedGame)}
-          {viewMode === 'parlays' && renderParlayRecommendations(selectedGame)}
+          {viewMode === 'parlays' && renderComboRecommendations(selectedGame)}
           {viewMode === 'fantasy' && renderFantasyProjections(selectedGame)}
         </Paper>
       </Box>
     );
   };
 
-  // ========== MAIN RENDER ==========
+  // ========== MAIN RENDER (Access Granted) ==========
   if (selectedGame) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -1353,6 +1533,13 @@ const NHLTrendsScreen = () => {
           <Box>
             <Typography variant="h3" fontWeight="bold" gutterBottom>NHL Center • March 2026</Typography>
             <Typography variant="h6" color="text.secondary">Season 2025-26 • Playoff Push</Typography>
+            <Chip
+              icon={<CheckCircleIcon />}
+              label={`${profile?.plan?.charAt(0).toUpperCase() + profile?.plan?.slice(1) || 'Active'} Plan`}
+              color="success"
+              size="small"
+              sx={{ mt: 1 }}
+            />
           </Box>
           <Box display="flex" alignItems="center" gap={2}>
             {loading && <CircularProgress size={24} />}

@@ -172,7 +172,7 @@ const NHLGames: React.FC<NHLGamesProps> = ({ onSelectGame, onSelectProp }) => {
               {/* Odds */}
               <div className="mt-6 grid grid-cols-3 gap-3">
                 <div className="bg-gray-50 p-3 rounded-lg text-center">
-                  <p className="text-xs text-gray-500 mb-1">Moneyline</p>
+                  <p className="text-xs text-gray-500 mb-1">Match Winner</p>
                   <div className="flex justify-around">
                     <div>
                       <p className="text-sm font-medium">{game.away_team}</p>
@@ -190,7 +190,7 @@ const NHLGames: React.FC<NHLGamesProps> = ({ onSelectGame, onSelectProp }) => {
                 </div>
 
                 <div className="bg-gray-50 p-3 rounded-lg text-center">
-                  <p className="text-xs text-gray-500 mb-1">Spread</p>
+                  <p className="text-xs text-gray-500 mb-1">Point Adjustment</p>
                   <div className="flex justify-around">
                     <div>
                       <p className="text-sm font-medium">{game.away_team}</p>

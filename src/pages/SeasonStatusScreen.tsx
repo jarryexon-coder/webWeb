@@ -135,7 +135,7 @@ const SeasonStatusScreen: React.FC = () => {
               • Use the filters on the Fantasy Hub to target players from teams still in contention.
             </Typography>
             <Typography variant="body2">
-              • Check back daily for updated playoff odds and draft projections.
+              • Check back daily for updated playoff projections and draft projections.
             </Typography>
           </Paper>
         </Grid>

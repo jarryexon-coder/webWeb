@@ -71,7 +71,7 @@ const FAQPage: React.FC = () => {
       id: 'gen1',
       category: 'general',
       question: 'What is Sports Analytics Pro?',
-      answer: 'Sports Analytics Pro is an AI-powered sports analytics platform that provides real-time player statistics, prop projections, parlay builders, and predictive analytics to help bettors make informed decisions. We cover NBA, NFL, MLB, NHL, NCAA Basketball, and more.'
+      answer: 'Sports Analytics Pro is an AI-powered sports analytics platform that provides real-time player statistics, prop projections, combo builders, and predictive analytics to help bettors make informed decisions. We cover NBA, NFL, MLB, NHL, NCAA Basketball, and more.'
     },
     {
       id: 'gen2',
@@ -151,8 +151,8 @@ const FAQPage: React.FC = () => {
     {
       id: 'feat2',
       category: 'features',
-      question: 'How does the Parlay Architect work?',
-      answer: 'The Parlay Architect analyzes correlated outcomes across games to build optimized parlay combinations with higher win probabilities. It considers factors like player performance, team matchups, and situational trends.'
+      question: 'How does the Combo Architect work?',
+      answer: 'The Combo Architect analyzes correlated outcomes across games to build optimized combo combinations with higher win probabilities. It considers factors like player performance, team matchups, and situational trends.'
     },
     {
       id: 'feat3',

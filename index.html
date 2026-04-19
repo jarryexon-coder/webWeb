@@ -5,17 +5,34 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sports Analytics GPT</title>
-    
-    <!-- Stripe.js -->
+
+    <!-- Stripe SDK -->
     <script src="https://js.stripe.com/v3/"></script>
-    
-    <!-- Google tag (gtag.js) -->
+
+    <!-- Google tag (gtag.js) for both Google Ads and GA4 -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-17318724833"></script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-QTSWN0T7JV"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
+
+      // Google Ads configuration
       gtag('config', 'AW-17318724833');
+
+      // GA4 configuration with cross-domain linking
+      gtag('config', 'G-QTSWN0T7JV', {
+        'linker': {
+          'domains': [
+            'sportsanalyticsgpt.com',
+            'sports-analytics-dashboard-dw2jthmoj-jarryexon-2517s-projects.vercel.app',
+            'sports-analytics-dashboard-q0ke98k8l-jarryexon-2517s-projects.vercel.app',
+            'sports-analytics-dashboard-3dfzjremu-jarryexon-2517s-projects.vercel.app',
+            'sports-analytics-dashboard-qe53nm90v-jarryexon-2517s-projects.vercel.app',
+            'sports-analytics-dashboard-54u9ma1ak-jarryexon-2517s-projects.vercel.app'
+          ]
+        }
+      });
     </script>
   </head>
   <body>

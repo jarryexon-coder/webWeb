@@ -43,7 +43,7 @@ export const TabNavigator = () => {
       />
       
       <Tab.Screen 
-        name="Parlay" 
+        name="Combo" 
         component={ParlayScreen}
         options={{
           tabBarIcon: ({ color, size }) => (

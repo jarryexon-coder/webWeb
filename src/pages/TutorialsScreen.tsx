@@ -1,4 +1,4 @@
-// src/pages/TutorialsScreen.tsx - With Video Support
+// src/pages/TutorialsScreen.tsx - With Only Real Video
 import React, { useState } from 'react';
 import {
   Box,
@@ -200,251 +200,44 @@ const TutorialCard: React.FC<{
 // Tutorial categories
 const categories = [
   { id: 'getting-started', label: '🚀 Getting Started', icon: <SchoolIcon /> },
-  { id: 'parlay-tools', label: '🎲 Parlay & Betting', icon: <MergeIcon /> },
+  { id: 'combo-tools', label: '🎲 Combo & Analytics', icon: <MergeIcon /> },
   { id: 'analytics', label: '📊 Analytics', icon: <BarChartIcon /> },
   { id: 'sports', label: '🏆 Sports', icon: <SportsBasketballIcon /> },
   { id: 'ai-features', label: '🤖 AI Features', icon: <AutoAwesomeIcon /> },
   { id: 'subscription', label: '💎 Subscription', icon: <LockIcon /> },
 ];
 
-// Tutorial data with video URLs
+// Tutorial data - only the real video, all other categories empty
 const tutorials = {
   'getting-started': [
     {
-      title: 'Welcome to Sports Analytics GPT',
-      description: 'Your complete guide to navigating the platform',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '8:32',
+      title: 'Sports Analytics GPT Tutorial: How to Find +EV Props in Minutes',
+      description: 'Learn how to find positive expected value (+EV) player props in minutes using Sports Analytics GPT. Master the app\'s core features for profitable analytics.',
+      videoUrl: 'https://youtu.be/p0vAMekRq8Q',
+      videoThumbnail: 'https://img.youtube.com/vi/p0vAMekRq8Q/maxresdefault.jpg',
+      duration: '5:00',
       steps: [
-        { title: 'Create an Account', description: 'Sign up for free to access basic features and track your activity.' },
-        { title: 'Explore the Home Screen', description: 'Browse featured tools, sports dashboards, and quick access cards.' },
-        { title: 'Choose Your Path', description: 'Select from Parlay Tools, Sports Analytics, News, or Special Events.' },
-        { title: 'Start with Free Features', description: 'Access live games, basic stats, and one daily AI generation for free.' },
-        { title: 'Upgrade for Full Access', description: 'Subscribe to Analytics, Generator, or Premium tiers for unlimited features.' }
+        { title: 'Introduction', description: 'Overview of what you\'ll learn: finding +EV props efficiently.' },
+        { title: 'First Topic / Setup', description: 'Setting up the app and navigating to the props tool.' },
+        { title: 'Core Tutorial Content', description: 'Step-by-step demonstration of finding +EV props.' },
+        { title: 'Advanced Tips or Pro Strategies', description: 'Advanced techniques to maximize advantage and simulated gain.' },
+        { title: 'Next Steps & Resources', description: 'Further learning and how to leverage the app\'s full potential.' }
       ],
-      tips: ['Bookmark your favorite screens', 'Use the search bar to find players', 'Check the stats bar for data freshness']
-    },
-    {
-      title: 'Understanding Plan Tiers',
-      description: 'What you get at each subscription level',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '5:15',
-      steps: [
-        { title: 'Starter (Free)', description: 'Live games, basic stats, one daily AI generation, one featured parlay per sport.' },
-        { title: 'Analytics ($9.99/mo)', description: 'Everything in Starter + advanced metrics, standings, injury reports, player analysis.' },
-        { title: 'Generator ($19.99/mo)', description: 'Everything in Analytics + unlimited AI generations, value bets, top prospects, premium predictions.' },
-        { title: 'Premium ($49.99/mo)', description: 'Everything in Generator + API access, priority support, early feature access.' }
-      ],
-      tips: ['Start with Starter to explore features', 'Upgrade when you need unlimited generations', 'Annual plans save 20%']
+      tips: [
+        'Match Analytics: Use matchup data to identify favorable player props.',
+        'Player Props: Focus on props with positive advantage percentages (5%+).',
+        'PrizePicks Integration: Cross-reference PrizePicks lines with our projections.',
+        'Pro Tip: Always check the confidence score and advantage % before making selections.',
+        'Use code TUTORIAL20 for 20% off your first month at https://SportsAnalyticsGPT.com',
+        'Subscribe for more tutorials: https://youtube.com/@SportsAnalyticsGPT'
+      ]
     }
   ],
-  'parlay-tools': [
-    {
-      title: 'Parlay Architect',
-      description: 'Build data-driven parlays with confidence',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '10:45',
-      steps: [
-        { title: 'Select Your Sport', description: 'Choose NBA, NHL, or MLB from the sport selector.' },
-        { title: 'Add Legs', description: 'Click "Add Leg" to browse real player props with projections and edge percentages.' },
-        { title: 'Filter Props', description: 'Use filters to sort by confidence, edge, or stat type.' },
-        { title: 'Build Your Parlay', description: 'Select overs/unders for each player. Watch odds calculate in real-time.' },
-        { title: 'Review & Place', description: 'Check total odds, implied probability, and potential payout before adding to bet slip.' }
-      ],
-      tips: ['Look for legs with 80%+ confidence', 'Mix correlated legs for better odds', 'Use the AI generator for instant suggestions']
-    },
-    {
-      title: 'Same-Game Parlay Generator',
-      description: 'One game, multiple bets, maximum payout',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '7:20',
-      steps: [
-        { title: 'Select a Sport', description: 'Choose NBA, NHL, or MLB to see the featured parlay.' },
-        { title: 'View Featured Parlay', description: 'Each sport shows one free, high-confidence parlay with 2-3 legs.' },
-        { title: 'Generate More', description: 'Click "Generate More" to see all parlay options for that game.' },
-        { title: 'Use AI Generator', description: 'Select a preset prompt or enter custom text to create new parlays instantly.' },
-        { title: 'Filter by Market', description: 'Use tabs to filter Player Props, Moneyline, Totals, or Mixed parlays.' }
-      ],
-      tips: ['Moneyline parlays are lowest risk', 'Mixed parlays combine props with totals', 'Generated parlays appear in the "Generated" tab']
-    },
-    {
-      title: 'PrizePicks Player Props',
-      description: 'Track real-time props with Kelly Criterion bet sizing',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '9:15',
-      steps: [
-        { title: 'Browse Props', description: 'View player props across NBA, NFL, MLB, and NHL with live odds.' },
-        { title: 'Filter by Edge', description: 'Use the edge slider to find +EV opportunities (positive edge %).' },
-        { title: 'Check Projections', description: 'Compare market lines against AI-driven player projections.' },
-        { title: 'Calculate Bet Size', description: 'Kelly Criterion automatically suggests optimal wager based on edge and bankroll.' },
-        { title: 'AI Prop Generator', description: 'Type prompts like "NBA points high edge" to get personalized recommendations.' }
-      ],
-      tips: ['Focus on props with 5%+ edge', 'Sort by projection difference', 'Refresh data every 3 minutes for latest odds']
-    }
-  ],
-  'analytics': [
-    {
-      title: 'Analytics Dashboard',
-      description: 'Unified sports analytics hub',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '6:30',
-      steps: [
-        { title: 'View KPIs', description: 'See total players, injury counts, and value bets found at a glance.' },
-        { title: 'Player Analysis', description: 'Browse player stats with paginated tables and advanced metrics.' },
-        { title: 'Injury Report', description: 'Track player injuries with status (Out/Questionable) and return dates.' },
-        { title: 'Value Bets', description: 'Find +EV betting opportunities with edge percentages and confidence levels.' },
-        { title: 'Visual Analytics', description: 'Explore position distribution charts and edge analysis bar charts.' }
-      ],
-      tips: ['Use the tabs to switch between views', 'Data freshness timestamps show last update', 'Plan tier determines available features']
-    },
-    {
-      title: 'Advanced Analytics',
-      description: 'AI-powered sports intelligence',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '8:45',
-      steps: [
-        { title: 'Smart Prompts Library', description: 'Choose from 20+ analytics-focused prompts like "Players with highest positive regression".' },
-        { title: 'Value Picks Engine', description: 'Automatically identifies +EV opportunities with edge filtering.' },
-        { title: 'Parlay Analytics', description: 'Find correlated parlay opportunities with correlation factors and true probability.' },
-        { title: 'Player Trend Tracking', description: 'Monitor rising players, hot streaks, and regression candidates.' },
-        { title: 'Custom Queries', description: 'Enter your own analytics questions for instant insights.' }
-      ],
-      tips: ['Try "Best value across NBA, NHL, MLB tonight"', 'Use "Sharp money moves last 24 hours" for insider trends', 'Correlation scores above 0.7 indicate strong connections']
-    }
-  ],
-  'sports': [
-    {
-      title: 'NBA Dashboard',
-      description: 'Fantasy basketball command center',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '7:50',
-      steps: [
-        { title: 'View Top 10 Chart', description: 'See highest fantasy scorers with interactive tooltips.' },
-        { title: 'Value Picks Table', description: 'Find best value players sorted by value score vs salary.' },
-        { title: 'Today\'s Games', description: 'Check live game schedule with scores, status, and matchups.' },
-        { title: 'Player Projections', description: 'View fantasy points, points, rebounds, assists, and value metrics.' },
-        { title: 'Summary Cards', description: 'Quick stats include total players, average fantasy points, and top scorer.' }
-      ],
-      tips: ['Value score = fantasy points ÷ salary × 1000', 'Look for players with high value scores under salary cap', 'Check injury status before locking lineups']
-    },
-    {
-      title: 'NHL Dashboard',
-      description: 'Hockey analytics & standings tracker',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '6:15',
-      steps: [
-        { title: 'Live Games', description: 'View today\'s matchups with scores, venues, and broadcast info.' },
-        { title: 'Standings Tab', description: 'Full conference standings with wins, losses, points, and streaks.' },
-        { title: 'Players Tab', description: 'Skater stats (goals, assists, points) and goalie stats (GAA, save %).' },
-        { title: 'Filter by Conference', description: 'Switch between Eastern and Western Conference views.' },
-        { title: 'Fantasy Points', description: 'Each player includes fantasy point calculations for your leagues.' }
-      ],
-      tips: ['Points percentage bars show team performance', 'Streak chips indicate recent form', 'Goalie save % above .915 is elite']
-    },
-    {
-      title: 'MLB Spring Training',
-      description: 'Spring training hub (Feb–Mar)',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '5:45',
-      steps: [
-        { title: 'Spring Games', description: 'Track Grapefruit and Cactus League games with scores and weather.' },
-        { title: 'Standings', description: 'View spring training records with wins, losses, and win percentage.' },
-        { title: 'Hitting Leaders', description: 'Top hitters with AVG, HR, RBI, OPS, and prospect indicators.' },
-        { title: 'Pitching Leaders', description: 'Pitching stats including ERA, WHIP, strikeouts, and innings pitched.' },
-        { title: 'Top Prospects', description: 'Featured prospects with hitting/pitching stats and team affiliation.' }
-      ],
-      tips: ['Weather cards show temperature and conditions', 'Prospect indicators highlight future stars', 'Toggle between current and next year\'s data']
-    },
-    {
-      title: 'World Cup 2026',
-      description: 'Your complete FIFA World Cup guide',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '8:00',
-      steps: [
-        { title: 'Group Standings', description: 'Track group stage progress with points, wins, and goal differential.' },
-        { title: 'Match Schedule', description: 'View all matches across USA, Canada, and Mexico venues.' },
-        { title: 'AI Predictions', description: 'Get AI-powered odds and predictions for each match.' },
-        { title: 'Team Schedules', description: 'Follow the United States team schedule and results.' },
-        { title: 'Tournament News', description: 'Stay informed with the latest World Cup updates and analysis.' }
-      ],
-      tips: ['Check venue locations for travel planning', 'AI predictions update daily', 'Follow your favorite team\'s path to the final']
-    }
-  ],
-  'ai-features': [
-    {
-      title: 'AI Prediction Generator',
-      description: 'Natural language predictions for props and outcomes',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '9:30',
-      steps: [
-        { title: 'Enter Your Prompt', description: 'Type natural language like "LeBron James points over 25.5 tonight".' },
-        { title: 'Smart Detection', description: 'AI detects sport, player, stat type, and bet side automatically.' },
-        { title: 'View Results', description: 'See prediction with confidence score, projection, and edge percentage.' },
-        { title: 'Track Outcomes', description: 'Monitor correct/incorrect status in the Predictions Outcome screen.' },
-        { title: 'Refine Queries', description: 'Add team names or specific games for more accurate predictions.' }
-      ],
-      tips: ['Be specific: "Lakers vs Warriors points over"', 'Use "NBA", "NHL", or "MLB" for sport detection', 'Check edge % to find +EV opportunities']
-    },
-    {
-      title: 'Secret Phrases Hub',
-      description: 'Unlock insider betting intelligence',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '7:15',
-      steps: [
-        { title: 'Browse Prompts', description: 'Select from 30+ specialized prompts like "sharp money moves".' },
-        { title: 'Enter Custom Queries', description: 'Type your own questions for personalized insights.' },
-        { title: 'Discover Hidden Features', description: 'Try "predictive clustering", "bayesian inference", or "easter egg".' },
-        { title: 'Analyze Results', description: 'View player projections, confidence scores, and edge percentages.' },
-        { title: 'Apply Insights', description: 'Use intelligence to inform your betting decisions.' }
-      ],
-      tips: ['"Sharp money moves" shows where professionals are betting', '"Prop value" finds best +EV opportunities', 'Try "easter egg" for exclusive content']
-    },
-    {
-      title: 'Daily Picks',
-      description: 'AI-curated daily betting recommendations',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '6:45',
-      steps: [
-        { title: 'View Picks', description: 'See AI-generated picks updated every 60 seconds.' },
-        { title: 'Filter by Sport', description: 'Focus on NBA, NFL, MLB, or NHL.' },
-        { title: 'Sort by Edge', description: 'Find highest value opportunities first.' },
-        { title: 'Check Confidence', description: 'Each pick shows confidence level and key factors.' },
-        { title: 'Build Parlays', description: 'Combine multiple picks into optimized parlays.' }
-      ],
-      tips: ['Refresh for latest picks', 'Focus on picks with 80%+ confidence', 'Edge % above 5% indicates strong value']
-    }
-  ],
-  'subscription': [
-    {
-      title: 'Subscription Management',
-      description: 'Manage your plan and credits',
-      videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', // Replace with actual video URL
-      videoThumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-      duration: '4:30',
-      steps: [
-        { title: 'View Current Plan', description: 'See your active subscription tier and feature access.' },
-        { title: 'Check Credits', description: 'Generator tier users see remaining AI generation credits.' },
-        { title: 'Upgrade Plan', description: 'Choose Analytics, Generator, or Premium for more features.' },
-        { title: 'Annual Savings', description: 'Select annual billing to save 20% on any plan.' },
-        { title: 'Manage Billing', description: 'Update payment methods and view invoices.' }
-      ],
-      tips: ['Starter tier includes one free daily AI generation', 'Generator tier unlocks unlimited generations', 'Premium includes API access and priority support']
-    }
-  ]
+  'parlay-tools': [],
+  'analytics': [],
+  'sports': [],
+  'ai-features': [],
+  'subscription': []
 };
 
 // Tutorial Detail Modal Component (Text-based)
@@ -613,19 +406,19 @@ const TutorialsScreen: React.FC = () => {
         </Grid>
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h4" color="primary">30+</Typography>
+            <Typography variant="h4" color="primary">6</Typography>
             <Typography variant="body2" color="text.secondary">Step-by-Step Guides</Typography>
           </Paper>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h4" color="primary">50+</Typography>
+            <Typography variant="h4" color="primary">6</Typography>
             <Typography variant="body2" color="text.secondary">Pro Tips</Typography>
           </Paper>
         </Grid>
         <Grid item xs={6} sm={3}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h4" color="primary">5-10</Typography>
+            <Typography variant="h4" color="primary">5</Typography>
             <Typography variant="body2" color="text.secondary">Minutes per Tutorial</Typography>
           </Paper>
         </Grid>
@@ -665,6 +458,15 @@ const TutorialsScreen: React.FC = () => {
             />
           </Grid>
         ))}
+        {currentTutorials.length === 0 && (
+          <Grid item xs={12}>
+            <Paper sx={{ p: 4, textAlign: 'center' }}>
+              <Typography variant="body1" color="text.secondary">
+                No tutorials available in this category yet. Check back soon!
+              </Typography>
+            </Paper>
+          </Grid>
+        )}
       </Grid>
 
       {/* Quick Navigation Section */}
@@ -681,13 +483,13 @@ const TutorialsScreen: React.FC = () => {
             </Button>
           </Grid>
           <Grid item xs={6} sm={4} md={3}>
-            <Button component={Link} to="/parlay-architect" fullWidth variant="outlined" startIcon={<MergeIcon />}>
-              Parlay Architect
+            <Button component={Link} to="/combo-architect" fullWidth variant="outlined" startIcon={<MergeIcon />}>
+              Combo Architect
             </Button>
           </Grid>
           <Grid item xs={6} sm={4} md={3}>
-            <Button component={Link} to="/same-game-parlay" fullWidth variant="outlined" startIcon={<AddTaskIcon />}>
-              Same-Game Parlay
+            <Button component={Link} to="/same-game-combo" fullWidth variant="outlined" startIcon={<AddTaskIcon />}>
+              Same-Game Combo
             </Button>
           </Grid>
           <Grid item xs={6} sm={4} md={3}>

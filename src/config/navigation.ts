@@ -29,7 +29,6 @@ import NHLTrendsScreen from '../pages/NHLTrendsScreen';
 import WorldCup2026Screen from '../pages/WorldCup2026Screen';
 
 import NBADashboard from '../pages/NBADashboard';
-import NHLDashboard from '../pages/NHLDashboard';
 import MLBSpringTraining from '../pages/MLBSpringTraining';
 
 import TennisPlayers from '../pages/TennisPlayers';
@@ -40,25 +39,19 @@ import GolfPlayers from '../pages/GolfPlayers';
 import GolfTournaments from '../pages/GolfTournaments';
 import GolfLeaderboard from '../pages/GolfLeaderboard';
 
-// NCAAB page imports
-import NCAABGamesPage from '../pages/ncaab/NCAABGamesPage';
-import NCAABStandingsPage from '../pages/ncaab/NCAABStandingsPage';
-import NCAABPlayersPage from '../pages/ncaab/NCAABPlayersPage';
-import NCAABTeamsPage from '../pages/ncaab/NCAABTeamsPage';
-import NCAABRankingsPage from '../pages/ncaab/NCAABRankingsPage';
-import NCAABBracketPage from '../pages/ncaab/NCAABBracketPage';
-
 // Team Rosters page
 import TeamRostersPage from '../pages/TeamRostersPage';
 
-// FAQ, Info, About, Settings, Tutorials
+// Tutorials
+import TutorialsScreen from '../pages/TutorialsScreen';
+
+// Settings pages
 import FAQPage from '../pages/FAQPage';
 import InfoPage from '../pages/InfoPage';
 import AboutPage from '../pages/AboutPage';
 import SettingsPage from '../pages/SettingsPage';
-import TutorialsScreen from '../pages/TutorialsScreen';
 
-// 👇 NEW ACCOUNT PAGE IMPORTS 👇
+// Account pages
 import SportsAnalyticsDashboard from '../pages/SportsAnalyticsDashboard';
 import SubscriptionScreen from '../pages/SubscriptionScreen';
 
@@ -77,69 +70,57 @@ export const navigationGroups: NavGroup[] = [
   {
     title: 'Free 4 All',
     items: [
-      { label: 'Home', path: '/home', element: HomeScreen },
-      { label: 'Live Games', path: '/live-games', element: LiveGamesScreen },
-      { label: 'News Desk', path: '/newsdesk', element: NewsDeskScreen },
-      { label: 'Team Rosters', path: '/team-rosters', element: TeamRostersPage },
-      { label: 'Match Analytics', path: '/match-analytics', element: MatchAnalyticsScreen },
-      { label: 'NCAAB Bracket', path: '/ncaab/bracket', element: NCAABBracketPage },
-      { label: 'Player Props', path: '/player-props', element: PlayerPropsScreen },
+      { label: 'Livegames', path: '/live-games', element: LiveGamesScreen },
+      { label: 'Newsdesk', path: '/newsdesk', element: NewsDeskScreen },
+      { label: 'Team rosters', path: '/team-rosters', element: TeamRostersPage },
       { label: 'Tutorials', path: '/tutorials', element: TutorialsScreen },
     ],
   },
   {
-    title: 'Starter',
+    title: 'Starters package',
     items: [
-      { label: 'NHL Trends', path: '/nhl-trends', element: NHLTrendsScreen },
-      { label: 'NCAAB Teams', path: '/ncaab/teams', element: NCAABTeamsPage },
-      { label: 'World Cup 2026', path: '/world-cup-2026', element: WorldCup2026Screen },
-    ],
-  },
-  {
-    title: 'Analytics Package',
-    items: [
-      { label: 'Player Stats', path: '/player-stats', element: PlayerStatsScreen },
-      { label: 'Season Stats', path: '/season-stats', element: SeasonStatsScreen },
-      { label: 'Parlay Analytics', path: '/parlay-analytics', element: ParlayAnalyticsScreen },
-      { label: 'AI Suggestions', path: '/ai-suggestions', element: AIParlaySuggestionsScreen },
-      { label: 'Tennis Matches', path: '/tennis/matches', element: TennisMatches },
+      { label: 'Nhltrends', path: '/nhl-trends', element: NHLTrendsScreen },
+      { label: 'Match Analytics', path: '/match-analytics', element: MatchAnalyticsScreen },
+      { label: 'Worldcup 2026', path: '/world-cup-2026', element: WorldCup2026Screen },
       { label: 'Tennis Players', path: '/tennis/players', element: TennisPlayers },
-      { label: 'Tennis Tournaments', path: '/tennis/tournaments', element: TennisTournaments },
-      { label: 'Golf Leaderboard', path: '/golf/leaderboard', element: GolfLeaderboard },
-      { label: 'Golf Players', path: '/golf/players', element: GolfPlayers },
-      { label: 'Golf Tournaments', path: '/golf/tournaments', element: GolfTournaments },
-      { label: 'NCAAB Games', path: '/ncaab/games', element: NCAABGamesPage },
-      { label: 'NCAAB Standings', path: '/ncaab/standings', element: NCAABStandingsPage },
-      { label: 'NCAAB Players', path: '/ncaab/players', element: NCAABPlayersPage },
+      { label: 'Tennis matches', path: '/tennis/matches', element: TennisMatches },
+      { label: 'Tennis tournaments', path: '/tennis/tournaments', element: TennisTournaments },
     ],
   },
   {
-    title: 'Generator package',
+    title: 'Analytics package',
+    items: [
+      { label: 'Player stats', path: '/player-stats', element: PlayerStatsScreen },
+      { label: 'Season Stats', path: '/season-stats', element: SeasonStatsScreen },
+      { label: 'Parlayanalytics', path: '/parlay-analytics', element: ParlayAnalyticsScreen },
+      { label: 'Ai parlay suggestions', path: '/ai-suggestions', element: AIParlaySuggestionsScreen },
+      { label: 'Player props', path: '/player-props', element: PlayerPropsScreen },
+      { label: 'Golf players', path: '/golf/players', element: GolfPlayers },
+      { label: 'SportsWire', path: '/sports-wire', element: SportsWireScreen },
+      { label: 'Golf leaderboard', path: '/golf/leaderboard', element: GolfLeaderboard },
+      { label: 'Golf Tournaments', path: '/golf/tournaments', element: GolfTournaments },
+      { label: 'Advanced Analytics', path: '/advanced-analytics', element: AdvancedAnalyticsScreen },
+      { label: 'Mlb Spring Training', path: '/mlb-spring-training', element: MLBSpringTraining },
+      { label: 'Nba dashboard', path: '/nba-dashboard', element: NBADashboard },
+    ],
+  },
+  {
+    title: 'Generators',
     items: [
       { label: 'Daily Picks', path: '/daily-picks', element: DailyPicksScreen },
-      { label: 'Secret Phrases', path: '/secret-phrases', element: SecretPhraseScreen },
-      { label: 'Sports Wire', path: '/sports-wire', element: SportsWireScreen },
-      { label: 'Fantasy Hub', path: '/fantasy-hub', element: FantasyHubScreen },
-      { label: 'Prize Picks', path: '/prize-picks', element: PrizePicksScreen },
+      { label: 'Same game', path: '/same-game-parlay', element: SameGameParlayScreen },
+      { label: 'Fantasy hub', path: '/fantasy-hub', element: FantasyHubScreen },
+      { label: 'Prize picks', path: '/prize-picks', element: PrizePicksScreen },
+      { label: 'Secret phrases', path: '/secret-phrases', element: SecretPhraseScreen },
+      { label: 'Predictions outcome', path: '/predictions-outcome', element: PredictionsOutcomeScreen },
       { label: 'Kalshi Predictions', path: '/kalshi-predictions', element: KalshiPredictionsScreen },
-      { label: 'Predictions Outcome', path: '/predictions-outcome', element: PredictionsOutcomeScreen },
       { label: 'Parlay Architect', path: '/parlay-architect', element: ParlayArchitectScreen },
-      { label: 'Same Game Parlay', path: '/same-game-parlay', element: SameGameParlayScreen },
-      { label: 'Advanced Analytics', path: '/advanced-analytics', element: AdvancedAnalyticsScreen },
-    ],
-  },
-  {
-    title: 'Dashboards',
-    items: [
-      { label: 'Analytics Dashboard', path: '/analytics-dashboard', element: AnalyticsDashboardScreen },
-      { label: 'NHL Dashboard', path: '/nhl-dashboard', element: NHLDashboard },
-      { label: 'NBA Dashboard', path: '/nba-dashboard', element: NBADashboard },
-      { label: 'MLB Spring Training', path: '/mlb-spring-training', element: MLBSpringTraining },
     ],
   },
   {
     title: 'Settings',
     items: [
+      { label: 'Analytics Dashboard', path: '/analytics-dashboard', element: AnalyticsDashboardScreen },
       { label: 'FAQ', path: '/faq', element: FAQPage },
       { label: 'Info', path: '/info', element: InfoPage },
       { label: 'About', path: '/about', element: AboutPage },
@@ -156,5 +137,5 @@ export const navigationGroups: NavGroup[] = [
   },
 ];
 
-// Optional: Export a flat list of all routes for easy reference
+// Flat list of all routes for easy reference
 export const allRoutes = navigationGroups.flatMap(group => group.items);

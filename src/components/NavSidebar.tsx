@@ -62,17 +62,17 @@ const navItems: NavItem[] = [
   { text: 'Analytics Dashboard', path: '/analytics-dashboard', icon: <AnalyticsIcon />, category: 'Analytics' },
   { text: 'Sports Analytics', path: '/sports-analytics/nba', icon: <AnalyticsIcon />, category: 'Analytics' },
 
-  // Parlay & Betting
-  { text: 'Parlay Builder', path: '/parlay-builder', icon: <CasinoIcon />, category: 'Parlay' },
-  { text: 'Same Game Parlay', path: '/same-game-parlay', icon: <CasinoIcon />, category: 'Parlay' },
-  { text: 'Teaser Calculator', path: '/teaser-calculator', icon: <CasinoIcon />, category: 'Parlay' },
-  { text: 'Round Robin', path: '/round-robin', icon: <CasinoIcon />, category: 'Parlay' },
-  { text: 'Parlay Boosts', path: '/parlay-boosts', icon: <CasinoIcon />, category: 'Parlay' },
-  { text: 'Parlay History', path: '/parlay-history', icon: <CasinoIcon />, category: 'Parlay' },
+  // Combo (formerly Combo)
+  { text: 'Combo Builder', path: '/parlay-builder', icon: <CasinoIcon />, category: 'Combo' },
+  { text: 'Game Combo', path: '/same-game-parlay', icon: <CasinoIcon />, category: 'Combo' },
+  { text: 'SpreadAdjuster Calculator', path: '/teaser-calculator', icon: <CasinoIcon />, category: 'Combo' },
+  { text: 'Multi‑Leg Combos', path: '/round-robin', icon: <CasinoIcon />, category: 'Combo' },
+  { text: 'Combo Boosts', path: '/parlay-boosts', icon: <CasinoIcon />, category: 'Combo' },
+  { text: 'Combo History', path: '/parlay-history', icon: <CasinoIcon />, category: 'Combo' },
 
   // AI & Correlation
   { text: 'AI Suggestions', path: '/ai-suggestions', icon: <AIIcon />, category: 'AI' },
-  { text: 'Parlay Analytics', path: '/parlay-analytics', icon: <PsychologyIcon />, category: 'AI' },
+  { text: 'Combo Analytics', path: '/parlay-analytics', icon: <PsychologyIcon />, category: 'AI' },
   { text: 'Correlation Explorer', path: '/correlation-explorer', icon: <PsychologyIcon />, category: 'AI' },
 
   // Props

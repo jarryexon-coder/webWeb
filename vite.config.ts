@@ -1,12 +1,29 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { visualizer } from 'rollup-plugin-visualizer';
 
+// Plugin to remove Content-Security-Policy header
+const removeCSP: Plugin = {
+  name: 'remove-csp',
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      const originalSetHeader = res.setHeader.bind(res);
+      res.setHeader = function(name: string, value: any) {
+        if (name.toLowerCase() === 'content-security-policy') {
+          // Ignore CSP headers
+          return;
+        }
+        return originalSetHeader(name, value);
+      };
+      next();
+    });
+  },
+};
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
-  // Use VITE_API_BASE_PYTHON if set, otherwise fallback to production URL
   const pythonApiTarget = env.VITE_API_BASE_PYTHON || 'https://python-api-fresh-production.up.railway.app';
   const nodeApiTarget = env.VITE_API_BASE_NODE || 'https://prizepicks-production.up.railway.app';
   
@@ -15,6 +32,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      removeCSP,
       react(),
       visualizer({
         open: true,
@@ -54,38 +72,64 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       host: true,
       proxy: {
-        // Proxy for Python API
+        // IMPORTANT: Auth endpoints go to Python backend (must come BEFORE generic /api)
+        '/api/auth': {
+          target: pythonApiTarget,
+          changeOrigin: true,
+          secure: false,
+          configure: (proxy) => {
+            proxy.on('error', (err) => console.log('❌ Auth proxy error:', err));
+            proxy.on('proxyReq', (proxyReq, req) => {
+              console.log('🔄 Auth proxy:', req.method, req.url, '→', pythonApiTarget + req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req) => {
+              console.log('✅ Auth proxy response:', proxyRes.statusCode, req.url);
+            });
+          },
+        },
+        // Default: proxy all other /api requests to Node backend
+        '/api': {
+          target: nodeApiTarget,
+          changeOrigin: true,
+          secure: false,
+          configure: (proxy) => {
+            proxy.on('error', (err) => console.log('❌ Node proxy error:', err));
+            proxy.on('proxyReq', (proxyReq, req) => {
+              console.log('🔄 Node proxy (default):', req.method, req.url, '→', nodeApiTarget + req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req) => {
+              console.log('✅ Node proxy response:', proxyRes.statusCode, req.url);
+            });
+          },
+        },
+        // Override for Python API with prefix /api/python
         '/api/python': {
           target: pythonApiTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/api\/python/, ''),
           configure: (proxy) => {
-            proxy.on('error', (err, req, res) => {
-              console.log('❌ Python proxy error:', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, res) => {
+            proxy.on('error', (err) => console.log('❌ Python proxy error:', err));
+            proxy.on('proxyReq', (proxyReq, req) => {
               console.log('🔄 Python proxy:', req.method, req.url, '→', pythonApiTarget + req.url.replace(/^\/api\/python/, ''));
             });
-            proxy.on('proxyRes', (proxyRes, req, res) => {
+            proxy.on('proxyRes', (proxyRes, req) => {
               console.log('✅ Python proxy response:', proxyRes.statusCode, req.url);
             });
           },
         },
-        // Proxy for Node API (Tank01, etc.)
+        // Override for Node API with prefix /api/node (if needed)
         '/api/node': {
           target: nodeApiTarget,
           changeOrigin: true,
           secure: false,
           rewrite: (path) => path.replace(/^\/api\/node/, ''),
           configure: (proxy) => {
-            proxy.on('error', (err, req, res) => {
-              console.log('❌ Node proxy error:', err);
+            proxy.on('error', (err) => console.log('❌ Node proxy error:', err));
+            proxy.on('proxyReq', (proxyReq, req) => {
+              console.log('🔄 Node proxy (prefix):', req.method, req.url, '→', nodeApiTarget + req.url.replace(/^\/api\/node/, ''));
             });
-            proxy.on('proxyReq', (proxyReq, req, res) => {
-              console.log('🔄 Node proxy:', req.method, req.url, '→', nodeApiTarget + req.url.replace(/^\/api\/node/, ''));
-            });
-            proxy.on('proxyRes', (proxyRes, req, res) => {
+            proxy.on('proxyRes', (proxyRes, req) => {
               console.log('✅ Node proxy response:', proxyRes.statusCode, req.url);
             });
           },

@@ -46,7 +46,7 @@ const ParlayBuilderStackNavigator = () => {
         options={({ route }) => ({
           title: route.params?.sport 
             ? `Build ${route.params.sport.toUpperCase()} Parlay` 
-            : 'Build Parlay',
+            : 'Build Combo',
           headerRight: () => (
             <TouchableOpacity style={{ marginRight: 16 }}>
               <Icon name="content-save" size={24} color={theme.primary} />
@@ -59,7 +59,7 @@ const ParlayBuilderStackNavigator = () => {
         name="AddLeg"
         component={AddLegScreen}
         options={{
-          title: 'Add Bet',
+          title: 'Add Selection',
         }}
       />
       
@@ -67,7 +67,7 @@ const ParlayBuilderStackNavigator = () => {
         name="ParlayTemplates"
         component={ParlayTemplatesScreen}
         options={{
-          title: 'Parlay Templates',
+          title: 'Combo Templates',
         }}
       />
       

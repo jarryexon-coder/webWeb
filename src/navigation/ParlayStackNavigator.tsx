@@ -1,44 +1,44 @@
-// src/navigation/ParlayStackNavigator.tsx
+// src/navigation/ComboStackNavigator.tsx
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ParlayStackParamList } from './types';
+import { ComboStackParamList } from './types';
 
 // Import screens
-import ParlayArchitectScreen from '../screens/parlay/ParlayArchitectScreen';
-import ParlayBuilderScreen from '../screens/parlay/ParlayBuilderScreen';
-import CrossSportParlayScreen from '../screens/parlay/CrossSportParlayScreen';
-import ParlayDetailsScreen from '../screens/parlay/ParlayDetailsScreen';
+import ComboArchitectScreen from '../screens/parlay/ComboArchitectScreen';
+import ComboBuilderScreen from '../screens/parlay/ComboBuilderScreen';
+import CrossSportComboScreen from '../screens/parlay/CrossSportComboScreen';
+import ComboDetailsScreen from '../screens/parlay/ComboDetailsScreen';
 
-const Stack = createNativeStackNavigator<ParlayStackParamList>();
+const Stack = createNativeStackNavigator<ComboStackParamList>();
 
-export const ParlayStackNavigator = () => {
+export const ComboStackNavigator = () => {
   return (
     <Stack.Navigator
-      initialRouteName="ParlayArchitect"
+      initialRouteName="ComboArchitect"
       screenOptions={{
         headerStyle: { backgroundColor: '#2d3748' },
         headerTintColor: '#fff',
       }}
     >
       <Stack.Screen
-        name="ParlayArchitect"
-        component={ParlayArchitectScreen}
-        options={{ title: 'Parlay Architect' }}
+        name="ComboArchitect"
+        component={ComboArchitectScreen}
+        options={{ title: 'Combo Architect' }}
       />
       <Stack.Screen
-        name="ParlayBuilder"
-        component={ParlayBuilderScreen}
-        options={{ title: 'Build Parlay' }}
+        name="ComboBuilder"
+        component={ComboBuilderScreen}
+        options={{ title: 'Build Combo' }}
       />
       <Stack.Screen
-        name="CrossSportParlay"
-        component={CrossSportParlayScreen}
-        options={{ title: 'Cross-Sport Parlay' }}
+        name="CrossSportCombo"
+        component={CrossSportComboScreen}
+        options={{ title: 'Cross-Sport Combo' }}
       />
       <Stack.Screen
-        name="ParlayDetails"
-        component={ParlayDetailsScreen}
-        options={{ title: 'Parlay Details' }}
+        name="ComboDetails"
+        component={ComboDetailsScreen}
+        options={{ title: 'Combo Details' }}
       />
     </Stack.Navigator>
   );

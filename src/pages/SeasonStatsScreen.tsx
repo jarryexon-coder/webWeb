@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
+  AlertTitle,
   Grid,
   Paper,
   Card,
@@ -40,7 +41,11 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Fade,
-  Zoom
+  Zoom,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   SportsBasketball,
@@ -48,6 +53,7 @@ import {
   SportsBaseball,
   SportsHockey,
   TrendingUp,
+  Done as CheckCircleIcon,
   TrendingDown,
   Assessment,
   ArrowDropUp,
@@ -70,11 +76,16 @@ import {
   Search,
   FilterList,
   Download,
-  CheckCircle
+  CheckCircle,
+  Lock as LockIcon,
+  CreditCard as CreditCardIcon,
+  Star as StarIcon,
+  Speed as SpeedIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
 
 // =============================================
 // CONSTANTS
@@ -389,6 +400,27 @@ const MOCK_PLAYER_STATS: PlayerStats[] = [
     injuryStatus: 'Active'
   }
 ];
+
+// Premium-only content wrapper
+const PremiumContent = ({ hasAccess, children, message }: { hasAccess: boolean; children: React.ReactNode; message?: string }) => {
+  if (!hasAccess) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 8 }}>
+        <LockIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+        <Typography variant="h6" gutterBottom>
+          Premium Feature
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          {message || 'Upgrade to premium to access advanced season statistics and analytics.'}
+        </Typography>
+        <Button variant="contained" startIcon={<CreditCardIcon />}>
+          Upgrade to Premium
+        </Button>
+      </Box>
+    );
+  }
+  return <>{children}</>;
+};
 
 // =============================================
 // API FUNCTIONS
@@ -819,6 +851,7 @@ const transformSeasonLeaders = (players: PlayerStats[]): SeasonLeaders => {
 
 const SeasonStatsContent: React.FC = () => {
   const theme = useTheme();
+  const { user, getIdToken } = useAuth();
   const [sportTab, setSportTab] = useState<string>('nba');
   const [statsTab, setStatsTab] = useState<string>('players');
   const [categoryTab, setCategoryTab] = useState<string>('points');
@@ -831,6 +864,45 @@ const SeasonStatsContent: React.FC = () => {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerStats | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [viewMode, setViewMode] = useState<'table' | 'cards' | 'compact'>('table');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [hasPremiumAccess, setHasPremiumAccess] = useState(false);
+  const [plan, setPlan] = useState('free');
+  const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
+
+  // ===== CHECK SUBSCRIPTION STATUS =====
+  useEffect(() => {
+    const fetchSubscriptionStatus = async () => {
+      if (!user || !user.uid) return;
+      
+      try {
+        const token = await getIdToken();
+        
+        // Fetch subscription
+        const response = await fetch(`${PYTHON_API_BASE}/api/subscriptions/my-subscription`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const data = await response.json();
+        
+        if (data.success && data.subscription) {
+          const isActive = data.subscription.status === 'active';
+          setHasPremiumAccess(isActive);
+          setPlan(data.subscription.plan_id || 'free');
+          setSubscriptionStatus(data.subscription.status);
+        } else {
+          setHasPremiumAccess(false);
+          setPlan('free');
+          setSubscriptionStatus('inactive');
+        }
+      } catch (error) {
+        console.error('Failed to fetch subscription status:', error);
+        setHasPremiumAccess(false);
+      }
+    };
+    
+    fetchSubscriptionStatus();
+  }, [user, getIdToken]);
 
   // ============= DATA FETCHING =============
   const { data: players, isLoading: playersLoading, refetch: refetchPlayers } = useQuery({
@@ -866,6 +938,54 @@ const SeasonStatsContent: React.FC = () => {
     threePoints: MOCK_PLAYER_STATS.sort((a, b) => b.threePointsMade - a.threePointsMade),
     fantasyPoints: MOCK_PLAYER_STATS.sort((a, b) => b.fantasyPointsPerGame - a.fantasyPointsPerGame),
     efficiency: MOCK_PLAYER_STATS.sort((a, b) => b.efficiency - a.efficiency)
+  };
+
+  // Premium-only stats
+  const premiumStats = useMemo(() => {
+    if (!hasPremiumAccess) return null;
+    
+    const topPerformersByEfficiency = [...playerStats]
+      .sort((a, b) => b.efficiency - a.efficiency)
+      .slice(0, 5);
+    
+    const avgEfficiency = playerStats.length > 0
+      ? (playerStats.reduce((sum, p) => sum + p.efficiency, 0) / playerStats.length).toFixed(1)
+      : 'N/A';
+    
+    const avgFantasyPoints = playerStats.length > 0
+      ? (playerStats.reduce((sum, p) => sum + p.fantasyPointsPerGame, 0) / playerStats.length).toFixed(1)
+      : 'N/A';
+    
+    const totalGamesPlayed = playerStats.reduce((sum, p) => sum + p.gamesPlayed, 0);
+    
+    return {
+      topPerformersByEfficiency,
+      avgEfficiency,
+      avgFantasyPoints,
+      totalGamesPlayed,
+      totalPlayers: playerStats.length
+    };
+  }, [playerStats, hasPremiumAccess]);
+
+  const handleStripeCheckout = async (planId: string, interval: string = 'month') => {
+    try {
+      const token = await getIdToken();
+      const response = await fetch(`${PYTHON_API_BASE}/api/subscriptions/create-checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ planId, interval }),
+      });
+      
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+    }
   };
 
   // Reset filters when sport changes
@@ -1119,6 +1239,12 @@ const SeasonStatsContent: React.FC = () => {
                   <Functions sx={{ fontSize: 20 }} />
                   <Typography>Advanced Metrics</Typography>
                 </Box>
+                {hasPremiumAccess && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <StarIcon sx={{ fontSize: 20 }} />
+                    <Typography>Premium Analytics</Typography>
+                  </Box>
+                )}
               </Box>
             </Grid>
             <Grid item xs={12} md={4} sx={{ display: { xs: 'none', md: 'block' } }}>
@@ -1158,6 +1284,26 @@ const SeasonStatsContent: React.FC = () => {
 
       {/* Main Content */}
       <Box sx={{ maxWidth: 1400, mx: 'auto', px: 3, mt: -4 }}>
+        {/* Premium Status Badge */}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          {hasPremiumAccess ? (
+            <Chip 
+              icon={<CheckCircleIcon />} 
+              label="PREMIUM ACCESS" 
+              color="success" 
+              sx={{ fontWeight: 'bold' }}
+            />
+          ) : (
+            <Chip 
+              icon={<LockIcon />} 
+              label="FREE TIER" 
+              color="default" 
+              sx={{ fontWeight: 'bold' }}
+              onClick={() => setShowUpgradeModal(true)}
+            />
+          )}
+        </Box>
+
         {/* Sport Selection */}
         <Paper sx={{ p: 1, mb: 3, borderRadius: 3, display: 'inline-block' }}>
           <ToggleButtonGroup
@@ -1198,6 +1344,143 @@ const SeasonStatsContent: React.FC = () => {
             </ToggleButton>
           </ToggleButtonGroup>
         </Paper>
+
+        {/* Upgrade Banner for Free Users */}
+        {!hasPremiumAccess && playerStats.length > 0 && (
+          <Alert 
+            severity="info" 
+            sx={{ mb: 3 }}
+            action={
+              <Button color="inherit" size="small" onClick={() => setShowUpgradeModal(true)}>
+                Upgrade Now
+              </Button>
+            }
+          >
+            <AlertTitle>Unlock Premium Season Analytics</AlertTitle>
+            Get access to advanced metrics, efficiency rankings, top performer analysis, and detailed season comparisons.
+          </Alert>
+        )}
+
+        {/* Premium Stats Dashboard */}
+        {hasPremiumAccess && premiumStats && (
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <SpeedIcon color="primary" />
+                    <Typography variant="body2" color="text.secondary">
+                      Avg Efficiency
+                    </Typography>
+                  </Box>
+                  <Typography variant="h4">{premiumStats.avgEfficiency}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    League average is 15.0
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <EmojiEventsIcon color="warning" />
+                    <Typography variant="body2" color="text.secondary">
+                      Total Players
+                    </Typography>
+                  </Box>
+                  <Typography variant="h4">{premiumStats.totalPlayers}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Analyzed this season
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <AssessmentIcon color="success" />
+                    <Typography variant="body2" color="text.secondary">
+                      Total Games
+                    </Typography>
+                  </Box>
+                  <Typography variant="h4">{premiumStats.totalGamesPlayed.toLocaleString()}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Combined games played
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Box display="flex" alignItems="center" gap={1} mb={1}>
+                    <AnalyticsIcon color="info" />
+                    <Typography variant="body2" color="text.secondary">
+                      Avg Fantasy PTS
+                    </Typography>
+                  </Box>
+                  <Typography variant="h4">{premiumStats.avgFantasyPoints}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Per game
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        )}
+
+        {/* Top Performers by Efficiency (Premium Only) */}
+        {hasPremiumAccess && premiumStats?.topPerformersByEfficiency && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Top 5 Players by Efficiency Rating
+            </Typography>
+            <Grid container spacing={2}>
+              {premiumStats.topPerformersByEfficiency.map((player, idx) => (
+                <Grid item xs={12} sm={6} md={4} key={player.id}>
+                  <Card variant="outlined">
+                    <CardContent>
+                      <Box display="flex" alignItems="center" gap={2} mb={1}>
+                        <Avatar sx={{ bgcolor: 'primary.main' }}>
+                          #{idx + 1}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight="bold">
+                            {player.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {player.teamAbbrev} • {player.position}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Divider sx={{ my: 1 }} />
+                      <Grid container spacing={1}>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary">EFF</Typography>
+                          <Typography variant="h6">{player.efficiency.toFixed(1)}</Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary">PPG</Typography>
+                          <Typography variant="h6">{player.pointsPerGame.toFixed(1)}</Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary">RPG</Typography>
+                          <Typography variant="body2">{player.reboundsPerGame.toFixed(1)}</Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="caption" color="text.secondary">APG</Typography>
+                          <Typography variant="body2">{player.assistsPerGame.toFixed(1)}</Typography>
+                        </Grid>
+                      </Grid>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        )}
 
         {/* Main Stats Tabs */}
         <Paper sx={{ borderRadius: 3, mb: 4, overflow: 'hidden' }}>
@@ -1801,6 +2084,9 @@ const SeasonStatsContent: React.FC = () => {
                 <Chip icon={<CheckCircle />} label="Tank01 API integration" size="small" variant="outlined" />
                 <Chip icon={<Downloading />} label="Updated daily" size="small" variant="outlined" />
                 <Chip icon={<Functions />} label="Advanced metrics included" size="small" variant="outlined" />
+                {hasPremiumAccess && (
+                  <Chip icon={<StarIcon />} label="Premium Analytics" size="small" color="primary" />
+                )}
               </Box>
             </Grid>
             <Grid item xs={12} md={4} sx={{ textAlign: { md: 'right' } }}>
@@ -1810,6 +2096,11 @@ const SeasonStatsContent: React.FC = () => {
               <Typography variant="caption" color="text.secondary">
                 Data sources: Tank01 API, JSON databases
               </Typography>
+              {hasPremiumAccess && (
+                <Typography variant="caption" display="block" color="success.main">
+                  ✓ Premium access active
+                </Typography>
+              )}
             </Grid>
           </Grid>
         </Paper>
@@ -1874,6 +2165,21 @@ const SeasonStatsContent: React.FC = () => {
                 <Typography variant="body2" fontWeight="bold" color="primary.main">{selectedPlayer.efficiency.toFixed(1)}</Typography>
               </Grid>
             </Grid>
+            {hasPremiumAccess && (
+              <>
+                <Divider sx={{ my: 1 }} />
+                <Grid container spacing={1}>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">USG%</Typography>
+                    <Typography variant="body2">{selectedPlayer.usageRate.toFixed(1)}%</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">VORP</Typography>
+                    <Typography variant="body2">{selectedPlayer.valueOverReplacement.toFixed(1)}</Typography>
+                  </Grid>
+                </Grid>
+              </>
+            )}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
               <Button size="small" variant="outlined" fullWidth>
                 View Full Profile
@@ -1882,6 +2188,95 @@ const SeasonStatsContent: React.FC = () => {
           </Paper>
         </Zoom>
       )}
+
+      {/* Upgrade Modal */}
+      <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <LockIcon sx={{ color: '#f59e0b' }} />
+            <Typography variant="h6">Upgrade to Premium</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography paragraph>
+            Get access to advanced season analytics, efficiency rankings, top performer analysis, and detailed player comparisons.
+          </Typography>
+          <Box sx={{ my: 3 }}>
+            {[
+              'Advanced efficiency metrics (PER, EFF, VORP)',
+              'Top performers by efficiency rating',
+              'Historical performance trends',
+              'Team comparison tools',
+              'Advanced season projections',
+              'Detailed scouting reports',
+              'Export data to CSV',
+              'Custom analytics dashboards',
+            ].map((feature) => (
+              <Box key={feature} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                <Typography variant="body2">{feature}</Typography>
+              </Box>
+            ))}
+          </Box>
+          <Grid container spacing={2}>
+            <Grid item xs={6}>
+              <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleStripeCheckout('starter', 'month')}>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h6" color="#10b981" gutterBottom>
+                    Starter
+                  </Typography>
+                  <Typography variant="h4" fontWeight="bold">
+                    $5.99
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    /month
+                  </Typography>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    sx={{ mt: 2, bgcolor: '#10b981' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStripeCheckout('starter', 'month');
+                    }}
+                  >
+                    Choose Starter
+                  </Button>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={6}>
+              <Card variant="outlined" sx={{ borderColor: '#f59e0b', borderWidth: 2, cursor: 'pointer' }} onClick={() => handleStripeCheckout('analytics', 'month')}>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h6" color="#f59e0b" gutterBottom>
+                    Analytics
+                  </Typography>
+                  <Typography variant="h4" fontWeight="bold">
+                    $19.99
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    /month
+                  </Typography>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    sx={{ mt: 2, bgcolor: '#f59e0b' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStripeCheckout('analytics', 'month');
+                    }}
+                  >
+                    Choose Analytics
+                  </Button>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

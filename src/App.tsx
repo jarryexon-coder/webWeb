@@ -1,8 +1,9 @@
 // src/App.tsx – Complete Integrated Version with Authentication Flow
-// March 2026 – Added Subscription Success and Cancel Pages
+// April 2026 – Added GA4 automatic page view tracking for React Router
+// SportsWireScreen now lazy-loaded and requires analytics plan
 
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { initializeApp, getApps } from 'firebase/app';
 
 // React Query
@@ -26,7 +27,7 @@ import { SportsProvider } from './context/SportsContext';
 import { BookmarkProvider } from './context/BookmarkContext';
 
 // Material-UI components for fallback UI
-import { Container, Paper, Typography, Button, Box } from '@mui/material';
+import { Container, Paper, Typography, Button, Box, CircularProgress } from '@mui/material';
 
 // Temporary/Mock Providers
 const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
@@ -49,9 +50,12 @@ import TutorialsScreen from './pages/TutorialsScreen';
 import SubscriptionSuccess from './pages/SubscriptionSuccess';
 import SubscriptionCancel from './pages/SubscriptionCancel';
 
+// ---------- CHECKOUT SUCCESS PAGE (for influencers & one-time purchases) ----------
+import CheckoutSuccess from './pages/CheckoutSuccess';
+
 // ---------- NEW DASHBOARD & SUBSCRIPTION PAGES ----------
 import SportsAnalyticsDashboard from './pages/SportsAnalyticsDashboard';
-import SubscriptionScreen from './pages/SubscriptionScreen';  // <-- CHANGED: Use SubscriptionScreen
+import SubscriptionScreen from './pages/SubscriptionScreen';
 
 // ---------- NEW INFO PAGES (FAQ, INFO, ABOUT, SETTINGS) ----------
 import FAQPage from './pages/FAQPage';
@@ -114,7 +118,7 @@ const KalshiPredictionsScreen = lazy(() => import('./pages/KalshiPredictionsScre
 const PredictionsOutcomeScreen = lazy(() => import('./pages/PredictionsOutcomeScreen'));
 const MatchAnalyticsScreen = lazy(() => import('./pages/MatchAnalyticsScreen'));
 const ParlayArchitectScreen = lazy(() => import('./pages/ParlayArchitectScreen'));
-const SportsWireScreen = lazy(() => import('./pages/SportsWireScreen'));
+const SportsWireScreen = lazy(() => import('./pages/SportsWireScreen')); // Now lazy-loaded
 const SecretPhraseScreen = lazy(() => import('./pages/SecretPhraseScreen'));
 const SeasonStatsScreen = lazy(() => import('./pages/SeasonStatsScreen'));
 
@@ -164,8 +168,30 @@ const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error; resetError
   </Container>
 );
 
-// ---------- Private Route Component ----------
-import PrivateRoute from './components/PrivateRoute';
+// ---------- Route Guard Components ----------
+import PrivateRoute from './components/PrivateRoute';      // Authentication only
+import ProtectedRoute from './components/ProtectedRoute'; // Plan-based access control
+
+// ---------- GA4 Page View Tracking Hook ----------
+declare global {
+  interface Window {
+    gtag: (...args: any[]) => void;
+  }
+}
+
+function usePageViews() {
+  const location = useLocation();
+  useEffect(() => {
+    if (typeof window.gtag === 'function') {
+      window.gtag('config', 'G-QTSWN0T7JV', {
+        'page_path': location.pathname + location.search,
+      });
+      console.log(`📊 GA4 page_view sent for: ${location.pathname}`);
+    } else {
+      console.warn('gtag not available for page view');
+    }
+  }, [location]);
+}
 
 // ---------- Main App Component ----------
 function App() {
@@ -188,6 +214,9 @@ function App() {
       console.error('Firebase error:', error);
     }
   }, []);
+
+  // Enable automatic GA4 page view tracking
+  usePageViews();
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -216,6 +245,9 @@ function App() {
                                   {/* Subscription Success/Cancel Pages */}
                                   <Route path="/subscription/success" element={<SubscriptionSuccess />} />
                                   <Route path="/subscription/cancel" element={<SubscriptionCancel />} />
+                                  
+                                  {/* Checkout Success Page (for influencers & one-time purchases) */}
+                                  <Route path="/checkout-success" element={<CheckoutSuccess />} />
 
                                   {/* Private routes (require authentication) */}
                                   <Route element={<PrivateRoute />}>
@@ -229,24 +261,40 @@ function App() {
 
                                       {/* STATS Section */}
                                       <Route path="player-props" element={<PlayerPropsScreen />} />
-                                      <Route path="player-stats" element={<Suspense fallback={<div>Loading...</div>}><PlayerStatsScreen /></Suspense>} />
+                                      <Route path="player-stats" element={<Suspense fallback={<CircularProgress />}><PlayerStatsScreen /></Suspense>} />
                                       <Route path="player/:id" element={<PlayerDetailPage />} />
-                                      <Route path="match-analytics" element={<Suspense fallback={<div>Loading...</div>}><MatchAnalyticsScreen /></Suspense>} />
-                                      <Route path="season-stats" element={<Suspense fallback={<div>Loading...</div>}><SeasonStatsScreen /></Suspense>} />
+                                      <Route path="props-details/:id" element={<PlayerDetailPage />} />
+                                      <Route path="match-analytics" element={<Suspense fallback={<CircularProgress />}><MatchAnalyticsScreen /></Suspense>} />
+                                      <Route path="season-stats" element={<Suspense fallback={<CircularProgress />}><SeasonStatsScreen /></Suspense>} />
                                       <Route path="nhl-trends" element={<NHLTrendsScreen />} />
 
                                       {/* GENERATOR$ Section */}
                                       <Route path="daily-picks" element={<DailyPicksScreen />} />
-                                      <Route path="secret-phrases" element={<Suspense fallback={<div>Loading...</div>}><SecretPhraseScreen /></Suspense>} />
-                                      <Route path="sports-wire" element={<Suspense fallback={<div>Loading...</div>}><SportsWireScreen /></Suspense>} />
-                                      <Route path="prize-picks" element={<Suspense fallback={<div>Loading...</div>}><PrizePicksScreen /></Suspense>} />
-                                      <Route path="fantasy-hub" element={<Suspense fallback={<div>Loading...</div>}><FantasyHubScreen /></Suspense>} />
-                                      <Route path="advanced-analytics" element={<Suspense fallback={<div>Loading...</div>}><AdvancedAnalyticsScreen /></Suspense>} />
-                                      <Route path="kalshi-predictions" element={<Suspense fallback={<div>Loading...</div>}><KalshiPredictionsScreen /></Suspense>} />
-                                      <Route path="predictions-outcome" element={<Suspense fallback={<div>Loading...</div>}><PredictionsOutcomeScreen /></Suspense>} />
+                                      <Route path="secret-phrases" element={<Suspense fallback={<CircularProgress />}><SecretPhraseScreen /></Suspense>} />
+                                      
+                                      {/* SportsWireScreen – lazy-loaded and requires analytics plan */}
+                                      <Route 
+                                        path="sports-wire" 
+                                        element={
+                                          <ProtectedRoute 
+                                            screenName="SportsWireScreen" 
+                                            requiredFeature="analytics"
+                                          >
+                                            <Suspense fallback={<CircularProgress />}>
+                                              <SportsWireScreen />
+                                            </Suspense>
+                                          </ProtectedRoute>
+                                        } 
+                                      />
+                                      
+                                      <Route path="prize-picks" element={<Suspense fallback={<CircularProgress />}><PrizePicksScreen /></Suspense>} />
+                                      <Route path="fantasy-hub" element={<Suspense fallback={<CircularProgress />}><FantasyHubScreen /></Suspense>} />
+                                      <Route path="advanced-analytics" element={<Suspense fallback={<CircularProgress />}><AdvancedAnalyticsScreen /></Suspense>} />
+                                      <Route path="kalshi-predictions" element={<Suspense fallback={<CircularProgress />}><KalshiPredictionsScreen /></Suspense>} />
+                                      <Route path="predictions-outcome" element={<Suspense fallback={<CircularProgress />}><PredictionsOutcomeScreen /></Suspense>} />
 
                                       {/* PARLAYPLUSPACKAGE-PPP Section */}
-                                      <Route path="parlay-architect" element={<Suspense fallback={<div>Loading...</div>}><ParlayArchitectScreen /></Suspense>} />
+                                      <Route path="parlay-architect" element={<Suspense fallback={<CircularProgress />}><ParlayArchitectScreen /></Suspense>} />
                                       <Route path="same-game-parlay" element={<SameGameParlayScreen />} />
                                       <Route path="parlay-analytics" element={<ParlayAnalyticsScreen />} />
                                       <Route path="ai-suggestions" element={<AIParlaySuggestionsScreen />} />
@@ -257,7 +305,7 @@ function App() {
                                       <Route path="nhl-dashboard" element={<NHLDashboard />} />
                                       <Route path="mlb-spring-training" element={<MLBSpringTraining />} />
 
-                                      {/* 👇 USER ACCOUNT Section 👇 - UPDATED */}
+                                      {/* 👇 USER ACCOUNT Section 👇 */}
                                       <Route path="dashboard" element={<SportsAnalyticsDashboard />} />
                                       <Route path="pricing" element={<SubscriptionScreen />} />
                                       <Route path="subscription" element={<SubscriptionScreen />} />

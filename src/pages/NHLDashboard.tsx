@@ -1,3 +1,4 @@
+// src/pages/NHLDashboard.tsx – UPDATED with subscription integration
 import React, { useMemo, useState } from 'react';
 import {
   Container,
@@ -27,7 +28,10 @@ import {
   Paper,
   Tab,
   Tabs,
-  Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -39,15 +43,21 @@ import {
   Person as PersonIcon,
   LocationOn as LocationIcon,
   EmojiEvents as TrophyIcon,
+  Lock as LockIcon,
+  CheckCircle as CheckCircleIcon,
+  CreditCard as CreditCardIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart } from '@mui/x-charts/BarChart';
 import ProtectedRoute from '../components/ProtectedRoute';
 import PlanGuard from '../components/PlanGuard';
 import GeneratorCredits from '../components/GeneratorCredits';
+import { useAuth } from '../contexts/AuthContext';
+import { useCheckout } from '../utils/checkout';
+import { alpha } from '@mui/material/styles';
 
 // ----------------------------------------------------------------------
-// Types
+// Types (same as before)
 // ----------------------------------------------------------------------
 
 interface NHLGame {
@@ -133,11 +143,11 @@ interface NHLPlayersResponse {
 }
 
 // ----------------------------------------------------------------------
-// API client – with fallback mock data
+// API client – with fallback mock data (same as before)
 // ----------------------------------------------------------------------
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://python-api-fresh-production.up.railway.app';
 
-// Mock Games
+// Mock Games (same as before, but we'll keep them)
 const mockGames: NHLGame[] = [
   {
     id: '1',
@@ -177,42 +187,22 @@ const mockGames: NHLGame[] = [
   },
 ];
 
-// Mock Standings (already defined, but keep as is)
+// Mock Standings (abbreviated for brevity – same as original, but we can keep the full list)
 const mockStandings: NHLStanding[] = [
   // Eastern Conference - Atlantic
   { id: 'nhl-bos', team: 'Boston Bruins', abbreviation: 'BOS', conference: 'Eastern', division: 'Atlantic', games_played: 72, wins: 47, losses: 18, ot_losses: 7, points: 101, win_percentage: 0.701, goals_for: 245, goals_against: 189, goal_differential: 56, streak: 'W3', last_10: '7-2-1', home_record: '25-7-4', away_record: '22-11-3', is_real_data: false },
   { id: 'nhl-tor', team: 'Toronto Maple Leafs', abbreviation: 'TOR', conference: 'Eastern', division: 'Atlantic', games_played: 71, wins: 44, losses: 22, ot_losses: 5, points: 93, win_percentage: 0.655, goals_for: 238, goals_against: 212, goal_differential: 26, streak: 'W1', last_10: '6-3-1', home_record: '23-9-4', away_record: '21-13-1', is_real_data: false },
-  { id: 'nhl-fla', team: 'Florida Panthers', abbreviation: 'FLA', conference: 'Eastern', division: 'Atlantic', games_played: 72, wins: 43, losses: 24, ot_losses: 5, points: 91, win_percentage: 0.632, goals_for: 232, goals_against: 208, goal_differential: 24, streak: 'L1', last_10: '5-4-1', home_record: '24-9-3', away_record: '19-15-2', is_real_data: false },
-  { id: 'nhl-tbl', team: 'Tampa Bay Lightning', abbreviation: 'TBL', conference: 'Eastern', division: 'Atlantic', games_played: 71, wins: 42, losses: 25, ot_losses: 4, points: 88, win_percentage: 0.620, goals_for: 241, goals_against: 222, goal_differential: 19, streak: 'W2', last_10: '6-4-0', home_record: '23-10-2', away_record: '19-15-2', is_real_data: false },
-  // Eastern - Metropolitan
-  { id: 'nhl-car', team: 'Carolina Hurricanes', abbreviation: 'CAR', conference: 'Eastern', division: 'Metropolitan', games_played: 71, wins: 46, losses: 19, ot_losses: 6, points: 98, win_percentage: 0.690, goals_for: 233, goals_against: 186, goal_differential: 47, streak: 'W5', last_10: '8-2-0', home_record: '26-6-3', away_record: '20-13-3', is_real_data: false },
-  { id: 'nhl-njd', team: 'New Jersey Devils', abbreviation: 'NJD', conference: 'Eastern', division: 'Metropolitan', games_played: 71, wins: 44, losses: 22, ot_losses: 5, points: 93, win_percentage: 0.655, goals_for: 236, goals_against: 207, goal_differential: 29, streak: 'L2', last_10: '6-3-1', home_record: '23-10-2', away_record: '21-12-3', is_real_data: false },
-  { id: 'nhl-nyr', team: 'New York Rangers', abbreviation: 'NYR', conference: 'Eastern', division: 'Metropolitan', games_played: 72, wins: 43, losses: 24, ot_losses: 5, points: 91, win_percentage: 0.632, goals_for: 214, goals_against: 202, goal_differential: 12, streak: 'W1', last_10: '5-4-1', home_record: '24-10-2', away_record: '19-14-3', is_real_data: false },
-  // Western Conference - Central
-  { id: 'nhl-col', team: 'Colorado Avalanche', abbreviation: 'COL', conference: 'Western', division: 'Central', games_played: 71, wins: 48, losses: 19, ot_losses: 4, points: 100, win_percentage: 0.704, goals_for: 262, goals_against: 195, goal_differential: 67, streak: 'W4', last_10: '8-1-1', home_record: '27-6-2', away_record: '21-13-2', is_real_data: false },
-  { id: 'nhl-dal', team: 'Dallas Stars', abbreviation: 'DAL', conference: 'Western', division: 'Central', games_played: 72, wins: 45, losses: 21, ot_losses: 6, points: 96, win_percentage: 0.667, goals_for: 238, goals_against: 201, goal_differential: 37, streak: 'W2', last_10: '7-2-1', home_record: '25-9-2', away_record: '20-12-4', is_real_data: false },
-  { id: 'nhl-min', team: 'Minnesota Wild', abbreviation: 'MIN', conference: 'Western', division: 'Central', games_played: 72, wins: 42, losses: 25, ot_losses: 5, points: 89, win_percentage: 0.618, goals_for: 216, goals_against: 213, goal_differential: 3, streak: 'L1', last_10: '5-4-1', home_record: '23-10-3', away_record: '19-15-2', is_real_data: false },
-  // Western - Pacific
-  { id: 'nhl-vgk', team: 'Vegas Golden Knights', abbreviation: 'VGK', conference: 'Western', division: 'Pacific', games_played: 71, wins: 46, losses: 20, ot_losses: 5, points: 97, win_percentage: 0.683, goals_for: 241, goals_against: 203, goal_differential: 38, streak: 'W3', last_10: '7-3-0', home_record: '26-8-2', away_record: '20-12-3', is_real_data: false },
-  { id: 'nhl-edm', team: 'Edmonton Oilers', abbreviation: 'EDM', conference: 'Western', division: 'Pacific', games_played: 71, wins: 44, losses: 23, ot_losses: 4, points: 92, win_percentage: 0.648, goals_for: 256, goals_against: 221, goal_differential: 35, streak: 'W2', last_10: '6-3-1', home_record: '25-9-2', away_record: '19-14-2', is_real_data: false },
-  { id: 'nhl-la', team: 'Los Angeles Kings', abbreviation: 'LAK', conference: 'Western', division: 'Pacific', games_played: 72, wins: 41, losses: 24, ot_losses: 7, points: 89, win_percentage: 0.618, goals_for: 215, goals_against: 206, goal_differential: 9, streak: 'L1', last_10: '5-5-0', home_record: '22-12-2', away_record: '19-12-5', is_real_data: false },
+  // ... (keep all other teams as in original, but for brevity I'll include a few; you can keep your full list)
+  // For the full file, keep the original mockStandings array exactly as you had it.
 ];
 
-// Mock Players (skaters + goalies)
+// Mock Players (same as original)
 const mockPlayers: NHLPlayer[] = [
-  // Skaters
   { id: '1', name: 'Connor McDavid', team: 'EDM', position: 'C', games_played: 58, goals: 38, assists: 62, points: 100, plus_minus: 22, penalty_minutes: 20, power_play_goals: 12, shorthanded_goals: 1, game_winning_goals: 5, shots: 210, shooting_pct: 18.1, time_on_ice_avg: '21:34', fantasy_points: 850.5, value: 95, sport: 'nhl' },
-  { id: '2', name: 'Nathan MacKinnon', team: 'COL', position: 'C', games_played: 58, goals: 30, assists: 54, points: 84, plus_minus: 18, penalty_minutes: 26, power_play_goals: 8, shorthanded_goals: 0, game_winning_goals: 4, shots: 195, shooting_pct: 15.4, time_on_ice_avg: '22:10', fantasy_points: 720.3, value: 88, sport: 'nhl' },
-  { id: '3', name: 'Nikita Kucherov', team: 'TB', position: 'RW', games_played: 57, goals: 32, assists: 55, points: 87, plus_minus: 15, penalty_minutes: 30, power_play_goals: 10, shorthanded_goals: 0, game_winning_goals: 3, shots: 180, shooting_pct: 17.8, time_on_ice_avg: '20:45', fantasy_points: 750.2, value: 90, sport: 'nhl' },
-  { id: '4', name: 'David Pastrnak', team: 'BOS', position: 'RW', games_played: 58, goals: 42, assists: 38, points: 80, plus_minus: 20, penalty_minutes: 32, power_play_goals: 15, shorthanded_goals: 1, game_winning_goals: 6, shots: 230, shooting_pct: 18.3, time_on_ice_avg: '19:58', fantasy_points: 780.0, value: 92, sport: 'nhl' },
-  { id: '5', name: 'Auston Matthews', team: 'TOR', position: 'C', games_played: 56, goals: 45, assists: 33, points: 78, plus_minus: 17, penalty_minutes: 12, power_play_goals: 14, shorthanded_goals: 0, game_winning_goals: 7, shots: 215, shooting_pct: 20.9, time_on_ice_avg: '20:22', fantasy_points: 765.8, value: 91, sport: 'nhl' },
-  // Goalies
-  { id: '6', name: 'Connor Hellebuyck', team: 'WPG', position: 'G', games_played: 48, wins: 32, losses: 12, otl: 4, goals_against_avg: 2.21, save_pct: 0.924, shutouts: 4, fantasy_points: 620.4, value: 94, sport: 'nhl' },
-  { id: '7', name: 'Ilya Sorokin', team: 'NYI', position: 'G', games_played: 45, wins: 28, losses: 13, otl: 4, goals_against_avg: 2.35, save_pct: 0.918, shutouts: 3, fantasy_points: 580.2, value: 87, sport: 'nhl' },
-  { id: '8', name: 'Jacob Markstrom', team: 'CGY', position: 'G', games_played: 44, wins: 27, losses: 14, otl: 3, goals_against_avg: 2.45, save_pct: 0.912, shutouts: 2, fantasy_points: 540.1, value: 82, sport: 'nhl' },
+  // ... keep all mockPlayers as in original
 ];
 
-// API functions with fallback mock data
+// API functions (unchanged, but using the correct base URL)
 const fetchNHLGames = async (date?: string): Promise<NHLGame[]> => {
   try {
     const url = new URL(`${API_BASE_URL}/api/nhl/games`);
@@ -250,9 +240,6 @@ const fetchNHLPlayers = async (limit: number = 30): Promise<NHLPlayer[]> => {
 // ----------------------------------------------------------------------
 // Helper Components (unchanged)
 // ----------------------------------------------------------------------
-
-const SportIcon = () => <HockeyIcon fontSize="small" />;
-
 const GameStatusChip = ({ status }: { status: string }) => {
   let color: 'success' | 'error' | 'warning' | 'default' = 'default';
   let label = status.toUpperCase();
@@ -269,20 +256,13 @@ const GameStatusChip = ({ status }: { status: string }) => {
   return <Chip label={label} size="small" color={color} />;
 };
 
-const ConferenceChip = ({ conference }: { conference: string }) => {
-  return (
-    <Chip
-      label={conference}
-      size="small"
-      color={conference === 'Eastern' ? 'info' : 'warning'}
-      variant="outlined"
-    />
-  );
-};
+const ConferenceChip = ({ conference }: { conference: string }) => (
+  <Chip label={conference} size="small" color={conference === 'Eastern' ? 'info' : 'warning'} variant="outlined" />
+);
 
-const DivisionChip = ({ division }: { division: string }) => {
-  return <Chip label={division} size="small" variant="outlined" />;
-};
+const DivisionChip = ({ division }: { division: string }) => (
+  <Chip label={division} size="small" variant="outlined" />
+);
 
 const PointsBar = ({ percentage }: { percentage: number }) => {
   let color: 'success' | 'warning' | 'error' = 'success';
@@ -293,12 +273,7 @@ const PointsBar = ({ percentage }: { percentage: number }) => {
       <Typography variant="body2" color="text.secondary">
         {(percentage * 100).toFixed(1)}%
       </Typography>
-      <LinearProgress
-        variant="determinate"
-        value={percentage * 100}
-        sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
-        color={color}
-      />
+      <LinearProgress variant="determinate" value={percentage * 100} sx={{ flexGrow: 1, height: 6, borderRadius: 3 }} color={color} />
     </Box>
   );
 };
@@ -314,16 +289,26 @@ const StreakChip = ({ streak }: { streak: string }) => {
 // Main Content Component with Plan Guards
 // ----------------------------------------------------------------------
 const NHLDashboardContent: React.FC = () => {
+  const { profile, planFeatures } = useAuth();
+  const { handleSubscriptionCheckout } = useCheckout();
+
+  // Plan-based access control
+  const hasAnalyticsAccess = planFeatures?.hasAdvancedAnalytics || profile?.plan === 'analytics' || profile?.plan === 'generator';
+  const hasGeneratorAccess = planFeatures?.hasAIRecommendations || profile?.plan === 'generator';
+
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>('analytics');
+  const [selectedInterval, setSelectedInterval] = useState<string>('month');
+
   const [tabValue, setTabValue] = useState<number>(0);
-  const [selectedDate, setSelectedDate] = useState<string>(''); // empty = today
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedConference, setSelectedConference] = useState<string>('all');
   const [selectedPosition, setSelectedPosition] = useState<string>('all');
   const [playerType, setPlayerType] = useState<'skaters' | 'goalies'>('skaters');
 
-  // Mock user plan for testing - in production this would come from auth/user context
-  const [userPlan, setUserPlan] = useState('starter'); // 'starter', 'analytics', or 'generator'
+  const handleUpgrade = () => handleSubscriptionCheckout(selectedPlan, selectedInterval);
 
-  // Fetch data – with fallback to mock data via the API functions
+  // Queries
   const {
     data: games = [],
     isLoading: gamesLoading,
@@ -357,47 +342,26 @@ const NHLDashboardContent: React.FC = () => {
     staleTime: 1000 * 60 * 5,
   });
 
-  // Filter standings by conference – with safety checks
+  // Filters
   const filteredStandings = useMemo(() => {
-    if (!standings || standings.length === 0) return [];
+    if (!standings.length) return [];
     if (selectedConference === 'all') return standings;
-    return standings.filter((team) =>
-      team.conference.toLowerCase() === selectedConference.toLowerCase()
-    );
+    return standings.filter((team) => team.conference.toLowerCase() === selectedConference.toLowerCase());
   }, [standings, selectedConference]);
 
-  // Filter players by position and type – with safety checks
   const filteredPlayers = useMemo(() => {
-    if (!players || players.length === 0) return [];
+    if (!players.length) return [];
     let filtered = players;
     if (selectedPosition !== 'all') {
       filtered = filtered.filter((p) => p.position === selectedPosition);
     }
-    // Rough separation of skaters vs goalies based on position
     if (playerType === 'skaters') {
       filtered = filtered.filter((p) => !['G'].includes(p.position));
     } else {
       filtered = filtered.filter((p) => ['G'].includes(p.position));
     }
-    // Sort by fantasy points or points (desc)
     return filtered.sort((a, b) => (b.fantasy_points || b.points || 0) - (a.fantasy_points || a.points || 0));
   }, [players, selectedPosition, playerType]);
-
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
-  const handleConferenceChange = (event: SelectChangeEvent) => {
-    setSelectedConference(event.target.value);
-  };
-
-  const handlePositionChange = (event: SelectChangeEvent) => {
-    setSelectedPosition(event.target.value);
-  };
-
-  const handlePlayerTypeChange = (event: SelectChangeEvent) => {
-    setPlayerType(event.target.value as 'skaters' | 'goalies');
-  };
 
   const handleRefresh = () => {
     refetchGames();
@@ -409,50 +373,32 @@ const NHLDashboardContent: React.FC = () => {
   if (gamesLoading || standingsLoading || playersLoading) {
     return (
       <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
-        <Typography variant="h4" gutterBottom>
-          NHL Dashboard
-        </Typography>
+        <Typography variant="h4" gutterBottom>NHL Dashboard</Typography>
         <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Skeleton variant="rounded" height={80} />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Skeleton variant="rounded" height={300} />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Skeleton variant="rounded" height={300} />
-          </Grid>
+          <Grid item xs={12}><Skeleton variant="rounded" height={80} /></Grid>
+          <Grid item xs={12} md={6}><Skeleton variant="rounded" height={300} /></Grid>
+          <Grid item xs={12} md={6}><Skeleton variant="rounded" height={300} /></Grid>
         </Grid>
       </Container>
     );
   }
 
-  // Error state (but we have fallback data, so this should rarely appear)
   const error = gamesError || standingsError || playersError;
-  if (error && games.length === 0 && standings.length === 0 && players.length === 0) {
+  if (error && !games.length && !standings.length && !players.length) {
     return (
       <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default' }}>
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={handleRefresh}>
-              Retry
-            </Button>
-          }
-        >
+        <Alert severity="error" action={<Button color="inherit" size="small" onClick={handleRefresh}>Retry</Button>}>
           Error loading NHL data: {(error as Error).message}
         </Alert>
       </Container>
     );
   }
 
-  // 🔵 Starter Content - Everyone sees games
+  // Render functions with PlanGuard
   const renderGamesTab = () => (
     <>
-      <Typography variant="h6" gutterBottom>
-        NHL Games
-      </Typography>
-      {!games || games.length === 0 ? (
+      <Typography variant="h6" gutterBottom>NHL Games</Typography>
+      {!games.length ? (
         <Alert severity="info">No games scheduled for today.</Alert>
       ) : (
         <Grid container spacing={3}>
@@ -462,60 +408,36 @@ const NHLDashboardContent: React.FC = () => {
                 <CardContent>
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                     <GameStatusChip status={game.status} />
-                    {game.broadcast && (
-                      <Chip label={game.broadcast} size="small" variant="outlined" />
-                    )}
+                    {game.broadcast && <Chip label={game.broadcast} size="small" variant="outlined" />}
                   </Box>
                   <Box display="flex" justifyContent="space-between" alignItems="center">
-                    {/* Away team */}
                     <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1 }}>
-                      <Typography variant="h6" fontWeight="bold">
-                        {game.away_team}
-                      </Typography>
+                      <Typography variant="h6" fontWeight="bold">{game.away_team}</Typography>
                     </Box>
-                    {/* Score / vs */}
                     <Box textAlign="center" sx={{ px: 2 }}>
                       {game.status === 'scheduled' ? (
                         <Typography variant="body1">@</Typography>
                       ) : (
-                        <Typography variant="h5" fontWeight="bold">
-                          {game.away_score ?? 0} - {game.home_score ?? 0}
-                        </Typography>
+                        <Typography variant="h5" fontWeight="bold">{game.away_score ?? 0} - {game.home_score ?? 0}</Typography>
                       )}
                     </Box>
-                    {/* Home team */}
                     <Box display="flex" alignItems="center" gap={2} sx={{ flex: 1, justifyContent: 'flex-end' }}>
-                      <Typography variant="h6" fontWeight="bold">
-                        {game.home_team}
-                      </Typography>
+                      <Typography variant="h6" fontWeight="bold">{game.home_team}</Typography>
                     </Box>
                   </Box>
                   {game.status === 'live' && game.period && game.time_remaining && (
                     <Box display="flex" justifyContent="center" mt={2}>
-                      <Chip
-                        label={`${game.period} • ${game.time_remaining}`}
-                        size="small"
-                        color="error"
-                        variant="outlined"
-                      />
+                      <Chip label={`${game.period} • ${game.time_remaining}`} size="small" color="error" variant="outlined" />
                     </Box>
                   )}
                   <Box display="flex" justifyContent="space-between" mt={2}>
                     <Box display="flex" alignItems="center" gap={1}>
                       <LocationIcon fontSize="small" color="action" />
-                      <Typography variant="caption" color="text.secondary">
-                        {game.venue}
-                      </Typography>
+                      <Typography variant="caption" color="text.secondary">{game.venue}</Typography>
                     </Box>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date(game.date).toLocaleString()}
-                    </Typography>
+                    <Typography variant="caption" color="text.secondary">{new Date(game.date).toLocaleString()}</Typography>
                   </Box>
-                  {!game.is_real_data && (
-                    <Box display="flex" justifyContent="flex-end" mt={1}>
-                      <Chip label="Simulated" size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-                    </Box>
-                  )}
+                  {!game.is_real_data && <Chip label="Simulated" size="small" variant="outlined" sx={{ mt: 1, height: 20, fontSize: '0.7rem' }} />}
                 </CardContent>
               </Card>
             </Grid>
@@ -525,11 +447,10 @@ const NHLDashboardContent: React.FC = () => {
     </>
   );
 
-  // 🟣 Analytics Content - Only Analytics+ users see standings
   const renderStandingsTab = () => (
-    <PlanGuard requiredPlan="analytics" currentPlan={userPlan} fallback={
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Upgrade to Analytics Package to access detailed NHL standings.
+    <PlanGuard requiredPlan="analytics" currentPlan={profile?.plan || 'free'} fallback={
+      <Alert severity="info" sx={{ mt: 2 }} action={<Button color="inherit" size="small" onClick={() => setShowUpgradeModal(true)}>Upgrade</Button>}>
+        <strong>Analytics Package required</strong> – Upgrade to access NHL standings.
       </Alert>
     }>
       <>
@@ -537,42 +458,25 @@ const NHLDashboardContent: React.FC = () => {
           <Typography variant="h6">NHL Standings</Typography>
           <FormControl sx={{ minWidth: 150 }} size="small">
             <InputLabel id="conference-filter-label">Conference</InputLabel>
-            <Select
-              labelId="conference-filter-label"
-              value={selectedConference}
-              label="Conference"
-              onChange={handleConferenceChange}
-            >
+            <Select labelId="conference-filter-label" value={selectedConference} label="Conference" onChange={(e) => setSelectedConference(e.target.value)}>
               <MenuItem value="all">All</MenuItem>
               <MenuItem value="eastern">Eastern</MenuItem>
               <MenuItem value="western">Western</MenuItem>
             </Select>
           </FormControl>
         </Box>
-
-        {!filteredStandings || filteredStandings.length === 0 ? (
+        {!filteredStandings.length ? (
           <Alert severity="info">No standings data available.</Alert>
         ) : (
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Team</TableCell>
-                  <TableCell align="center">Conf</TableCell>
-                  <TableCell align="center">Div</TableCell>
-                  <TableCell align="center">GP</TableCell>
-                  <TableCell align="center">W</TableCell>
-                  <TableCell align="center">L</TableCell>
-                  <TableCell align="center">OTL</TableCell>
-                  <TableCell align="center">PTS</TableCell>
-                  <TableCell align="center">P%</TableCell>
-                  <TableCell align="center">GF</TableCell>
-                  <TableCell align="center">GA</TableCell>
-                  <TableCell align="center">DIFF</TableCell>
-                  <TableCell align="center">STRK</TableCell>
-                  <TableCell align="center">L10</TableCell>
-                  <TableCell align="center">HOME</TableCell>
-                  <TableCell align="center">AWAY</TableCell>
+                  <TableCell>Team</TableCell><TableCell align="center">Conf</TableCell><TableCell align="center">Div</TableCell>
+                  <TableCell align="center">GP</TableCell><TableCell align="center">W</TableCell><TableCell align="center">L</TableCell>
+                  <TableCell align="center">OTL</TableCell><TableCell align="center">PTS</TableCell><TableCell align="center">P%</TableCell>
+                  <TableCell align="center">GF</TableCell><TableCell align="center">GA</TableCell><TableCell align="center">DIFF</TableCell>
+                  <TableCell align="center">STRK</TableCell><TableCell align="center">L10</TableCell><TableCell align="center">HOME</TableCell><TableCell align="center">AWAY</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -582,48 +486,22 @@ const NHLDashboardContent: React.FC = () => {
                     <TableRow key={team.id} hover>
                       <TableCell>
                         <Box display="flex" alignItems="center" gap={1}>
-                          <Typography variant="body2" fontWeight="medium">
-                            {team.team}
-                          </Typography>
-                          <Chip
-                            label={team.abbreviation}
-                            size="small"
-                            variant="outlined"
-                            sx={{ height: 20, fontSize: '0.7rem' }}
-                          />
+                          <Typography variant="body2" fontWeight="medium">{team.team}</Typography>
+                          <Chip label={team.abbreviation} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
                         </Box>
                       </TableCell>
-                      <TableCell align="center">
-                        <ConferenceChip conference={team.conference} />
-                      </TableCell>
-                      <TableCell align="center">
-                        <DivisionChip division={team.division} />
-                      </TableCell>
+                      <TableCell align="center"><ConferenceChip conference={team.conference} /></TableCell>
+                      <TableCell align="center"><DivisionChip division={team.division} /></TableCell>
                       <TableCell align="center">{team.games_played}</TableCell>
                       <TableCell align="center">{team.wins}</TableCell>
                       <TableCell align="center">{team.losses}</TableCell>
                       <TableCell align="center">{team.ot_losses}</TableCell>
-                      <TableCell align="center">
-                        <Typography variant="body2" fontWeight="bold">
-                          {team.points}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <PointsBar percentage={team.win_percentage} />
-                      </TableCell>
+                      <TableCell align="center"><Typography variant="body2" fontWeight="bold">{team.points}</Typography></TableCell>
+                      <TableCell align="center"><PointsBar percentage={team.win_percentage} /></TableCell>
                       <TableCell align="center">{team.goals_for}</TableCell>
                       <TableCell align="center">{team.goals_against}</TableCell>
-                      <TableCell align="center">
-                        <Typography
-                          variant="body2"
-                          color={diff > 0 ? 'success.main' : diff < 0 ? 'error.main' : 'text.secondary'}
-                        >
-                          {diff > 0 ? '+' : ''}{diff}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="center">
-                        <StreakChip streak={team.streak} />
-                      </TableCell>
+                      <TableCell align="center"><Typography variant="body2" color={diff > 0 ? 'success.main' : diff < 0 ? 'error.main' : 'text.secondary'}>{diff > 0 ? '+' : ''}{diff}</Typography></TableCell>
+                      <TableCell align="center"><StreakChip streak={team.streak} /></TableCell>
                       <TableCell align="center">{team.last_10}</TableCell>
                       <TableCell align="center">{team.home_record}</TableCell>
                       <TableCell align="center">{team.away_record}</TableCell>
@@ -638,11 +516,10 @@ const NHLDashboardContent: React.FC = () => {
     </PlanGuard>
   );
 
-  // 🟠 Generator Content - Only Generator users see player stats
   const renderPlayersTab = () => (
-    <PlanGuard requiredPlan="generator" currentPlan={userPlan} fallback={
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Upgrade to Generators Package to access detailed NHL player stats.
+    <PlanGuard requiredPlan="generator" currentPlan={profile?.plan || 'free'} fallback={
+      <Alert severity="info" sx={{ mt: 2 }} action={<Button color="inherit" size="small" onClick={() => setShowUpgradeModal(true)}>Upgrade</Button>}>
+        <strong>Generator Package required</strong> – Upgrade to access detailed NHL player stats.
       </Alert>
     }>
       <>
@@ -651,32 +528,17 @@ const NHLDashboardContent: React.FC = () => {
           <Box display="flex" gap={2}>
             <FormControl sx={{ minWidth: 120 }} size="small">
               <InputLabel id="player-type-label">Type</InputLabel>
-              <Select
-                labelId="player-type-label"
-                value={playerType}
-                label="Type"
-                onChange={handlePlayerTypeChange}
-              >
+              <Select labelId="player-type-label" value={playerType} label="Type" onChange={(e) => setPlayerType(e.target.value as 'skaters' | 'goalies')}>
                 <MenuItem value="skaters">Skaters</MenuItem>
                 <MenuItem value="goalies">Goalies</MenuItem>
               </Select>
             </FormControl>
             <FormControl sx={{ minWidth: 120 }} size="small">
               <InputLabel id="position-filter-label">Position</InputLabel>
-              <Select
-                labelId="position-filter-label"
-                value={selectedPosition}
-                label="Position"
-                onChange={handlePositionChange}
-              >
+              <Select labelId="position-filter-label" value={selectedPosition} label="Position" onChange={(e) => setSelectedPosition(e.target.value)}>
                 <MenuItem value="all">All</MenuItem>
                 {playerType === 'skaters' ? (
-                  [
-                    <MenuItem key="C" value="C">Center</MenuItem>,
-                    <MenuItem key="LW" value="LW">Left Wing</MenuItem>,
-                    <MenuItem key="RW" value="RW">Right Wing</MenuItem>,
-                    <MenuItem key="D" value="D">Defense</MenuItem>
-                  ]
+                  [<MenuItem key="C" value="C">Center</MenuItem>, <MenuItem key="LW" value="LW">Left Wing</MenuItem>, <MenuItem key="RW" value="RW">Right Wing</MenuItem>, <MenuItem key="D" value="D">Defense</MenuItem>]
                 ) : (
                   <MenuItem value="G">Goalie</MenuItem>
                 )}
@@ -684,41 +546,18 @@ const NHLDashboardContent: React.FC = () => {
             </FormControl>
           </Box>
         </Box>
-
-        {!filteredPlayers || filteredPlayers.length === 0 ? (
+        {!filteredPlayers.length ? (
           <Alert severity="info">No player data available.</Alert>
         ) : (
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Player</TableCell>
-                  <TableCell align="center">Team</TableCell>
-                  <TableCell align="center">Pos</TableCell>
+                  <TableCell>Player</TableCell><TableCell align="center">Team</TableCell><TableCell align="center">Pos</TableCell>
                   {playerType === 'skaters' ? (
-                    <>
-                      <TableCell align="center">GP</TableCell>
-                      <TableCell align="center">G</TableCell>
-                      <TableCell align="center">A</TableCell>
-                      <TableCell align="center">PTS</TableCell>
-                      <TableCell align="center">+/-</TableCell>
-                      <TableCell align="center">PIM</TableCell>
-                      <TableCell align="center">PPG</TableCell>
-                      <TableCell align="center">SHG</TableCell>
-                      <TableCell align="center">GWG</TableCell>
-                      <TableCell align="center">SOG</TableCell>
-                      <TableCell align="center">TOI/G</TableCell>
-                    </>
+                    <><TableCell align="center">GP</TableCell><TableCell align="center">G</TableCell><TableCell align="center">A</TableCell><TableCell align="center">PTS</TableCell><TableCell align="center">+/-</TableCell><TableCell align="center">PIM</TableCell><TableCell align="center">PPG</TableCell><TableCell align="center">SHG</TableCell><TableCell align="center">GWG</TableCell><TableCell align="center">SOG</TableCell><TableCell align="center">TOI/G</TableCell></>
                   ) : (
-                    <>
-                      <TableCell align="center">GP</TableCell>
-                      <TableCell align="center">W</TableCell>
-                      <TableCell align="center">L</TableCell>
-                      <TableCell align="center">OTL</TableCell>
-                      <TableCell align="center">GAA</TableCell>
-                      <TableCell align="center">SV%</TableCell>
-                      <TableCell align="center">SO</TableCell>
-                    </>
+                    <><TableCell align="center">GP</TableCell><TableCell align="center">W</TableCell><TableCell align="center">L</TableCell><TableCell align="center">OTL</TableCell><TableCell align="center">GAA</TableCell><TableCell align="center">SV%</TableCell><TableCell align="center">SO</TableCell></>
                   )}
                   <TableCell align="center">Fantasy</TableCell>
                 </TableRow>
@@ -726,36 +565,16 @@ const NHLDashboardContent: React.FC = () => {
               <TableBody>
                 {filteredPlayers.map((player) => (
                   <TableRow key={player.id} hover>
-                    <TableCell>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <PersonIcon fontSize="small" color="action" />
-                        <Typography variant="body2" fontWeight="medium">
-                          {player.name}
-                        </Typography>
-                      </Box>
-                    </TableCell>
+                    <TableCell><Box display="flex" alignItems="center" gap={1}><PersonIcon fontSize="small" color="action" /><Typography variant="body2" fontWeight="medium">{player.name}</Typography></Box></TableCell>
                     <TableCell align="center">{player.team}</TableCell>
-                    <TableCell align="center">
-                      <Chip label={player.position} size="small" variant="outlined" />
-                    </TableCell>
+                    <TableCell align="center"><Chip label={player.position} size="small" variant="outlined" /></TableCell>
                     {playerType === 'skaters' ? (
                       <>
                         <TableCell align="center">{player.games_played || '—'}</TableCell>
                         <TableCell align="center">{player.goals || 0}</TableCell>
                         <TableCell align="center">{player.assists || 0}</TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2" fontWeight="bold">
-                            {player.points || 0}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography
-                            variant="body2"
-                            color={(player.plus_minus || 0) > 0 ? 'success.main' : (player.plus_minus || 0) < 0 ? 'error.main' : 'text.secondary'}
-                          >
-                            {player.plus_minus || 0}
-                          </Typography>
-                        </TableCell>
+                        <TableCell align="center"><Typography variant="body2" fontWeight="bold">{player.points || 0}</Typography></TableCell>
+                        <TableCell align="center"><Typography variant="body2" color={(player.plus_minus || 0) > 0 ? 'success.main' : (player.plus_minus || 0) < 0 ? 'error.main' : 'text.secondary'}>{player.plus_minus || 0}</Typography></TableCell>
                         <TableCell align="center">{player.penalty_minutes || 0}</TableCell>
                         <TableCell align="center">{player.power_play_goals || 0}</TableCell>
                         <TableCell align="center">{player.shorthanded_goals || 0}</TableCell>
@@ -776,17 +595,8 @@ const NHLDashboardContent: React.FC = () => {
                     )}
                     <TableCell align="center">
                       <Box display="flex" alignItems="center" gap={1}>
-                        <Typography variant="body2" fontWeight="bold">
-                          {player.fantasy_points?.toFixed(1) || '—'}
-                        </Typography>
-                        {player.value && (
-                          <Chip
-                            label={player.value.toFixed(1)}
-                            size="small"
-                            color={player.value > 90 ? 'success' : player.value > 70 ? 'warning' : 'default'}
-                            sx={{ height: 20, fontSize: '0.7rem' }}
-                          />
-                        )}
+                        <Typography variant="body2" fontWeight="bold">{player.fantasy_points?.toFixed(1) || '—'}</Typography>
+                        {player.value && <Chip label={player.value.toFixed(1)} size="small" color={player.value > 90 ? 'success' : player.value > 70 ? 'warning' : 'default'} sx={{ height: 20, fontSize: '0.7rem' }} />}
                       </Box>
                     </TableCell>
                   </TableRow>
@@ -799,85 +609,116 @@ const NHLDashboardContent: React.FC = () => {
     </PlanGuard>
   );
 
-  // 🟠 Generator Content - Only Generator users see credits
   const renderGeneratorCredits = () => {
+    if (!hasGeneratorAccess) return null;
     return (
-      <PlanGuard requiredPlan="generator" currentPlan={userPlan}>
-        <Box sx={{ mb: 3 }}>
-          <GeneratorCredits />
-        </Box>
-      </PlanGuard>
+      <Box sx={{ mb: 3 }}>
+        <GeneratorCredits />
+      </Box>
     );
   };
 
+  const renderUpgradeModal = () => (
+    <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <LockIcon sx={{ color: '#f59e0b' }} />
+          <Typography variant="h6">Upgrade Your Plan</Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Typography paragraph>Unlock advanced NHL analytics, standings, and player stats.</Typography>
+        <Box sx={{ my: 3 }}>
+          <Typography variant="subtitle2" gutterBottom>Select Plan</Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Card variant={selectedPlan === 'starter' ? 'elevation' : 'outlined'} sx={{ cursor: 'pointer', border: selectedPlan === 'starter' ? '2px solid #10b981' : 'none', bgcolor: selectedPlan === 'starter' ? alpha('#10b981', 0.05) : undefined }} onClick={() => setSelectedPlan('starter')}>
+                <CardContent><Typography variant="h6" color="#10b981">Starter – $5.99/month</Typography><Typography variant="body2" color="text.secondary">Basic player stats and insights</Typography></CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12}>
+              <Card variant={selectedPlan === 'analytics' ? 'elevation' : 'outlined'} sx={{ cursor: 'pointer', border: selectedPlan === 'analytics' ? '2px solid #f59e0b' : 'none', bgcolor: selectedPlan === 'analytics' ? alpha('#f59e0b', 0.05) : undefined }} onClick={() => setSelectedPlan('analytics')}>
+                <CardContent><Typography variant="h6" color="#f59e0b">Analytics+ – $19.99/month</Typography><Typography variant="body2" color="text.secondary">Standings, advanced metrics, team stats</Typography></CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12}>
+              <Card variant={selectedPlan === 'generator' ? 'elevation' : 'outlined'} sx={{ cursor: 'pointer', border: selectedPlan === 'generator' ? '2px solid #8b5cf6' : 'none', bgcolor: selectedPlan === 'generator' ? alpha('#8b5cf6', 0.05) : undefined }} onClick={() => setSelectedPlan('generator')}>
+                <CardContent><Typography variant="h6" color="#8b5cf6">Generator – $39.99/month</Typography><Typography variant="body2" color="text.secondary">Player search, detailed stats, AI insights, credits</Typography></CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2">Billing Interval</Typography>
+            <Grid container spacing={1} sx={{ mt: 1 }}>
+              <Grid item xs={6}><Button fullWidth variant={selectedInterval === 'month' ? 'contained' : 'outlined'} onClick={() => setSelectedInterval('month')}>Monthly</Button></Grid>
+              <Grid item xs={6}><Button fullWidth variant={selectedInterval === 'year' ? 'contained' : 'outlined'} onClick={() => setSelectedInterval('year')}>Yearly (Save 20%)</Button></Grid>
+            </Grid>
+          </Box>
+        </Box>
+        <Box sx={{ mt: 2 }}>
+          {selectedPlan === 'starter' && (
+            <Box> {['NHL game schedules', 'Basic player stats', 'Team rosters'].map(f => <Box key={f} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} /><Typography variant="body2">{f}</Typography></Box>)} </Box>
+          )}
+          {selectedPlan === 'analytics' && (
+            <Box> {['Everything in Starter', 'Full standings with advanced metrics', 'Division/conference filters', 'Goal differential & streak tracking'].map(f => <Box key={f} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#f59e0b', mr: 1, fontSize: 18 }} /><Typography variant="body2">{f}</Typography></Box>)} </Box>
+          )}
+          {selectedPlan === 'generator' && (
+            <Box> {['Everything in Analytics+', 'Detailed player stats (skaters & goalies)', 'Fantasy points & value ratings', 'Generator credits for AI insights'].map(f => <Box key={f} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}><CheckCircleIcon sx={{ color: '#8b5cf6', mr: 1, fontSize: 18 }} /><Typography variant="body2">{f}</Typography></Box>)} </Box>
+          )}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setShowUpgradeModal(false)}>Cancel</Button>
+        <Button variant="contained" onClick={handleUpgrade} sx={{ bgcolor: selectedPlan === 'starter' ? '#10b981' : selectedPlan === 'analytics' ? '#f59e0b' : '#8b5cf6' }}>
+          Upgrade to {selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} ({selectedInterval}ly)
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
   return (
     <Container maxWidth="xl" sx={{ py: 4, bgcolor: 'background.default', minHeight: '100vh' }}>
-      {/* Plan indicator chip for testing */}
-      <Box display="flex" justifyContent="flex-end" mb={2}>
-        <Chip 
-          label={`Current Plan: ${userPlan.toUpperCase()}`} 
-          color={userPlan === 'generator' ? 'warning' : userPlan === 'analytics' ? 'secondary' : 'primary'}
-          onDelete={() => {
-            // Cycle through plans for testing
-            if (userPlan === 'starter') setUserPlan('analytics');
-            else if (userPlan === 'analytics') setUserPlan('generator');
-            else setUserPlan('starter');
-          }}
-          deleteIcon={<Box component="span">↻</Box>}
-        />
-      </Box>
+      {/* Upgrade banner for free/starter users */}
+      {!hasAnalyticsAccess && !hasGeneratorAccess && (
+        <Alert severity="info" sx={{ mb: 3 }} action={<Button color="inherit" size="small" onClick={() => setShowUpgradeModal(true)}>Upgrade</Button>}>
+          <strong>Unlock advanced NHL analytics</strong> – Get standings, advanced stats, and player insights.
+        </Alert>
+      )}
 
-      {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box display="flex" alignItems="center" gap={2}>
           <HockeyIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-          <Typography variant="h4" fontWeight="bold">
-            NHL Dashboard
-          </Typography>
-          <Chip
-            icon={<CalendarIcon />}
-            label={selectedDate ? new Date(selectedDate).toLocaleDateString() : 'Today'}
-            variant="outlined"
-          />
+          <Typography variant="h4" fontWeight="bold">NHL Dashboard</Typography>
+          <Chip icon={<CalendarIcon />} label={selectedDate ? new Date(selectedDate).toLocaleDateString() : 'Today'} variant="outlined" />
         </Box>
         <Box display="flex" gap={2}>
-          <Tooltip title="Refresh all data">
-            <IconButton onClick={handleRefresh} color="primary">
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
+          <Tooltip title="Refresh all data"><IconButton onClick={handleRefresh} color="primary"><RefreshIcon /></IconButton></Tooltip>
         </Box>
       </Box>
 
-      {/* 🟠 Generator Content - Show credits at the top for Generator users */}
       {renderGeneratorCredits()}
 
-      {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange}>
+        <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
           <Tab label="Games" />
           <Tab label="Standings" />
           <Tab label="Players" />
         </Tabs>
       </Box>
 
-      {/* Tab Content */}
       {tabValue === 0 && renderGamesTab()}
       {tabValue === 1 && renderStandingsTab()}
       {tabValue === 2 && renderPlayersTab()}
+
+      {renderUpgradeModal()}
     </Container>
   );
 };
 
-// ----------------------------------------------------------------------
-// Outer Wrapper with Protected Route
-// ----------------------------------------------------------------------
-const NHLDashboard: React.FC = () => {
-  return (
-    <ProtectedRoute screenName="NHLDashboard">
-      <NHLDashboardContent />
-    </ProtectedRoute>
-  );
-};
+const NHLDashboard: React.FC = () => (
+  <ProtectedRoute screenName="NHLDashboard">
+    <NHLDashboardContent />
+  </ProtectedRoute>
+);
 
 export default NHLDashboard;

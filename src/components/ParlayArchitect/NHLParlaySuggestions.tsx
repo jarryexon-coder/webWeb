@@ -1,16 +1,16 @@
 import React from 'react';
-import { ParlaySuggestion, ParlayLeg } from '../../types/parlay.types';
+import { ComboSuggestion, ComboLeg } from '../../types/parlay.types';
 
-interface NHLParlaySuggestionsProps {
-  onSelectParlay: (parlay: ParlaySuggestion) => void;
+interface NHLComboSuggestionsProps {
+  onSelectCombo: (parlay: ComboSuggestion) => void;
 }
 
-const NHLParlaySuggestions: React.FC<NHLParlaySuggestionsProps> = ({ onSelectParlay }) => {
-  // February 2026 NHL Parlay Suggestions
-  const nhlParlays: ParlaySuggestion[] = [
+const NHLComboSuggestions: React.FC<NHLComboSuggestionsProps> = ({ onSelectCombo }) => {
+  // February 2026 NHL Combo Suggestions
+  const nhlCombos: ComboSuggestion[] = [
     {
       id: 'nhl-parlay-1',
-      name: 'Superstar Points Parlay',
+      name: 'Superstar Points Combo',
       sport: 'NHL',
       type: 'Player Props',
       legs: [
@@ -128,7 +128,7 @@ const NHLParlaySuggestions: React.FC<NHLParlaySuggestionsProps> = ({ onSelectPar
       id: 'nhl-parlay-3',
       name: 'Pacific Division Battle',
       sport: 'NHL',
-      type: 'Moneyline',
+      type: 'Match Winner',
       legs: [
         {
           id: 'leg-edm-1',
@@ -178,7 +178,7 @@ const NHLParlaySuggestions: React.FC<NHLParlaySuggestionsProps> = ({ onSelectPar
 
   return (
     <div className="space-y-4">
-      {nhlParlays.map((parlay) => (
+      {nhlCombos.map((parlay) => (
         <div key={parlay.id} className="bg-white rounded-lg border border-gray-200 p-4 hover:border-blue-300 transition">
           <div className="flex justify-between items-start">
             <div>
@@ -204,19 +204,19 @@ const NHLParlaySuggestions: React.FC<NHLParlaySuggestionsProps> = ({ onSelectPar
           <div className="mt-3 flex items-center justify-between">
             <div className="flex items-center space-x-4 text-sm">
               <span className="text-gray-500">{parlay.legs.length} legs</span>
-              <span className="text-gray-500">EV: {parlay.expected_value}</span>
+              <span className="text-gray-500">Expected Value: {parlay.expected_value}</span>
               <span className={`text-xs px-2 py-1 rounded-full ${
                 parlay.risk_level <= 2 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
               }`}>
-                Risk: {parlay.risk_level}/5
+                Volatility: {parlay.volatility_level}/5
               </span>
             </div>
             
             <button
-              onClick={() => onSelectParlay(parlay)}
+              onClick={() => onSelectCombo(parlay)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
             >
-              Add to Parlay
+              Add to Combo
             </button>
           </div>
         </div>
@@ -225,4 +225,4 @@ const NHLParlaySuggestions: React.FC<NHLParlaySuggestionsProps> = ({ onSelectPar
   );
 };
 
-export default NHLParlaySuggestions;
+export default NHLComboSuggestions;

@@ -97,7 +97,7 @@ interface Subscription {
 interface Stats {
   totalPredictions: number;
   winRate: number;
-  totalProfit: number;
+  totalSimulatedGain: number;
   activeDays: number;
   promo_codes?: any[];
 }
@@ -126,13 +126,13 @@ const SportsAnalyticsDashboard: React.FC = () => {
       analytics: [
         'Player Analysis & Advanced Stats',
         'Real-time Injury Reports',
-        'Edge Analysis & Value Betting',
+        'Advantage Analysis & Top Projections',
         'AI-Powered Predictions',
       ],
       generator: [
         'All Analytics features',
         '8 daily AI-generated predictions',
-        'Parlay builder tools',
+        'Combo builder tools',
         'Expert pick analysis',
         'Secret Phrases & Insider Insights',
         'Priority generator access',
@@ -140,7 +140,7 @@ const SportsAnalyticsDashboard: React.FC = () => {
       starter: [
         '5 supercharged AI stats screens',
         'Advanced handicapping tools',
-        'Real-time betting insights',
+        'Real-time analytics insights',
         'Player performance analytics',
         'Game prediction models',
       ],
@@ -216,7 +216,7 @@ const SportsAnalyticsDashboard: React.FC = () => {
             setStats({
               totalPredictions: 0,
               winRate: 0,
-              totalProfit: 0,
+              totalSimulatedGain: 0,
               activeDays: 0,
               promo_codes: [],
             });
@@ -225,7 +225,7 @@ const SportsAnalyticsDashboard: React.FC = () => {
           setStats({
             totalPredictions: 0,
             winRate: 0,
-            totalProfit: 0,
+            totalSimulatedGain: 0,
             activeDays: 0,
             promo_codes: [],
           });
@@ -460,9 +460,9 @@ const SportsAnalyticsDashboard: React.FC = () => {
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
-                Total Profit
+                Total Simulated Gain
               </Typography>
-              <Typography variant="h4">${stats?.totalProfit || 0}</Typography>
+              <Typography variant="h4">${stats?.totalSimulatedGain || 0}</Typography>
               <Typography variant="body2" color="text.secondary">
                 Lifetime earnings
               </Typography>
@@ -685,7 +685,7 @@ const SportsAnalyticsDashboard: React.FC = () => {
           <Card sx={{ cursor: 'pointer' }} onClick={() => navigate('/parlay-architect')}>
             <CardContent sx={{ textAlign: 'center' }}>
               <AnalyticsIcon sx={{ fontSize: 48, color: '#2196f3', mb: 2 }} />
-              <Typography variant="h6">Parlay Builder</Typography>
+              <Typography variant="h6">Combo Builder</Typography>
               <Typography variant="body2" color="text.secondary">
                 Build winning parlays with AI
               </Typography>

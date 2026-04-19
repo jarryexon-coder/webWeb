@@ -1,8 +1,9 @@
-// pages/AIParlaySuggestionsScreen.tsx - Updated with real MLB/NHL data (same as ParlayArchitectScreen)
+// pages/AIComboSuggestionsScreen.tsx - Premium only (Analytics plan required)
 import React, { useMemo, useState, useEffect } from 'react';
 import {
   Container,
   Typography,
+  AlertTitle,
   Box,
   Grid,
   Card,
@@ -31,6 +32,10 @@ import {
   AccordionDetails,
   Divider,
   Slider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -40,10 +45,18 @@ import {
   TrendingDown as TrendingDownIcon,
   TrendingFlat as TrendingFlatIcon,
   InfoOutlined as InfoIcon,
+  Lock as LockIcon,
+  CheckCircle as CheckCircleIcon,
+  CreditCard as CreditCardIcon,
+  EmojiEvents as EmojiEventsIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart } from '@mui/x-charts/BarChart';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
+import { useCheckout } from '../utils/checkout';
+import { PlanFeaturesDisplay } from '../components/PlanFeaturesDisplay';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 // ==============================
 // Configuration & Types
@@ -52,7 +65,7 @@ import axios from 'axios';
 const NODE_API_BASE = 'https://prizepicks-production.up.railway.app';
 const PYTHON_API_BASE = 'https://python-api-fresh-production.up.railway.app';
 
-interface ParlayLeg {
+interface ComboLeg {
   id: string;
   description: string;
   odds: string;
@@ -69,13 +82,13 @@ interface ParlayLeg {
   edge?: string;
 }
 
-interface ParlaySuggestion {
+interface ComboSuggestion {
   id: string;
   name: string;
   sport: string;
   type: string;
   market_type: string;
-  legs: ParlayLeg[];
+  legs: ComboLeg[];
   total_odds: string;
   confidence: number;
   confidence_level: string;
@@ -102,7 +115,7 @@ interface Selection {
   stat: string;
   line: number;
   projection: number;
-  odds: string | number; // Can be string or number
+  odds: string | number;
   confidence: number;
   edge: string;
   position?: string;
@@ -113,14 +126,14 @@ interface Selection {
 // Fetch real props from APIs
 // ==============================
 
-// NBA props from Node API (same as ParlayArchitect)
+// NBA props from Node API
 const fetchNBASelections = async (): Promise<Selection[]> => {
   try {
     const response = await axios.get(`${NODE_API_BASE}/api/prizepicks/selections?sport=nba`);
     return (response.data.selections || []).map((s: any) => ({
       ...s,
       sport: 'NBA',
-      odds: String(s.odds || '-110'), // Ensure odds is string
+      odds: String(s.odds || '-110'),
     }));
   } catch (error) {
     console.warn('Failed to fetch NBA selections', error);
@@ -128,7 +141,7 @@ const fetchNBASelections = async (): Promise<Selection[]> => {
   }
 };
 
-// MLB props from Python API (same as ParlayArchitect's fetchMLBProps)
+// MLB props from Python API
 const fetchMLBSelections = async (): Promise<Selection[]> => {
   try {
     const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
@@ -147,7 +160,6 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
       const isPitcher = player.position === 'P';
       const gamesPlayed = player.games_played || 1;
 
-      // Helper to create a selection
       const makeSelection = (stat: string, line: number, proj: number, odds = '-110') => {
         const edge = proj > line ? `+${(((proj - line) / line) * 100).toFixed(1)}%` : `${(((proj - line) / line) * 100).toFixed(1)}%`;
         selections.push({
@@ -157,8 +169,8 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
           stat,
           line,
           projection: proj,
-          odds: String(odds), // Ensure odds is string
-          confidence: 70 + Math.floor(Math.random() * 15), // can be improved
+          odds: String(odds),
+          confidence: 70 + Math.floor(Math.random() * 15),
           edge,
           position: player.position,
           sport: 'MLB',
@@ -169,7 +181,6 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
         if (player.strikeouts !== undefined) {
           makeSelection('Strikeouts', 5.5, player.strikeouts / gamesPlayed);
         }
-        // add other pitcher props if needed
       } else {
         if (player.hits !== undefined) {
           makeSelection('Hits', 0.5, player.hits / gamesPlayed);
@@ -180,7 +191,6 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
         if (player.rbi !== undefined) {
           makeSelection('RBI', 0.5, player.rbi / gamesPlayed);
         }
-        // stolen bases, etc.
       }
     });
 
@@ -191,7 +201,7 @@ const fetchMLBSelections = async (): Promise<Selection[]> => {
   }
 };
 
-// NHL props from Python API (same as ParlayArchitect's fetchNHLProps)
+// NHL props from Python API
 const fetchNHLSelections = async (): Promise<Selection[]> => {
   try {
     const response = await axios.get(`${PYTHON_API_BASE}/api/players`, {
@@ -219,7 +229,7 @@ const fetchNHLSelections = async (): Promise<Selection[]> => {
           stat,
           line,
           projection: proj,
-          odds: String(odds), // Ensure odds is string
+          odds: String(odds),
           confidence: 70 + Math.floor(Math.random() * 15),
           edge,
           position: player.position,
@@ -257,7 +267,6 @@ const fetchNHLSelections = async (): Promise<Selection[]> => {
   }
 };
 
-// Generic fetch function based on sport
 const fetchSelectionsBySport = async (sport: string): Promise<Selection[]> => {
   switch (sport) {
     case 'NBA':
@@ -272,27 +281,22 @@ const fetchSelectionsBySport = async (sport: string): Promise<Selection[]> => {
 };
 
 // ==============================
-// Generate AI parlay suggestions from selections (sport-agnostic)
+// Generate AI combo suggestions from selections
 // ==============================
 
-const generateAIParlaysFromSelections = (
+const generateAICombosFromSelections = (
   selections: Selection[],
   sport: string
-): ParlaySuggestion[] => {
+): ComboSuggestion[] => {
   if (selections.length === 0) return [];
 
-  const suggestions: ParlaySuggestion[] = [];
+  const suggestions: ComboSuggestion[] = [];
 
-  // Helper to calculate total odds with proper string handling
-  const calculateTotalOdds = (legs: ParlayLeg[]): { odds: string; decimal: number } => {
+  const calculateTotalOdds = (legs: ComboLeg[]): { odds: string; decimal: number } => {
     let decimal = 1.0;
     legs.forEach(leg => {
-      // Convert odds to string if it's a number, otherwise use as is
       const oddsStr = leg.odds ? String(leg.odds) : '-110';
-      
-      // Remove + sign if present
       const cleanOddsStr = oddsStr.replace(/\+/g, '');
-      
       const oddsNum = parseInt(cleanOddsStr, 10);
       if (!isNaN(oddsNum)) {
         if (oddsNum > 0) {
@@ -301,36 +305,33 @@ const generateAIParlaysFromSelections = (
           decimal *= 1 - 100 / Math.abs(oddsNum);
         }
       } else {
-        decimal *= 1.91; // -110 approx
+        decimal *= 1.91;
       }
     });
-    
     const totalOdds = decimal >= 2.0
       ? `+${Math.round((decimal - 1) * 100)}`
       : Math.round(-100 / (decimal - 1)).toString();
     return { odds: totalOdds, decimal };
   };
 
-  // Helper to safely parse confidence
   const getConfidence = (c: any): number => {
     const num = Number(c);
     return !isNaN(num) && num > 0 ? num : 75;
   };
 
-  // Sport-specific naming
   const sportDisplay = sport.toUpperCase();
 
-  // 1. High Confidence Parlay (top 3 by confidence)
+  // 1. High Confidence Combo
   const topConfidence = [...selections]
     .sort((a, b) => getConfidence(b.confidence) - getConfidence(a.confidence))
     .slice(0, 3);
   if (topConfidence.length >= 2) {
-    const legs: ParlayLeg[] = topConfidence.map((s, idx) => {
+    const legs: ComboLeg[] = topConfidence.map((s, idx) => {
       const conf = getConfidence(s.confidence);
       return {
         id: `conf-${idx}-${Date.now()}`,
         description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: String(s.odds), // Convert to string explicitly
+        odds: String(s.odds),
         confidence: conf,
         sport: sportDisplay,
         market: 'player_props',
@@ -346,7 +347,7 @@ const generateAIParlaysFromSelections = (
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
     suggestions.push({
       id: `ai-conf-${sport}-${Date.now()}`,
-      name: `High Confidence ${sportDisplay} Parlay`,
+      name: `High Confidence ${sportDisplay} Combo`,
       sport: sportDisplay,
       type: 'player_props',
       market_type: 'player_props',
@@ -370,22 +371,22 @@ const generateAIParlaysFromSelections = (
     });
   }
 
-  // 2. Best Value Parlay (highest positive edge)
+  // 2. Best Value Combo
   const topEdge = [...selections]
-    .filter(s => s.edge && s.edge.startsWith('+'))
+    .filter(s => s.edge && String(s.edge).startsWith('+'))
     .sort((a, b) => {
-      const edgeA = parseFloat(a.edge?.replace('+', '').replace('%', '') || '0');
-      const edgeB = parseFloat(b.edge?.replace('+', '').replace('%', '') || '0');
+      const edgeA = parseFloat(String(a.edge || '0').replace(/[+%]/g, ''));
+      const edgeB = parseFloat(String(b.edge || '0').replace(/[+%]/g, ''));
       return edgeB - edgeA;
     })
     .slice(0, 3);
   if (topEdge.length >= 2) {
-    const legs: ParlayLeg[] = topEdge.map((s, idx) => {
+    const legs: ComboLeg[] = topEdge.map((s, idx) => {
       const conf = getConfidence(s.confidence);
       return {
         id: `edge-${idx}-${Date.now()}`,
         description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: String(s.odds), // Convert to string explicitly
+        odds: String(s.odds),
         confidence: conf,
         sport: sportDisplay,
         market: 'player_props',
@@ -401,7 +402,7 @@ const generateAIParlaysFromSelections = (
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
     suggestions.push({
       id: `ai-edge-${sport}-${Date.now()}`,
-      name: `Best Value ${sportDisplay} Parlay`,
+      name: `Best Value ${sportDisplay} Combo`,
       sport: sportDisplay,
       type: 'player_props',
       market_type: 'player_props',
@@ -425,19 +426,19 @@ const generateAIParlaysFromSelections = (
     });
   }
 
-  // 3. Balanced Parlay (mix of projection and confidence)
+  // 3. Balanced Combo
   const randomIndices = new Set<number>();
   while (randomIndices.size < 3 && randomIndices.size < selections.length) {
     randomIndices.add(Math.floor(Math.random() * selections.length));
   }
   const randomProps = Array.from(randomIndices).map(i => selections[i]);
   if (randomProps.length >= 2) {
-    const legs: ParlayLeg[] = randomProps.map((s, idx) => {
+    const legs: ComboLeg[] = randomProps.map((s, idx) => {
       const conf = getConfidence(s.confidence);
       return {
         id: `bal-${idx}-${Date.now()}`,
         description: `${s.player} ${s.stat} Over ${s.line}`,
-        odds: String(s.odds), // Convert to string explicitly
+        odds: String(s.odds),
         confidence: conf,
         sport: sportDisplay,
         market: 'player_props',
@@ -453,7 +454,7 @@ const generateAIParlaysFromSelections = (
     const avgConfidence = Math.round(legs.reduce((sum, l) => sum + l.confidence, 0) / legs.length);
     suggestions.push({
       id: `ai-bal-${sport}-${Date.now()}`,
-      name: `Balanced Mix ${sportDisplay} Parlay`,
+      name: `Balanced Mix ${sportDisplay} Combo`,
       sport: sportDisplay,
       type: 'player_props',
       market_type: 'player_props',
@@ -543,15 +544,28 @@ const SportChip = ({ sport }: { sport: string }) => {
 };
 
 // ==============================
-// Main Component
+// Main Component (Premium only)
 // ==============================
 
-const AIParlaySuggestionsScreen: React.FC = () => {
+const AIComboSuggestionsContent: React.FC = () => {
+  const { profile, planFeatures } = useAuth();
+  const { handleSubscriptionCheckout, handleCreditsCheckout } = useCheckout();
+  
   const [selectedSport, setSelectedSport] = useState<string>('NBA');
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0);
   const [sortBy, setSortBy] = useState<string>('confidence');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>('analytics');
+  const [selectedInterval, setSelectedInterval] = useState<string>('month');
+  
+  // Access plan features (only for display)
+  const hasAdvancedAnalytics = planFeatures?.hasAdvancedAnalytics ?? false;
+  const hasAIRecommendations = planFeatures?.hasAIRecommendations ?? false;
+  const hasBettingInsights = planFeatures?.hasBettingInsights ?? false;
+  
+  const hasPremiumAccess = hasAIRecommendations || hasAdvancedAnalytics || hasBettingInsights;
 
-  // Fetch selections based on selected sport
+  // Fetch selections
   const {
     data: selections = [],
     isLoading,
@@ -560,50 +574,49 @@ const AIParlaySuggestionsScreen: React.FC = () => {
   } = useQuery({
     queryKey: ['selections', selectedSport],
     queryFn: () => fetchSelectionsBySport(selectedSport),
-    staleTime: 1000 * 60 * 2, // 2 minutes
+    staleTime: 1000 * 60 * 2,
     refetchOnWindowFocus: false,
   });
 
-  // Generate AI parlays from selections
-  const allParlays = useMemo(() => {
+  // Generate AI parlays
+  const allCombos = useMemo(() => {
     if (selections.length === 0) return [];
-    return generateAIParlaysFromSelections(selections, selectedSport);
+    return generateAICombosFromSelections(selections, selectedSport);
   }, [selections, selectedSport]);
 
-  // Filter and sort based on user selections
-  const filteredParlays = useMemo(() => {
-    let filtered = [...allParlays];
-
-    // Apply confidence threshold
+  // Filter and sort
+  const filteredCombos = useMemo(() => {
+    let filtered = [...allCombos];
     if (confidenceThreshold > 0) {
       filtered = filtered.filter(p => p.confidence >= confidenceThreshold);
     }
-
-    // Sort
     filtered.sort((a, b) => {
       if (sortBy === 'confidence') return b.confidence - a.confidence;
       if (sortBy === 'edge') return (b.ai_metrics?.edge || 0) - (a.ai_metrics?.edge || 0);
       if (sortBy === 'legs') return b.legs.length - a.legs.length;
       return 0;
     });
-
     return filtered;
-  }, [allParlays, confidenceThreshold, sortBy]);
+  }, [allCombos, confidenceThreshold, sortBy]);
 
-  // AI summary analytics
+  // AI summary
   const aiSummary = useMemo(() => {
-    if (!allParlays.length) return null;
-    const total = allParlays.length;
-    const avgConfidence = allParlays.reduce((acc, p) => acc + (p.confidence || 0), 0) / total;
-    const avgEdge = allParlays.reduce((acc, p) => acc + (p.ai_metrics?.edge || 0), 0) / total;
-    const totalLegs = allParlays.reduce((acc, p) => acc + p.legs.length, 0);
+    if (allCombos.length === 0) return null;
+    const total = allCombos.length;
+    const avgConfidence = allCombos.reduce((acc, p) => acc + (p.confidence || 0), 0) / total;
+    const avgEdge = allCombos.reduce((acc, p) => acc + (p.ai_metrics?.edge || 0), 0) / total;
+    const totalLegs = allCombos.reduce((acc, p) => acc + p.legs.length, 0);
     const avgLegs = totalLegs / total;
-    const avgStake = allParlays.reduce((acc, p) => {
+    const avgAmount = allCombos.reduce((acc, p) => {
       const stake = parseFloat(p.ai_metrics?.recommended_stake?.replace('$', '') || '0');
       return acc + stake;
     }, 0) / total;
-    return { total, avgConfidence: avgConfidence || 0, avgEdge, avgLegs, avgStake };
-  }, [allParlays]);
+    return { total, avgConfidence: avgConfidence || 0, avgEdge, avgLegs, avgAmount };
+  }, [allCombos]);
+
+  const handleUpgrade = () => {
+    handleSubscriptionCheckout(selectedPlan, selectedInterval);
+  };
 
   const handleSportChange = (event: SelectChangeEvent) => {
     setSelectedSport(event.target.value);
@@ -621,7 +634,7 @@ const AIParlaySuggestionsScreen: React.FC = () => {
     return (
       <Container maxWidth="xl" sx={{ py: 4 }}>
         <Typography variant="h4" gutterBottom>
-          AI Parlay Suggestions
+          AI Combo Suggestions
         </Typography>
         <Grid container spacing={3}>
           {[1, 2, 3, 4].map((i) => (
@@ -645,12 +658,13 @@ const AIParlaySuggestionsScreen: React.FC = () => {
             </Button>
           }
         >
-          Error loading AI parlay suggestions: {(error as Error).message}
+          Error loading AI combo suggestions: {(error as Error).message}
         </Alert>
       </Container>
     );
   }
 
+  // No inner PremiumContent wrapper – the entire screen is premium-only
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       {/* Header */}
@@ -658,12 +672,13 @@ const AIParlaySuggestionsScreen: React.FC = () => {
         <Box display="flex" alignItems="center" gap={2}>
           <PsychologyIcon sx={{ fontSize: 40, color: 'primary.main' }} />
           <Typography variant="h4" fontWeight="bold">
-            AI Parlay Suggestions
+            AI Combo Suggestions
           </Typography>
           <Chip
-            label={allParlays.length ? `${allParlays.length} active` : 'No active parlays'}
+            icon={<CheckCircleIcon />}
+            label="Premium"
+            color="success"
             size="small"
-            color={allParlays.length ? 'success' : 'default'}
           />
         </Box>
         <Box display="flex" gap={2}>
@@ -688,6 +703,13 @@ const AIParlaySuggestionsScreen: React.FC = () => {
           </Tooltip>
         </Box>
       </Box>
+
+      {/* Display current plan features */}
+      {profile && (
+        <Box sx={{ mb: 3 }}>
+          <PlanFeaturesDisplay currentPlan={profile.plan} compact />
+        </Box>
+      )}
 
       {/* AI Summary Cards */}
       {aiSummary && (
@@ -741,10 +763,10 @@ const AIParlaySuggestionsScreen: React.FC = () => {
             <Card variant="outlined" sx={{ bgcolor: 'warning.50' }}>
               <CardContent>
                 <Typography color="text.secondary" gutterBottom>
-                  Recommended Stake
+                  Recommended Amount
                 </Typography>
                 <Typography variant="h4" fontWeight="bold">
-                  ${aiSummary.avgStake.toFixed(2)}
+                  ${aiSummary.avgAmount.toFixed(2)}
                 </Typography>
               </CardContent>
             </Card>
@@ -782,28 +804,28 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                 onChange={handleSortChange}
               >
                 <MenuItem value="confidence">Confidence (High to Low)</MenuItem>
-                <MenuItem value="edge">Edge (High to Low)</MenuItem>
+                <MenuItem value="edge">Advantage (High to Low)</MenuItem>
                 <MenuItem value="legs">Legs (Most to Least)</MenuItem>
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} md={4}>
             <Typography variant="body2" color="text.secondary">
-              {filteredParlays.length} AI parlays available
+              {filteredCombos.length} AI combos available
             </Typography>
           </Grid>
         </Grid>
       </Paper>
 
       {/* Confidence Distribution Chart */}
-      {filteredParlays.length > 0 && (
+      {filteredCombos.length > 0 && (
         <Paper sx={{ p: 3, mb: 4 }}>
           <Typography variant="h6" gutterBottom>
             AI Confidence Distribution
           </Typography>
           <Box sx={{ height: 250, width: '100%' }}>
             <BarChart
-              dataset={filteredParlays.slice(0, 10).map((p) => ({
+              dataset={filteredCombos.slice(0, 10).map((p) => ({
                 label: p.name.length > 20 ? p.name.substring(0, 18) + '…' : p.name,
                 confidence: p.confidence,
               }))}
@@ -816,16 +838,15 @@ const AIParlaySuggestionsScreen: React.FC = () => {
         </Paper>
       )}
 
-      {/* Parlay Cards */}
-      {filteredParlays.length === 0 ? (
-        <Alert severity="info">No AI parlay suggestions match your filters.</Alert>
+      {/* Combo Cards */}
+      {filteredCombos.length === 0 ? (
+        <Alert severity="info">No AI combo suggestions match your filters.</Alert>
       ) : (
         <Grid container spacing={3}>
-          {filteredParlays.map((parlay) => (
+          {filteredCombos.map((parlay) => (
             <Grid item xs={12} md={6} key={parlay.id}>
               <Card variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <CardContent>
-                  {/* Header */}
                   <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="h6" fontWeight="bold">
                       {parlay.name}
@@ -833,12 +854,11 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                     <SportChip sport={parlay.sport} />
                   </Box>
                   <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
-                    <Chip label={`Odds: ${parlay.total_odds}`} size="small" variant="outlined" />
+                    <Chip label={`Multiplier: ${parlay.total_odds}`} size="small" variant="outlined" />
                     <RiskChip risk={parlay.risk_level} />
                     <Chip label={`EV: ${parlay.expected_value}`} size="small" variant="outlined" />
                   </Box>
 
-                  {/* AI Edge Badge */}
                   {parlay.ai_metrics?.edge !== undefined && (
                     <Box
                       sx={{
@@ -858,7 +878,6 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                     </Box>
                   )}
 
-                  {/* Confidence */}
                   <Box mb={2}>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       AI Confidence
@@ -866,7 +885,6 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                     <ConfidenceIndicator value={parlay.confidence} />
                   </Box>
 
-                  {/* Legs Accordion */}
                   <Accordion disableGutters elevation={0} square sx={{ border: 'none', '&:before': { display: 'none' } }}>
                     <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
                       <Typography variant="body2" fontWeight="medium">
@@ -879,7 +897,7 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                           <TableHead>
                             <TableRow>
                               <TableCell>Description</TableCell>
-                              <TableCell align="right">Odds</TableCell>
+                              <TableCell align="right">Multiplier</TableCell>
                               <TableCell align="right">Confidence</TableCell>
                             </TableRow>
                           </TableHead>
@@ -912,7 +930,6 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                     </AccordionDetails>
                   </Accordion>
 
-                  {/* AI Analysis */}
                   <Box mt={2}>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       AI Analysis
@@ -922,7 +939,6 @@ const AIParlaySuggestionsScreen: React.FC = () => {
                     </Typography>
                   </Box>
 
-                  {/* Footer: stake & timestamp */}
                   <Box mt={2} display="flex" justifyContent="space-between" alignItems="center">
                     <Chip
                       label={`Recommended stake: ${parlay.ai_metrics.recommended_stake}`}
@@ -940,8 +956,137 @@ const AIParlaySuggestionsScreen: React.FC = () => {
           ))}
         </Grid>
       )}
+
+      {/* Upgrade Modal (fallback – rarely shown because ProtectedRoute blocks first) */}
+      <Dialog open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <PsychologyIcon sx={{ color: '#f59e0b' }} />
+            <Typography variant="h6">Upgrade to Premium AI</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography paragraph>
+            Unlock powerful AI-powered combo suggestions and advanced analytics.
+          </Typography>
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>Select Plan</InputLabel>
+            <Select
+              value={selectedPlan}
+              label="Select Plan"
+              onChange={(e) => setSelectedPlan(e.target.value)}
+            >
+              <MenuItem value="starter">Starter - $5.99/month</MenuItem>
+              <MenuItem value="analytics">Analytics - $19.99/month</MenuItem>
+              <MenuItem value="generator">Generator - $39.99/month</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth sx={{ mb: 3 }}>
+            <InputLabel>Billing Interval</InputLabel>
+            <Select
+              value={selectedInterval}
+              label="Billing Interval"
+              onChange={(e) => setSelectedInterval(e.target.value)}
+            >
+              <MenuItem value="month">Monthly</MenuItem>
+              <MenuItem value="year">Yearly (Save 20%)</MenuItem>
+            </Select>
+          </FormControl>
+          <Box sx={{ my: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              {selectedPlan === 'starter' && 'Starter Plan Features:'}
+              {selectedPlan === 'analytics' && 'Analytics Plan Features:'}
+              {selectedPlan === 'generator' && 'Generator Plan Features:'}
+            </Typography>
+            {selectedPlan === 'starter' && (
+              <>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Basic combo suggestions</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Tournament schedules & results</Typography>
+                </Box>
+              </>
+            )}
+            {selectedPlan === 'analytics' && (
+              <>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">All Starter features</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">AI-powered combo suggestions</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Historical performance trends</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Personalized recommendations</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Advanced Advantage calculations</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Real-time confidence scores</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Premium AI analysis</Typography>
+                </Box>
+              </>
+            )}
+            {selectedPlan === 'generator' && (
+              <>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">All Analytics features</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Unlimited AI generations</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  <CheckCircleIcon sx={{ color: '#10b981', mr: 1, fontSize: 18 }} />
+                  <Typography variant="body2">Custom combo builder</Typography>
+                </Box>
+              </>
+            )}
+          </Box>
+          <Button
+            fullWidth
+            variant="contained"
+            size="large"
+            onClick={handleUpgrade}
+            sx={{ mt: 2 }}
+          >
+            Upgrade to {selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} ({selectedInterval}ly)
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowUpgradeModal(false)}>Not Now</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
 
-export default AIParlaySuggestionsScreen;
+// ==============================
+// Main exported component wrapped with ProtectedRoute
+// ==============================
+
+const AIComboSuggestionsScreen: React.FC = () => {
+  return (
+    <ProtectedRoute screenName="AIComboSuggestionsScreen">
+      <AIComboSuggestionsContent />
+    </ProtectedRoute>
+  );
+};
+
+export default AIComboSuggestionsScreen;

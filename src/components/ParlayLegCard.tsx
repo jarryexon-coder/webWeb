@@ -3,14 +3,14 @@ import React from 'react';
 import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-interface ParlayLegCardProps {
+interface ComboLegCardProps {
   market: string;
   odds: number;
   probability: number;
   sport?: string;
 }
 
-export const ParlayLegCard: React.FC<ParlayLegCardProps> = ({
+export const ComboLegCard: React.FC<ComboLegCardProps> = ({
   market,
   odds,
   probability,

@@ -5,13 +5,21 @@ import { Box, CircularProgress } from '@mui/material';
 import PlanGuard from './PlanGuard';
 import { SCREEN_REQUIREMENTS, PLAN_REQUIREMENTS } from '../config/planRequirements';
 
+const GENERATOR_ACCESS_SCREENS = new Set([
+  'KalshiPredictions',
+  'SameGameParlay',
+  'ParlayArchitect',
+]);
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  screenName: string; // The name of the screen/component
+  screenName: string;
+  requiredFeature?: string;  // ← NEW: optional override
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, screenName }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, screenName, requiredFeature: propRequiredFeature }) => {
   const [userPlan, setUserPlan] = useState<string | null>(null);
+  const [credits, setCredits] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const location = useLocation();
 
@@ -20,36 +28,29 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, screenName })
       try {
         const token = localStorage.getItem('authToken');
         if (!token) {
-          console.log('ProtectedRoute: No token found');
           setUserPlan(null);
           setLoading(false);
           return;
         }
 
-        console.log('ProtectedRoute: Fetching user profile...');
         const response = await fetch('https://python-api-fresh-production.up.railway.app/api/user/profile', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         const data = await response.json();
         console.log('ProtectedRoute: Profile data:', data);
-        console.log('ProtectedRoute: Plan from API:', data.plan);
         
-        if (data.plan) {
-          const plan = data.plan.toLowerCase();
-          setUserPlan(plan);
-          localStorage.setItem('userPlan', plan);
-        } else {
-          setUserPlan('free');
-        }
+        const plan = data.plan ? data.plan.toLowerCase() : 'free';
+        setUserPlan(plan);
+        setCredits(data.credits ?? 0);
+        localStorage.setItem('userPlan', plan);
       } catch (error) {
         console.error('ProtectedRoute: Error fetching user plan:', error);
         const cachedPlan = localStorage.getItem('userPlan');
         setUserPlan(cachedPlan || 'free');
+        setCredits(0);
       } finally {
         setLoading(false);
       }
@@ -66,25 +67,35 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, screenName })
     );
   }
 
-  // Check if user is logged in
   if (!userPlan) {
-    console.log('ProtectedRoute: No user plan, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Get the required feature and then the actual plan
-  const requiredFeature = SCREEN_REQUIREMENTS[screenName];
-  const requiredPlan = requiredFeature ? PLAN_REQUIREMENTS[requiredFeature as keyof typeof PLAN_REQUIREMENTS] : 'free';
+  // Use propRequiredFeature if provided, otherwise use screen mapping
+  const requiredFeature = propRequiredFeature || SCREEN_REQUIREMENTS[screenName];
+  let requiredPlan = requiredFeature ? PLAN_REQUIREMENTS[requiredFeature as keyof typeof PLAN_REQUIREMENTS] : 'free';
+  const needsGeneratorAccess = GENERATOR_ACCESS_SCREENS.has(screenName);
   
-  console.log(`ProtectedRoute: Screen=${screenName}, Feature=${requiredFeature}, RequiredPlan=${requiredPlan}, UserPlan=${userPlan}`);
+  console.log(`ProtectedRoute: Screen=${screenName}, RequiredFeature=${requiredFeature}, RequiredPlan=${requiredPlan}, UserPlan=${userPlan}, Credits=${credits}, NeedsGeneratorAccess=${needsGeneratorAccess}`);
 
-  // If no plan requirement, just show children
-  if (!requiredPlan) {
+  if (!requiredPlan && !needsGeneratorAccess) {
     return <>{children}</>;
   }
 
+  if (needsGeneratorAccess) {
+    return (
+      <PlanGuard 
+        requireGeneratorAccess={true}
+        currentPlanProp={userPlan}
+        creditsProp={credits}
+      >
+        {children}
+      </PlanGuard>
+    );
+  }
+
   return (
-    <PlanGuard requiredPlan={requiredPlan} currentPlan={userPlan}>
+    <PlanGuard requiredPlan={requiredPlan} currentPlanProp={userPlan} creditsProp={credits}>
       {children}
     </PlanGuard>
   );

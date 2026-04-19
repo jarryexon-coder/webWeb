@@ -1,10 +1,10 @@
-// src/pages/TeamRostersPage.tsx - UPDATED VERSION
-import React, { useState, useEffect, useMemo } from 'react';
+// src/pages/TeamRostersPage.tsx - Lazy load rosters on expand
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Container, Typography, Paper, Accordion, AccordionSummary, AccordionDetails,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TableSortLabel,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   CircularProgress, Alert, Box, Chip, FormControl, InputLabel, Select, MenuItem,
-  TextField, InputAdornment, IconButton, Button, Tab, Tabs, Badge, Tooltip,
+  TextField, InputAdornment, IconButton, Button, Tab, Tabs, Badge,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
@@ -26,10 +26,7 @@ interface Player {
   rebounds: number;
   assists: number;
   injury_status?: string;
-  adp?: number;
-  source?: string;
-  
-  // NHL-specific stats
+  // NHL specific
   goals?: number;
   plusMinus?: number;
   shots?: number;
@@ -39,34 +36,15 @@ interface Player {
   powerPlayGoals?: number;
   powerPlayAssists?: number;
   powerPlayPoints?: number;
-  faceoffsWon?: number;
-  faceoffsLost?: number;
-  faceoffs?: number;
-  faceoffPercent?: number;
-  penalties?: number;
-  penaltiesInMinutes?: number;
-  shifts?: number;
-  takeaways?: number;
-  giveaways?: number;
-  shotsMissedNet?: number;
-  
-  // MLB-specific stats
+  faceoffPercent?: string;
+  // MLB specific
   atBats?: number;
-  hits?: number;
+  hits_mlb?: number;
   homeRuns?: number;
   rbi?: number;
   stolenBases?: number;
   battingAverage?: number;
-  onBasePercentage?: number;
-  sluggingPercentage?: number;
   ops?: number;
-  inningsPitched?: number;
-  era?: number;
-  whip?: number;
-  strikeouts?: number;
-  wins?: number;
-  losses?: number;
-  saves?: number;
 }
 
 interface TeamInfo {
@@ -77,48 +55,31 @@ interface TeamInfo {
 
 const API_BASE = 'https://prizepicks-production.up.railway.app';
 const CACHE_TTL = 5 * 60 * 1000;
-const dataCache = new Map<string, { data: any; timestamp: number }>();
 
-async function fetchWithCache<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const cached = dataCache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    console.log(`[TeamRosters] ✅ Using cached data for ${key}`);
-    return cached.data;
+// Simple memory cache
+const rosterCache = new Map<string, { data: Player[]; timestamp: number }>();
+
+async function fetchWithRetry(url: string, retries = 3, baseDelay = 1000): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    const res = await fetch(url);
+    if (res.status !== 429) return res;
+    const wait = baseDelay * Math.pow(2, i);
+    await new Promise(resolve => setTimeout(resolve, wait));
   }
-  
-  console.log(`[TeamRosters] 🔄 Fetching fresh data for ${key}`);
-  try {
-    const data = await fetcher();
-    
-    let normalizedData;
-    if (Array.isArray(data)) {
-      console.log(`[TeamRosters] ⚠️ Received raw array for ${key}, wrapping in { data }`);
-      normalizedData = { success: true, data };
-    } else if (data && typeof data === 'object' && 'data' in data && Array.isArray(data.data)) {
-      normalizedData = data;
-    } else {
-      console.error(`[TeamRosters] ❌ Invalid API response structure for ${key}:`, data);
-      normalizedData = { success: false, data: [] };
-    }
-    
-    dataCache.set(key, { data: normalizedData, timestamp: Date.now() });
-    return normalizedData as T;
-  } catch (error) {
-    console.error(`[TeamRosters] ❌ Fetch error for ${key}:`, error);
-    const fallback = { success: false, data: [] };
-    dataCache.set(key, { data: fallback, timestamp: Date.now() });
-    return fallback as T;
-  }
+  throw new Error(`Failed after ${retries} retries: ${url}`);
 }
 
 const TeamRostersPage: React.FC = () => {
   const [sport, setSport] = useState<'nba' | 'mlb' | 'nhl'>('nba');
-  const [players, setPlayers] = useState<Player[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingTeams, setLoadingTeams] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usingMock, setUsingMock] = useState(false);
   const [apiStatus, setApiStatus] = useState<Record<string, string>>({});
+
+  const [rosters, setRosters] = useState<Map<string, Player[]>>(new Map());
+  const [loadingRosters, setLoadingRosters] = useState<Set<string>>(new Set());
+  const [failedTeams, setFailedTeams] = useState<Set<string>>(new Set());
 
   const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
   const [sortConfig, setSortConfig] = useState<{ column: keyof Player; direction: 'asc' | 'desc' }>({
@@ -135,350 +96,389 @@ const TeamRostersPage: React.FC = () => {
     { id: 'nhl', label: 'NHL', icon: <SportsHockeyIcon /> },
   ];
 
-  const fetchTeams = async (sport: string): Promise<TeamInfo[]> => {
-    const url = `${API_BASE}/api/tank01/teams?league=${sport}`;
-    try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const json = await response.json();
-      if (!json.success || !Array.isArray(json.data)) throw new Error('Invalid response');
-
-      const normalizedTeams = json.data.map((t: any) => ({
-        abbreviation: t.teamAbv || t.abbreviation || t,
+  // ---------- Fetch team list ----------
+  const fetchTeamList = async (sport: string): Promise<TeamInfo[]> => {
+    if (sport === 'nba') {
+      const nbaTeams = [
+        'ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW',
+        'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK',
+        'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS'
+      ];
+      return nbaTeams.map(abbr => ({ abbreviation: abbr }));
+    } else {
+      const url = `${API_BASE}/api/tank01/teams?league=${sport}`;
+      const res = await fetchWithRetry(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (!json.success || !Array.isArray(json.data)) throw new Error('Invalid team response');
+      return json.data.map((t: any) => ({
+        abbreviation: t.abbreviation || t.teamAbv,
         fullName: t.fullName || t.teamName,
         logo: t.logo || t.logos?.[0],
-      })).filter(t => t.abbreviation);
-
-      if (normalizedTeams.length === 0) {
-        console.warn(`[TeamRosters] API returned empty normalized teams for ${sport}, using fallback`);
-        throw new Error('Empty team list');
-      }
-
-      console.log(`[TeamRosters] Fetched ${normalizedTeams.length} teams for ${sport}`);
-      return normalizedTeams;
-    } catch (err) {
-      console.warn(`[TeamRosters] Failed to fetch teams for ${sport}, using fallback:`, err);
-      // Hardcoded fallback with correct abbreviations
-      if (sport === 'mlb') {
-        return [
-          'ARI', 'ATL', 'BAL', 'BOS', 'CHC', 'CWS', 'CIN', 'CLE', 'COL', 'DET',
-          'HOU', 'KC', 'LAA', 'LAD', 'MIA', 'MIL', 'MIN', 'NYM', 'NYY', 'OAK',
-          'PHI', 'PIT', 'SD', 'SF', 'SEA', 'STL', 'TB', 'TEX', 'TOR', 'WSH'
-        ].map(abbr => ({ abbreviation: abbr }));
-      }
-      if (sport === 'nhl') {
-        return [
-          'ANA', 'ARI', 'BOS', 'BUF', 'CAR', 'CBJ', 'CGY', 'CHI', 'COL', 'DAL',
-          'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NJD', 'NSH', 'NYI', 'NYR',
-          'OTT', 'PHI', 'PIT', 'SEA', 'SJS', 'STL', 'TBL', 'TOR', 'VAN', 'VGK',
-          'WPG', 'WSH'
-        ].map(abbr => ({ abbreviation: abbr }));
-      }
-      return [];
+      }));
     }
   };
 
-  const fetchPlayersWithRetry = async (sport: string, retries = 2): Promise<any> => {
-    const playersUrl = `${API_BASE}/api/fantasyhub/players?sport=${sport}&filterByToday=false`;
-    
-    for (let i = 0; i <= retries; i++) {
+  // ---------- Cache for fantasyhub stats ----------
+  let fantasyStatsCache: Map<string, Map<string, any>> = new Map();
+
+  const fetchSingleRoster = async (teamAbbr: string, sport: string): Promise<Player[]> => {
+    const cacheKey = `${sport}:${teamAbbr}`;
+    const cached = rosterCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data;
+    }
+
+    // 1. Fetch roster from Tank01
+    const rosterUrl = `${API_BASE}/api/tank01/roster?team=${teamAbbr}&sport=${sport}`;
+    const rosterRes = await fetchWithRetry(rosterUrl, 3, 1500);
+    if (!rosterRes.ok) throw new Error(`HTTP ${rosterRes.status} for team ${teamAbbr}`);
+    const rosterJson = await rosterRes.json();
+    if (!rosterJson.success || !Array.isArray(rosterJson.data)) return [];
+
+    // 2. Fetch fantasyhub stats once per sport
+    let statsMap = fantasyStatsCache.get(sport);
+    if (!statsMap) {
+      const statsUrl = `${API_BASE}/api/fantasyhub/players?sport=${sport}&filterByToday=false`;
       try {
-        console.log(`[TeamRosters] Fetching players for ${sport} (attempt ${i + 1}/${retries + 1})`);
-        const response = await fetch(playersUrl);
-        
-        if (response.status === 401) {
-          console.warn(`[TeamRosters] API key issue for ${sport}, marking as unavailable`);
-          setApiStatus(prev => ({ ...prev, [sport]: 'API key invalid' }));
-          return null;
-        }
-        
-        if (!response.ok) {
-          if (response.status === 404) {
-            console.warn(`[TeamRosters] No data available for ${sport} (404)`);
-            setApiStatus(prev => ({ ...prev, [sport]: 'No data available' }));
-            return null;
+        const statsRes = await fetch(statsUrl);
+        if (statsRes.ok) {
+          const statsJson = await statsRes.json();
+          if (statsJson.success && Array.isArray(statsJson.data)) {
+            statsMap = new Map();
+            statsJson.data.forEach((p: any) => {
+              let rawName = p.name || '';
+              let norm = rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
+              statsMap.set(norm, p);
+              statsMap.set(rawName.toLowerCase(), p);
+            });
+            fantasyStatsCache.set(sport, statsMap);
           }
-          throw new Error(`HTTP ${response.status}`);
         }
-        
-        const json = await response.json();
-        
-        if (json.success === false && json.error) {
-          console.warn(`[TeamRosters] API returned error for ${sport}: ${json.error}`);
-          setApiStatus(prev => ({ ...prev, [sport]: json.error }));
-          return null;
-        }
-        
-        // Check if we have data
-        const dataArray = Array.isArray(json) ? json : (json.data || []);
-        if (dataArray.length === 0) {
-          console.warn(`[TeamRosters] Empty data for ${sport}`);
-          setApiStatus(prev => ({ ...prev, [sport]: 'No players found' }));
-          return null;
-        }
-        
-        // Success!
-        setApiStatus(prev => ({ ...prev, [sport]: 'ok' }));
-        return json;
-        
       } catch (err) {
-        console.error(`[TeamRosters] Attempt ${i + 1} failed for ${sport}:`, err);
-        if (i === retries) {
-          setApiStatus(prev => ({ ...prev, [sport]: 'Connection error' }));
-          return null;
-        }
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Silently ignore – fallback will be used
       }
+      if (!statsMap) statsMap = new Map();
     }
-    return null;
-  };
 
-  useEffect(() => {
-    console.log(`[TeamRosters] 🏁 Sport changed to ${sport}, fetching...`);
+    const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      setUsingMock(false);
+    // 3. Build players
+    const players = rosterJson.data.map((p: any, idx: number) => {
+      const name = p.longName || p.espnName || 'Unknown';
+      const normName = normalize(name);
+      const stats = statsMap.get(normName) || statsMap.get(name.toLowerCase());
 
-      try {
-        // Fetch players with retry logic
-        const playersData = await fetchPlayersWithRetry(sport);
-        
-        // Build team list
-        let teamList: TeamInfo[] = [];
-        
-        if (playersData && (Array.isArray(playersData) || playersData.data?.length > 0)) {
-          const dataArray = Array.isArray(playersData) ? playersData : playersData.data;
-          
-          if (sport === 'nba') {
-            const uniqueTeams = [...new Set(dataArray.map((p: any) => p.team).filter(Boolean))];
-            teamList = uniqueTeams.map(abbr => ({ abbreviation: abbr }));
-            console.log(`[TeamRosters] NBA teams derived from players: ${teamList.length} teams`);
-          } else {
-            teamList = await fetchTeams(sport);
-          }
-          
-          // Transform players
-          const transformed = dataArray.map((p: any, idx: number) => {
-            const player: any = {
-              id: p.player_id || p.id || `api-${sport}-${idx}`,
-              name: p.name,
-              team: p.team || 'FA',
-              position: p.position || 'N/A',
-              salary: parseFloat(p.salary) || 5000,
-              projection: parseFloat(p.fantasy_points || p.projection) || 0,
-              value: parseFloat(p.value) || 0,
-              points: parseFloat(p.points) || 0,
-              rebounds: parseFloat(p.rebounds) || 0,
-              assists: parseFloat(p.assists) || 0,
-              injury_status: p.injury_status || 'Healthy',
-              adp: parseFloat(p.adp) || undefined,
-              source: p.source || 'api',
-            };
+      let projection = 0;
+      let points = 0, rebounds = 0, assists = 0;
+      let salary = 5000;
+      let injury = p.injury?.designation || 'Healthy';
 
-            // NHL-specific stats
-            if (sport === 'nhl') {
-              player.goals = parseFloat(p.goals) || 0;
-              player.plusMinus = parseInt(p.plusMinus) || 0;
-              player.shots = parseFloat(p.shots) || 0;
-              player.hits = parseFloat(p.hits) || 0;
-              player.blockedShots = parseFloat(p.blockedShots) || 0;
-              player.timeOnIce = p.timeOnIce || '0:00';
-              player.powerPlayGoals = parseFloat(p.powerPlayGoals) || 0;
-              player.powerPlayAssists = parseFloat(p.powerPlayAssists) || 0;
-              player.powerPlayPoints = parseFloat(p.powerPlayPoints) || 0;
-              player.faceoffsWon = parseFloat(p.faceoffsWon) || 0;
-              player.faceoffsLost = parseFloat(p.faceoffsLost) || 0;
-              player.faceoffs = parseFloat(p.faceoffs) || 0;
-              player.faceoffPercent = p.faceoffs ? ((parseFloat(p.faceoffsWon) || 0) / (parseFloat(p.faceoffs) || 1) * 100).toFixed(1) : '0';
-              player.penalties = parseFloat(p.penalties) || 0;
-              player.penaltiesInMinutes = parseFloat(p.penaltiesInMinutes) || 0;
-              player.shifts = parseInt(p.shifts) || 0;
-              player.takeaways = parseFloat(p.takeaways) || 0;
-              player.giveaways = parseFloat(p.giveaways) || 0;
-              player.shotsMissedNet = parseFloat(p.shotsMissedNet) || 0;
-            }
+      let nhlStats: Partial<Player> = {};
+      let mlbStats: Partial<Player> = {};
 
-            // MLB-specific stats
-            if (sport === 'mlb') {
-              player.atBats = parseInt(p.atBats) || 0;
-              player.hits = parseFloat(p.hits) || 0;
-              player.homeRuns = parseInt(p.homeRuns) || 0;
-              player.rbi = parseInt(p.rbi) || 0;
-              player.stolenBases = parseInt(p.stolenBases) || 0;
-              player.battingAverage = parseFloat(p.battingAverage) || 0;
-              player.onBasePercentage = parseFloat(p.onBasePercentage) || 0;
-              player.sluggingPercentage = parseFloat(p.sluggingPercentage) || 0;
-              player.ops = parseFloat(p.ops) || 0;
-              player.inningsPitched = parseFloat(p.inningsPitched) || 0;
-              player.era = parseFloat(p.era) || 0;
-              player.whip = parseFloat(p.whip) || 0;
-              player.strikeouts = parseInt(p.strikeouts) || 0;
-              player.wins = parseInt(p.wins) || 0;
-              player.losses = parseInt(p.losses) || 0;
-              player.saves = parseInt(p.saves) || 0;
-            }
-
-            return player;
-          });
-
-          // Filter players with valid teams
-          const validPlayers = transformed.filter((p: Player) => {
-            if (teamList.length === 0) return true; // If no team list, accept all
-            return teamList.some(t => t.abbreviation === p.team);
-          });
-          
-          if (validPlayers.length > 0) {
-            console.log(`[TeamRosters] ✅ Using real data for ${sport}: ${validPlayers.length} players`);
-            setPlayers(validPlayers);
-            setUsingMock(false);
-          } else {
-            console.warn(`[TeamRosters] No valid players for ${sport}, using mock`);
-            const mockPlayers = generateMockPlayers(sport, teamList.length > 0 ? teamList : await fetchTeams(sport));
-            setPlayers(mockPlayers);
-            setUsingMock(true);
-          }
-          
-          setTeams(teamList);
-          
-        } else {
-          // No real data available, use mock
-          console.log(`[TeamRosters] ⚠️ No real data for ${sport}, using mock fallback`);
-          const fallbackTeams = await fetchTeams(sport);
-          const mockPlayers = generateMockPlayers(sport, fallbackTeams);
-          setPlayers(mockPlayers);
-          setTeams(fallbackTeams);
-          setUsingMock(true);
-          setError(null);
-        }
-        
-      } catch (err: any) {
-        console.error(`[TeamRosters] ❌ Fetch error:`, err);
-        setError(err.message);
-        
-        // Always fall back to mock data on error
-        const fallbackTeams = await fetchTeams(sport);
-        const mockPlayers = generateMockPlayers(sport, fallbackTeams);
-        setPlayers(mockPlayers);
-        setTeams(fallbackTeams);
-        setUsingMock(true);
-        setError(null);
-      } finally {
-        setLoading(false);
-        console.log(`[TeamRosters] ✅ Fetch complete for ${sport}`);
-      }
-    };
-
-    fetchData();
-  }, [sport]);
-
-  const generateMockPlayers = (sport: string, teamList: TeamInfo[]): Player[] => {
-    const positions: Record<string, string[]> = {
-      mlb: ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'],
-      nhl: ['C', 'LW', 'RW', 'D', 'G'],
-      nba: ['PG', 'SG', 'SF', 'PF', 'C'],
-    };
-    const posList = positions[sport] || ['N/A'];
-    
-    // Realistic name pools
-    const firstNames = [
-      'James', 'John', 'Robert', 'Michael', 'William', 'David', 'Richard', 'Joseph', 'Thomas', 'Charles',
-      'Christopher', 'Daniel', 'Matthew', 'Anthony', 'Donald', 'Mark', 'Paul', 'Steven', 'Andrew', 'Kenneth',
-      'Joshua', 'Kevin', 'Brian', 'George', 'Edward', 'Ronald', 'Timothy', 'Jason', 'Jeffrey', 'Ryan',
-    ];
-
-    const lastNames = [
-      'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez',
-      'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin',
-      'Lee', 'Perez', 'Thompson', 'White', 'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson',
-    ];
-
-    const mockPlayers: Player[] = [];
-
-    teamList.forEach((team, teamIdx) => {
-      const numPlayers = sport === 'nba' ? 15 : (sport === 'nhl' ? 23 : 26); // Realistic roster sizes
-      const usedNames = new Set<string>();
-
-      for (let i = 0; i < numPlayers; i++) {
-        let firstName, lastName, fullName;
-        do {
-          firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-          lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-          fullName = `${firstName} ${lastName}`;
-        } while (usedNames.has(fullName));
-        usedNames.add(fullName);
-
-        const salary = 4000 + Math.floor(Math.random() * 9000);
-        const points = sport === 'nhl' ? 0.5 + Math.random() * 1.5 : (sport === 'mlb' ? 1 + Math.random() * 5 : 5 + Math.random() * 20);
-        const rebounds = sport === 'mlb' ? 0 : (2 + Math.random() * 8);
-        const assists = 1 + Math.random() * 7;
-        const projection = points + rebounds * 0.8 + assists * 0.8;
-        const value = (projection / salary) * 1000;
-
-        const player: Player = {
-          id: `mock-${sport}-${team.abbreviation}-${fullName.replace(/\s+/g, '')}`,
-          name: fullName,
-          team: team.abbreviation,
-          position: posList[Math.floor(Math.random() * posList.length)],
-          salary,
-          projection: parseFloat(projection.toFixed(1)),
-          value: parseFloat(value.toFixed(2)),
-          points: parseFloat(points.toFixed(1)),
-          rebounds: parseFloat(rebounds.toFixed(1)),
-          assists: parseFloat(assists.toFixed(1)),
-          injury_status: Math.random() > 0.9 ? 'Day-to-Day' : 'Healthy',
-          source: 'mock',
-        };
+      if (stats) {
+        projection = stats.projection || stats.fantasy_points || 0;
+        points = stats.points || 0;
+        rebounds = stats.rebounds || 0;
+        assists = stats.assists || 0;
+        salary = stats.salary || 5000;
+        injury = stats.injury_status || injury;
 
         if (sport === 'nhl') {
-          player.goals = parseFloat((Math.random() * 0.8).toFixed(1));
-          player.plusMinus = Math.floor(Math.random() * 3) - 1;
-          player.shots = parseFloat((1 + Math.random() * 4).toFixed(1));
-          player.hits = parseFloat((Math.random() * 3).toFixed(1));
-          player.blockedShots = parseFloat((Math.random() * 2).toFixed(1));
-          player.timeOnIce = `${Math.floor(12 + Math.random() * 10)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
-          player.powerPlayGoals = parseFloat((Math.random() * 0.3).toFixed(1));
-          player.faceoffPercent = (Math.random() * 60).toFixed(1);
+          nhlStats = {
+            goals: stats.goals || 0,
+            plusMinus: stats.plusMinus || 0,
+            shots: stats.shots || 0,
+            hits: stats.hits || 0,
+            blockedShots: stats.blockedShots || 0,
+            timeOnIce: stats.timeOnIce || '0:00',
+            powerPlayGoals: stats.powerPlayGoals || 0,
+            powerPlayAssists: stats.powerPlayAssists || 0,
+            powerPlayPoints: (stats.powerPlayGoals || 0) + (stats.powerPlayAssists || 0),
+            faceoffPercent: stats.faceoffPercent || '0',
+          };
         }
-
         if (sport === 'mlb') {
-          player.atBats = Math.floor(Math.random() * 4) + 3;
-          player.hits = parseFloat((Math.random() * 1.5).toFixed(1));
-          player.homeRuns = Math.floor(Math.random() * 3);
-          player.rbi = Math.floor(Math.random() * 4);
-          player.stolenBases = Math.floor(Math.random() * 2);
-          player.battingAverage = parseFloat((0.200 + Math.random() * 0.150).toFixed(3));
-          player.ops = parseFloat((0.600 + Math.random() * 0.400).toFixed(3));
+          mlbStats = {
+            atBats: stats.atBats || 0,
+            hits_mlb: stats.hits || 0,
+            homeRuns: stats.homeRuns || 0,
+            rbi: stats.rbi || 0,
+            stolenBases: stats.stolenBases || 0,
+            battingAverage: stats.battingAverage || 0,
+            ops: stats.ops || 0,
+          };
         }
-
-        mockPlayers.push(player);
+      } else {
+        // Fallback estimates
+        const pos = (p.pos || 'N/A').toUpperCase();
+        if (sport === 'nba') {
+          if (pos.includes('PG') || pos.includes('SG')) {
+            points = 8 + Math.random() * 10;
+            assists = 3 + Math.random() * 5;
+            rebounds = 2 + Math.random() * 3;
+          } else if (pos.includes('SF')) {
+            points = 6 + Math.random() * 10;
+            rebounds = 3 + Math.random() * 4;
+            assists = 1 + Math.random() * 3;
+          } else if (pos.includes('PF') || pos.includes('C')) {
+            points = 5 + Math.random() * 8;
+            rebounds = 4 + Math.random() * 6;
+            assists = 0.5 + Math.random() * 2;
+          } else {
+            points = 5 + Math.random() * 10;
+            rebounds = 2 + Math.random() * 5;
+            assists = 1 + Math.random() * 4;
+          }
+          projection = points + rebounds * 0.8 + assists * 0.8;
+          salary = 4000 + Math.floor(projection * 200);
+        } 
+        else if (sport === 'nhl') {
+          const isForward = ['C', 'LW', 'RW'].includes(pos);
+          const isDefense = pos === 'D';
+          let estPoints = 0;
+          if (isForward) {
+            estPoints = 0.6 + Math.random() * 0.9;
+            nhlStats.goals = estPoints * 0.4;
+            nhlStats.assists_nhl = estPoints * 0.6;
+            nhlStats.shots = 1.5 + Math.random() * 2;
+            nhlStats.hits = 1 + Math.random() * 2;
+            nhlStats.blockedShots = 0.5 + Math.random() * 1;
+          } else if (isDefense) {
+            estPoints = 0.3 + Math.random() * 0.6;
+            nhlStats.goals = estPoints * 0.2;
+            nhlStats.assists_nhl = estPoints * 0.8;
+            nhlStats.shots = 1 + Math.random() * 1.5;
+            nhlStats.hits = 1.5 + Math.random() * 2;
+            nhlStats.blockedShots = 1 + Math.random() * 1.5;
+          } else {
+            estPoints = 0;
+            nhlStats.goals = 0;
+            nhlStats.assists_nhl = 0;
+            nhlStats.shots = 0;
+            nhlStats.hits = 0;
+            nhlStats.blockedShots = 0;
+          }
+          nhlStats.plusMinus = Math.floor(Math.random() * 3) - 1;
+          nhlStats.timeOnIce = `${Math.floor(12 + Math.random() * 10)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
+          nhlStats.powerPlayGoals = 0;
+          nhlStats.powerPlayAssists = 0;
+          nhlStats.powerPlayPoints = 0;
+          nhlStats.faceoffPercent = (Math.random() * 60).toFixed(1);
+          projection = estPoints * 5;
+          points = estPoints;
+          salary = 4000 + Math.floor(projection * 800);
+        }
+        else if (sport === 'mlb') {
+          const isPitcher = pos === 'P';
+          mlbStats.atBats = isPitcher ? 0 : 3 + Math.floor(Math.random() * 2);
+          mlbStats.hits_mlb = isPitcher ? 0 : parseFloat((0.5 + Math.random() * 1).toFixed(1));
+          mlbStats.homeRuns = isPitcher ? 0 : Math.floor(Math.random() * 2);
+          mlbStats.rbi = isPitcher ? 0 : Math.floor(Math.random() * 3);
+          mlbStats.stolenBases = isPitcher ? 0 : (Math.random() > 0.8 ? 1 : 0);
+          mlbStats.battingAverage = isPitcher ? 0 : parseFloat((0.200 + Math.random() * 0.150).toFixed(3));
+          mlbStats.ops = isPitcher ? 0 : parseFloat((0.600 + Math.random() * 0.400).toFixed(3));
+          
+          if (isPitcher) {
+            mlbStats.strikeouts = 4 + Math.random() * 4;
+            mlbStats.era = 3 + Math.random() * 4;
+            mlbStats.whip = 1.1 + Math.random() * 0.5;
+          }
+          
+          let projValue = (mlbStats.hits_mlb || 0) + (mlbStats.homeRuns || 0) * 2 + (mlbStats.rbi || 0);
+          if (projValue <= 0) projValue = 4 + Math.random() * 6;
+          projection = projValue;
+          points = projValue;
+          salary = 4000 + Math.floor(projection * 500);
+        }
       }
+
+      if (projection <= 0) projection = 5;
+      if (salary <= 0) salary = 5000;
+
+      const basePlayer: Player = {
+        id: p.playerID || p.espnID || `${sport}-${teamAbbr}-${idx}`,
+        name: name,
+        team: teamAbbr,
+        position: p.pos || 'N/A',
+        salary: Math.round(salary),
+        projection: parseFloat(projection.toFixed(1)),
+        value: (projection / salary) * 1000,
+        points: parseFloat(points.toFixed(1)),
+        rebounds: parseFloat(rebounds.toFixed(1)),
+        assists: parseFloat(assists.toFixed(1)),
+        injury_status: injury,
+        source: stats ? 'merged' : 'estimated',
+        ...nhlStats,
+        ...mlbStats,
+      };
+
+      if (sport === 'nhl') {
+        basePlayer.goals = nhlStats.goals;
+        basePlayer.plusMinus = nhlStats.plusMinus;
+        basePlayer.shots = nhlStats.shots;
+        basePlayer.hits = nhlStats.hits;
+        basePlayer.blockedShots = nhlStats.blockedShots;
+        basePlayer.timeOnIce = nhlStats.timeOnIce;
+        basePlayer.powerPlayGoals = nhlStats.powerPlayGoals;
+        basePlayer.powerPlayAssists = nhlStats.powerPlayAssists;
+        basePlayer.powerPlayPoints = nhlStats.powerPlayPoints;
+        basePlayer.faceoffPercent = nhlStats.faceoffPercent;
+      }
+      if (sport === 'mlb') {
+        basePlayer.atBats = mlbStats.atBats;
+        basePlayer.hits_mlb = mlbStats.hits_mlb;
+        basePlayer.homeRuns = mlbStats.homeRuns;
+        basePlayer.rbi = mlbStats.rbi;
+        basePlayer.stolenBases = mlbStats.stolenBases;
+        basePlayer.battingAverage = mlbStats.battingAverage;
+        basePlayer.ops = mlbStats.ops;
+      }
+
+      return basePlayer;
     });
-    
-    console.log(`[TeamRosters] Generated ${mockPlayers.length} mock players for ${sport.toUpperCase()}`);
+
+    rosterCache.set(cacheKey, { data: players, timestamp: Date.now() });
+    return players;
+  };
+
+  // ---------- Load roster when expanded ----------
+  const loadRosterIfNeeded = useCallback(async (teamAbbr: string) => {
+    if (rosters.has(teamAbbr)) return;
+    if (loadingRosters.has(teamAbbr)) return;
+
+    setLoadingRosters(prev => new Set(prev).add(teamAbbr));
+    setFailedTeams(prev => {
+      const next = new Set(prev);
+      next.delete(teamAbbr);
+      return next;
+    });
+
+    try {
+      const players = await fetchSingleRoster(teamAbbr, sport);
+      if (players.length === 0) throw new Error('No players returned');
+      setRosters(prev => new Map(prev).set(teamAbbr, players));
+      setApiStatus(prev => ({ ...prev, [sport]: 'ok' }));
+    } catch (err) {
+      console.error(`Failed to load roster for ${teamAbbr}:`, err);
+      setFailedTeams(prev => new Set(prev).add(teamAbbr));
+      setApiStatus(prev => ({ ...prev, [sport]: 'partial' }));
+    } finally {
+      setLoadingRosters(prev => {
+        const next = new Set(prev);
+        next.delete(teamAbbr);
+        return next;
+      });
+    }
+  }, [sport, rosters, loadingRosters]);
+
+  useEffect(() => {
+    expandedTeams.forEach(team => {
+      loadRosterIfNeeded(team);
+    });
+  }, [expandedTeams, loadRosterIfNeeded]);
+
+  // ---------- Initial load of team list ----------
+  useEffect(() => {
+    const loadTeams = async () => {
+      setLoadingTeams(true);
+      setError(null);
+      setUsingMock(false);
+      setRosters(new Map());
+      setExpandedTeams(new Set());
+      setFailedTeams(new Set());
+      try {
+        const teamList = await fetchTeamList(sport);
+        setTeams(teamList);
+        setApiStatus(prev => ({ ...prev, [sport]: 'ok' }));
+      } catch (err: any) {
+        console.error('Failed to load team list:', err);
+        setError(err.message);
+        setApiStatus(prev => ({ ...prev, [sport]: err.message }));
+        const mockTeams = sport === 'nba'
+          ? ['ATL','BOS','BKN','CHA','CHI','CLE','DAL','DEN','DET','GSW','HOU','IND','LAC','LAL','MEM','MIA','MIL','MIN','NOP','NYK','OKC','ORL','PHI','PHX','POR','SAC','SAS','TOR','UTA','WAS']
+          : (sport === 'nhl' 
+              ? ['ANA','BOS','BUF','CGY','CAR','CHI','COL','CBJ','DAL','DET','EDM','FLA','LAK','MIN','MTL','NSH','NJD','NYI','NYR','OTT','PHI','PIT','SEA','SJS','STL','TBL','TOR','VAN','VGK','WPG','WSH']
+              : ['ARI','ATL','BAL','BOS','CHC','CWS','CIN','CLE','COL','DET','HOU','KC','LAA','LAD','MIA','MIL','MIN','NYM','NYY','OAK','PHI','PIT','SD','SF','SEA','STL','TB','TEX','TOR','WSH']);
+        setTeams(mockTeams.map(abbr => ({ abbreviation: abbr })));
+        setUsingMock(true);
+      } finally {
+        setLoadingTeams(false);
+      }
+    };
+    loadTeams();
+  }, [sport]);
+
+  // ---------- Mock roster generator ----------
+  const getMockRoster = (teamAbbr: string): Player[] => {
+    const positions: Record<string, string[]> = {
+      nba: ['PG', 'SG', 'SF', 'PF', 'C'],
+      nhl: ['C', 'LW', 'RW', 'D', 'G'],
+      mlb: ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'],
+    };
+    const posList = positions[sport] || ['N/A'];
+    const firstNames = ['James','John','Robert','Michael','William','David','Richard','Joseph','Thomas','Charles'];
+    const lastNames = ['Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Rodriguez','Martinez'];
+    const rosterSize = sport === 'nba' ? 15 : (sport === 'nhl' ? 23 : 26);
+    const mockPlayers: Player[] = [];
+    for (let i = 0; i < rosterSize; i++) {
+      const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+      const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+      const fullName = `${firstName} ${lastName}`;
+      const salary = 4000 + Math.floor(Math.random() * 9000);
+      const points = sport === 'nhl' ? 0.5 + Math.random() * 1.5 : (sport === 'mlb' ? 1 + Math.random() * 5 : 5 + Math.random() * 20);
+      const rebounds = sport === 'mlb' ? 0 : 2 + Math.random() * 8;
+      const assists = 1 + Math.random() * 7;
+      const projection = points + rebounds * 0.8 + assists * 0.8;
+      const player: Player = {
+        id: `mock-${sport}-${teamAbbr}-${fullName}-${i}`,
+        name: fullName,
+        team: teamAbbr,
+        position: posList[Math.floor(Math.random() * posList.length)],
+        salary,
+        projection: parseFloat(projection.toFixed(1)),
+        value: (projection / salary) * 1000,
+        points: parseFloat(points.toFixed(1)),
+        rebounds: parseFloat(rebounds.toFixed(1)),
+        assists: parseFloat(assists.toFixed(1)),
+        injury_status: Math.random() > 0.9 ? 'Day-to-Day' : 'Healthy',
+        source: 'mock',
+      };
+      if (sport === 'nhl') {
+        player.goals = parseFloat((Math.random() * 0.8).toFixed(1));
+        player.plusMinus = Math.floor(Math.random() * 3) - 1;
+        player.shots = parseFloat((1 + Math.random() * 4).toFixed(1));
+        player.hits = parseFloat((Math.random() * 3).toFixed(1));
+        player.blockedShots = parseFloat((Math.random() * 2).toFixed(1));
+        player.timeOnIce = `${Math.floor(12 + Math.random() * 10)}:${Math.floor(Math.random() * 60).toString().padStart(2, '0')}`;
+        player.faceoffPercent = (Math.random() * 60).toFixed(1);
+      }
+      if (sport === 'mlb') {
+        player.atBats = Math.floor(Math.random() * 4) + 3;
+        player.hits_mlb = parseFloat((Math.random() * 1.5).toFixed(1));
+        player.homeRuns = Math.floor(Math.random() * 3);
+        player.rbi = Math.floor(Math.random() * 4);
+        player.stolenBases = Math.floor(Math.random() * 2);
+        player.battingAverage = parseFloat((0.200 + Math.random() * 0.150).toFixed(3));
+        player.ops = parseFloat((0.600 + Math.random() * 0.400).toFixed(3));
+      }
+      mockPlayers.push(player);
+    }
     return mockPlayers;
   };
 
-  const playersByTeam = useMemo(() => {
-    const map = new Map<string, Player[]>();
-    players.forEach(p => {
-      if (!map.has(p.team)) map.set(p.team, []);
-      map.get(p.team)!.push(p);
-    });
-    return map;
-  }, [players]);
-
+  // ---------- Filtering & sorting ----------
   const allPositions = useMemo(() => {
-    const positions = new Set(players.map(p => p.position).filter(Boolean));
+    const allPlayers = Array.from(rosters.values()).flat();
+    const positions = new Set(allPlayers.map(p => p.position).filter(Boolean));
     return Array.from(positions).sort();
-  }, [players]);
+  }, [rosters]);
 
   const allTeamsForFilter = useMemo(() => teams.map(t => t.abbreviation).sort(), [teams]);
 
   const getFilteredPlayersForTeam = (teamAbbr: string) => {
-    const teamPlayers = playersByTeam.get(teamAbbr) || [];
+    const teamPlayers = rosters.get(teamAbbr) || [];
     return teamPlayers.filter(p => {
       if (searchTerm && !p.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       if (positionFilter !== 'all' && p.position !== positionFilter) return false;
@@ -528,32 +528,7 @@ const TeamRostersPage: React.FC = () => {
     return teams.filter(t => t.abbreviation === teamFilter);
   }, [teams, teamFilter]);
 
-  if (loading && players.length === 0) {
-    return (
-      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Box textAlign="center">
-          <CircularProgress size={60} />
-          <Typography variant="h6" sx={{ mt: 3 }}>Loading {sport.toUpperCase()} rosters...</Typography>
-          {apiStatus[sport] && apiStatus[sport] !== 'ok' && (
-            <Typography variant="body2" color="warning.main" sx={{ mt: 1 }}>
-              Note: {apiStatus[sport]}
-            </Typography>
-          )}
-        </Box>
-      </Container>
-    );
-  }
-
-  if (error && players.length === 0 && teams.length === 0) {
-    return (
-      <Container sx={{ py: 8 }}>
-        <Alert severity="error" action={<IconButton onClick={() => window.location.reload()}><RefreshIcon /></IconButton>}>
-          {error}
-        </Alert>
-      </Container>
-    );
-  }
-
+  // ---------- Table rendering ----------
   const renderTableHeaders = () => {
     const baseHeaders = (
       <>
@@ -564,7 +539,6 @@ const TeamRostersPage: React.FC = () => {
         <TableCell align="right">Value</TableCell>
       </>
     );
-
     if (sport === 'nhl') {
       return (
         <TableRow>
@@ -583,7 +557,6 @@ const TeamRostersPage: React.FC = () => {
         </TableRow>
       );
     }
-
     if (sport === 'mlb') {
       return (
         <TableRow>
@@ -599,8 +572,6 @@ const TeamRostersPage: React.FC = () => {
         </TableRow>
       );
     }
-
-    // NBA
     return (
       <TableRow>
         {baseHeaders}
@@ -652,13 +623,13 @@ const TeamRostersPage: React.FC = () => {
       return (
         <TableRow key={player.id} hover>
           {baseCells}
-          <TableCell align="right">{player.atBats || '0'}</TableCell>
-          <TableCell align="right">{player.hits?.toFixed(1) || '0.0'}</TableCell>
-          <TableCell align="right">{player.homeRuns || '0'}</TableCell>
-          <TableCell align="right">{player.rbi || '0'}</TableCell>
-          <TableCell align="right">{player.stolenBases || '0'}</TableCell>
-          <TableCell align="right">{player.battingAverage?.toFixed(3) || '.000'}</TableCell>
-          <TableCell align="right">{player.ops?.toFixed(3) || '.000'}</TableCell>
+          <TableCell align="right">{player.atBats ?? 0}</TableCell>
+          <TableCell align="right">{(player.hits_mlb ?? 0).toFixed(1)}</TableCell>
+          <TableCell align="right">{player.homeRuns ?? 0}</TableCell>
+          <TableCell align="right">{player.rbi ?? 0}</TableCell>
+          <TableCell align="right">{player.stolenBases ?? 0}</TableCell>
+          <TableCell align="right">{(player.battingAverage ?? 0).toFixed(3)}</TableCell>
+          <TableCell align="right">{(player.ops ?? 0).toFixed(3)}</TableCell>
           <TableCell>
             <Chip label={player.injury_status || 'Healthy'} size="small" 
                   color={player.injury_status === 'Healthy' ? 'success' : 'error'} variant="outlined" />
@@ -683,6 +654,29 @@ const TeamRostersPage: React.FC = () => {
     );
   };
 
+  // ---------- Loading states ----------
+  if (loadingTeams && teams.length === 0) {
+    return (
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
+        <Box textAlign="center">
+          <CircularProgress size={60} />
+          <Typography variant="h6" sx={{ mt: 3 }}>Loading {sport.toUpperCase()} teams...</Typography>
+        </Box>
+      </Container>
+    );
+  }
+
+  if (error && teams.length === 0) {
+    return (
+      <Container sx={{ py: 8 }}>
+        <Alert severity="error" action={<IconButton onClick={() => window.location.reload()}><RefreshIcon /></IconButton>}>
+          {error}
+        </Alert>
+      </Container>
+    );
+  }
+
+  // ---------- Main render ----------
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <Paper elevation={0} sx={{ mb: 3, borderRadius: 2 }}>
@@ -710,13 +704,8 @@ const TeamRostersPage: React.FC = () => {
           {usingMock && (
             <Badge badgeContent="PREVIEW" color="warning" sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: 20, minWidth: 50 } }} />
           )}
-          {apiStatus[sport] && apiStatus[sport] !== 'ok' && apiStatus[sport] !== 'mock' && (
-            <Chip 
-              label={apiStatus[sport]} 
-              size="small" 
-              color="warning" 
-              variant="outlined"
-            />
+          {apiStatus[sport] && apiStatus[sport] !== 'ok' && apiStatus[sport] !== 'loading' && (
+            <Chip label={apiStatus[sport]} size="small" color="warning" variant="outlined" />
           )}
         </Box>
         <Typography variant="body1" color="text.secondary" paragraph>
@@ -757,9 +746,19 @@ const TeamRostersPage: React.FC = () => {
         <Alert severity="info">No teams match your filters.</Alert>
       ) : (
         filteredTeams.map(teamInfo => {
-          const teamPlayers = getFilteredPlayersForTeam(teamInfo.abbreviation);
-          const sorted = sortPlayers(teamPlayers);
+          const teamPlayers = rosters.get(teamInfo.abbreviation) || [];
+          const filtered = getFilteredPlayersForTeam(teamInfo.abbreviation);
+          const sorted = sortPlayers(filtered);
           const isExpanded = expandedTeams.has(teamInfo.abbreviation);
+          const isLoading = loadingRosters.has(teamInfo.abbreviation);
+          const hasFailed = failedTeams.has(teamInfo.abbreviation);
+          const displayPlayers = usingMock && !teamPlayers.length ? getMockRoster(teamInfo.abbreviation) : teamPlayers;
+          const filteredDisplay = usingMock && !teamPlayers.length ? getMockRoster(teamInfo.abbreviation).filter(p => {
+            if (searchTerm && !p.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+            if (positionFilter !== 'all' && p.position !== positionFilter) return false;
+            return true;
+          }) : filtered;
+          const sortedDisplay = sortPlayers(filteredDisplay);
 
           return (
             <Accordion key={teamInfo.abbreviation} expanded={isExpanded} onChange={() => handleTeamToggle(teamInfo.abbreviation)}
@@ -769,26 +768,42 @@ const TeamRostersPage: React.FC = () => {
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
                   {teamInfo.logo && <img src={teamInfo.logo} alt={teamInfo.abbreviation} style={{ height: 24, width: 24, objectFit: 'contain' }} />}
                   <Typography variant="h6" sx={{ fontWeight: 600 }}>{teamInfo.abbreviation}</Typography>
-                  <Chip label={`${teamPlayers.length} players`} size="small" />
+                  <Chip label={`${displayPlayers.length} players`} size="small" />
                   <Box sx={{ flex: 1 }} />
-                  {teamPlayers.length > 0 && (
+                  {displayPlayers.length > 0 && (
                     <Typography variant="body2" color="text.secondary">
-                      Avg Proj: {(teamPlayers.reduce((sum, p) => sum + p.projection, 0) / teamPlayers.length).toFixed(1)}
+                      Avg Proj: {(displayPlayers.reduce((sum, p) => sum + p.projection, 0) / displayPlayers.length).toFixed(1)}
                     </Typography>
                   )}
                 </Box>
               </AccordionSummary>
               <AccordionDetails sx={{ p: 2, overflowX: 'auto' }}>
-                {teamPlayers.length === 0 ? (
+                {isLoading && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                    <CircularProgress size={40} />
+                    <Typography sx={{ ml: 2 }}>Loading roster...</Typography>
+                  </Box>
+                )}
+                {hasFailed && !isLoading && (
+                  <Alert severity="warning" action={
+                    <Button color="inherit" size="small" onClick={() => loadRosterIfNeeded(teamInfo.abbreviation)}>
+                      Retry
+                    </Button>
+                  }>
+                    Failed to load roster. Click Retry or check your connection.
+                  </Alert>
+                )}
+                {!isLoading && !hasFailed && sortedDisplay.length === 0 && (
                   <Typography color="text.secondary" sx={{ p: 2, textAlign: 'center' }}>No player data available for this team.</Typography>
-                ) : (
+                )}
+                {!isLoading && !hasFailed && sortedDisplay.length > 0 && (
                   <TableContainer component={Paper} variant="outlined">
                     <Table size="small" stickyHeader>
                       <TableHead>
                         {renderTableHeaders()}
                       </TableHead>
                       <TableBody>
-                        {sorted.map(player => renderPlayerRow(player))}
+                        {sortedDisplay.map(player => renderPlayerRow(player))}
                       </TableBody>
                     </Table>
                   </TableContainer>

@@ -83,7 +83,7 @@ const AboutPage: React.FC = () => {
     { year: '2024', title: 'Beta Launch', description: 'Released first version to 500 beta testers' },
     { year: '2024', title: 'Public Launch', description: 'Officially launched platform with 3 subscription tiers' },
     { year: '2025', title: '10K Users', description: 'Reached 10,000 active users milestone' },
-    { year: '2026', title: 'New Features', description: 'Launched AI Parlay Architect and Secret Phrases Hub' }
+    { year: '2026', title: 'New Features', description: 'Launched AI Combo Architect and Secret Phrases Hub' }
   ];
 
   const values = [

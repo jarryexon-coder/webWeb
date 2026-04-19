@@ -1,30 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
-import { ParlaySuggestion, ParlayLeg, ParlayStrategy } from '../../types/parlay.types';
+import { ComboSuggestion, ComboLeg, ComboStrategy } from '../../types/parlay.types';
 
-interface ParlayBuilderProps {
+interface ComboBuilderProps {
   initialSport?: string;
-  onAddToSlip?: (parlay: ParlaySuggestion) => void;
+  onAddToSlip?: (parlay: ComboSuggestion) => void;
 }
 
-const ParlayBuilder: React.FC<ParlayBuilderProps> = ({ 
+const ComboBuilder: React.FC<ComboBuilderProps> = ({ 
   initialSport = 'all', 
   onAddToSlip 
 }) => {
-  const [suggestions, setSuggestions] = useState<ParlaySuggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<ComboSuggestion[]>([]);
   const [selectedSport, setSelectedSport] = useState<string>(initialSport);
   const [loading, setLoading] = useState<boolean>(false);
-  const [selectedParlay, setSelectedParlay] = useState<ParlaySuggestion | null>(null);
-  const [customLegs, setCustomLegs] = useState<ParlayLeg[]>([]);
+  const [selectedCombo, setSelectedCombo] = useState<ComboSuggestion | null>(null);
+  const [customLegs, setCustomLegs] = useState<ComboLeg[]>([]);
 
   useEffect(() => {
-    fetchParlaySuggestions();
+    fetchComboSuggestions();
   }, [selectedSport]);
 
-  const fetchParlaySuggestions = async (): Promise<void> => {
+  const fetchComboSuggestions = async (): Promise<void> => {
     setLoading(true);
     try {
-      const data = await api.getParlaySuggestions(selectedSport, 6);
+      const data = await api.getComboSuggestions(selectedSport, 6);
       setSuggestions(data.suggestions || []);
     } catch (error) {
       console.error('Failed to fetch parlays:', error);
@@ -67,7 +67,7 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
     
     return (
       <span className={`text-xs px-2 py-1 rounded-full ${risk.color}`}>
-        {risk.label} Risk
+        {risk.label} Volatility
       </span>
     );
   };
@@ -86,7 +86,7 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
       <div className="bg-white p-6 rounded-xl shadow-lg">
         <div className="flex justify-between items-start mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">AI Parlay Architect</h1>
+            <h1 className="text-2xl font-bold text-gray-900">AI Combo Architect</h1>
             <p className="text-gray-600 mt-1">February 11, 2026 • Powered by DeepSeek AI</p>
           </div>
           <div className="flex items-center space-x-2">
@@ -94,7 +94,7 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
             </span>
-            <span className="text-sm text-gray-600">Live Odds</span>
+            <span className="text-sm text-gray-600">Live Multipliers</span>
           </div>
         </div>
 
@@ -145,18 +145,18 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
         </div>
       </div>
 
-      {/* AI Parlay Suggestions */}
+      {/* AI Combo Suggestions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {suggestions.map((parlay) => (
           <div 
             key={parlay.id} 
             className={`bg-white rounded-xl shadow-lg overflow-hidden border-2 transition ${
-              selectedParlay?.id === parlay.id 
+              selectedCombo?.id === parlay.id 
                 ? 'border-blue-500 shadow-blue-100' 
                 : 'border-gray-200 hover:border-gray-300'
             }`}
           >
-            {/* Parlay Header */}
+            {/* Combo Header */}
             <div className={`px-6 py-4 bg-gradient-to-r ${
               parlay.sport === 'NBA' 
                 ? 'from-orange-500 to-red-500' 
@@ -176,12 +176,12 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-bold">{parlay.total_odds}</div>
-                  <div className="text-sm text-white/90">Estimated Payout</div>
+                  <div className="text-sm text-white/90">Estimated Return</div>
                 </div>
               </div>
             </div>
 
-            {/* Parlay Legs */}
+            {/* Combo Legs */}
             <div className="p-6">
               <div className="space-y-3 mb-4">
                 {parlay.legs.map((leg, index) => (
@@ -231,7 +231,7 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
                 ))}
               </div>
 
-              {/* Parlay Analysis */}
+              {/* Combo Analysis */}
               <div className="border-t pt-4">
                 <div className="flex items-start space-x-3">
                   <div className={`flex-1 ${getConfidenceColor(parlay.confidence)} p-3 rounded-lg`}>
@@ -243,10 +243,10 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
                   </div>
                 </div>
 
-                {/* Parlay Metrics */}
+                {/* Combo Metrics */}
                 <div className="mt-4 grid grid-cols-2 gap-4">
                   <div className="bg-gray-50 p-3 rounded-lg">
-                    <p className="text-xs text-gray-500 mb-1">Risk Level</p>
+                    <p className="text-xs text-gray-500 mb-1">Volatility Level</p>
                     {getRiskBadge(parlay.risk_level)}
                   </div>
                   <div className="bg-gray-50 p-3 rounded-lg">
@@ -261,7 +261,7 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
                     <div className="flex justify-between">
                       <span>Legs: {parlay.ai_metrics.leg_count}</span>
                       <span>Avg Confidence: {parlay.ai_metrics.avg_leg_confidence}%</span>
-                      <span>Recommended Stake: {parlay.ai_metrics.recommended_stake}</span>
+                      <span>Recommended Amount: {parlay.ai_metrics.recommended_stake}</span>
                     </div>
                   </div>
                 )}
@@ -273,13 +273,13 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold transition flex items-center justify-center space-x-2"
                   >
                     <span>📋</span>
-                    <span>Add to Bet Slip</span>
+                    <span>Add to Tracker</span>
                   </button>
                   <button
-                    onClick={() => setSelectedParlay(selectedParlay?.id === parlay.id ? null : parlay)}
+                    onClick={() => setSelectedCombo(selectedCombo?.id === parlay.id ? null : parlay)}
                     className="px-6 border border-gray-300 hover:bg-gray-50 rounded-lg font-medium transition"
                   >
-                    {selectedParlay?.id === parlay.id ? 'Hide' : 'Details'}
+                    {selectedCombo?.id === parlay.id ? 'Hide' : 'Details'}
                   </button>
                 </div>
               </div>
@@ -288,12 +288,12 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
         ))}
       </div>
 
-      {/* Custom Parlay Builder */}
+      {/* Custom Combo Builder */}
       <div className="bg-white rounded-xl shadow-lg p-6">
-        <h2 className="text-lg font-bold mb-4">🎯 Build Your Own Parlay</h2>
+        <h2 className="text-lg font-bold mb-4">🎯 Build Your Own Combo</h2>
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
           <div className="text-4xl mb-3">✨</div>
-          <p className="text-gray-600 mb-2">Select props from NHL or NBA games to build a custom parlay</p>
+          <p className="text-gray-600 mb-2">Select props from NHL or NBA games to build a custom combo</p>
           <p className="text-sm text-gray-500">AI will analyze correlation and suggest optimal combinations</p>
           <button className="mt-4 bg-gray-900 text-white px-6 py-2 rounded-lg text-sm hover:bg-gray-800 transition">
             Browse Available Props
@@ -304,4 +304,4 @@ const ParlayBuilder: React.FC<ParlayBuilderProps> = ({
   );
 };
 
-export default ParlayBuilder;
+export default ComboBuilder;
